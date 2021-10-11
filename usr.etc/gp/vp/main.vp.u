@@ -1,0 +1,315 @@
+| "@(#)main.vp.u 1.1 94/10/31 SMI"
+| Copyright (c) 1985 by Sun Microsystems, Inc.
+
+#include "vp.h"
+
+#define BUFLMSK 0xFF
+#define BUFVEC1 5
+#define BUFVEC2 6
+
+#define postptr r[31]
+#define cmdptr r[30]
+#define frameptr r[29]
+#define fbindx r[28]
+
+#define pkcnthi r[27]		/* these used only by GP+ */
+#define pkcntlo r[26]	
+
+#define lptmp r[1]
+#define cmd r[0]
+#define countr r[10]
+
+#define postoffset 0x8
+
+	org 0
+	debug off
+
+reset:	btstw,s 8,d;		fl2reg->am;	;		;
+	;			;		cjp,zer vpinit;	;
+	;			;		jmap PP_ORG;	;
+
+gp1_code_ver: movw d,acc;	GP1_CODE_VER->am;crtn,go;	;			| version number
+
+gp1_board_addr: movw,s d,acc;	GP1_DEFAULT_ADDR->am; crtn,go;	;			| GP1: top 8 bits of 24-bit VME address
+											| change to GP1_NOTINSTALLED for release
+
+cg2_board_addr0: movw,s d,acc;	CG2_DEFAULT_ADDR->am; crtn,go;	;			| board #0
+											| change to CG2_NOTINSTALLED for release
+cg2_board_addr1: movw,s d,acc;	CG2_NOTINSTALLED->am; crtn,go;	;			| board #1
+cg2_board_addr2: movw,s d,acc;	CG2_NOTINSTALLED->am; crtn,go;	;			| board #2
+cg2_board_addr3: movw,s d,acc;	CG2_NOTINSTALLED->am; crtn,go;	;			| board #3
+
+gb_board_inq: movw,s d,acc;	GB_CG2_0->am;	crtn,go;	;			| graphics buffer inquiry routine
+											| change to GB_NOTINSTALLED for release
+											| returns: 0xFFFF if no gb, otherwise
+											| index (0-3) of corresponding cg2 board
+
+
+	sccsid("GP-1 Microcode 1.0 85/07/17 Copyr 1985 Sun Micro")
+
+
+vpinit:	;			VERSIONFLG->shmemp;;		;
+	movw d,acc;		shmem->am;	;		;
+	andw d,acc,acc;		0xFF->am;	;		;			| set high byte of shared memory location
+	bsetw 8,acc;		am->shmem;	;		;			| VERSIONFLG (2) to 0x1 to indicate
+											| 3.2FCS or later microcode
+	;			VERSIONLOC->shmemp;;		;
+	;			SW_RELEASE->shmem;;		;		shp+	| set release number and serial number
+	;			SERIAL_NUM->shmem;;		;			| in VERSIONLOC and VERSIONLOC+1 (508,509)
+
+	movw 0,postptr;		;		push,~go;	;			| postptr <- 0
+	;			PPINIT->fifo1;	loop,f1nf;	;			| send PPINIT command to PP
+	;			;		cjs,go gp1_board_addr;;			| get GP1 address
+	;			;		cjp,neg .-1;	;			| loop if GP1 addr == GP1_NOTINSTALLED
+	movw acc,y;		am->fifo1;	cjp,f1f .;	;			| send address to PP
+	movw 0,acc;		;		cjs,go getfbaddr;;			| send a valid fb address to PP and 
+											| set fbindx to correct value
+#ifdef GPPLUS
+clr_contexts:
+	mov2nw 3,r[0];		;		;		;			| use r[0] as counter
+	movw 0,acc;		;		;		;			| stick -1 in acc
+	sub2nw,s 0,r[0];	;		cjs,go clear_ctx; ;			| 
+	incw acc,acc;		;		cjp,~neg .-1;	;			| will clear all 8 contexts
+	
+	;			;		cjs,go gb_board_inq; ;			| tell PP about gb status
+	movw PPGBINSTALLED,acc;	;		;		;			| 
+	IMM;			am->fifo1;	cjs,f1f wrfifo;	;			| 
+	;			;		cjp,neg .+3;	;			| no GB, send a 0
+	mov2nw 0,y;		am->fifo1;	cjp,f1f .;	;			| GB installed, send a 1
+	;			;		cjp,go .+2;	;			| 
+	movw 0,y;		am->fifo1;	cjp,f1f .;	;			| 
+#endif GPPLUS
+	
+	movw 0,acc;		TEXPPFRMPTR->shmemp; ;		;			| zero acc, load initial value for which
+	;			0xffff->shmem;	;		;		shp+	|  frames texture is on pp = -1.
+	;			0xffff->shmem;	;		;			| Set ptr to 2d texture to -1.
+
+vpidle:	;			postoffset->am;	;		;
+	addw d,acc,y;		am->shmemp;	;		;
+	movw,s d,cmdptr;	shmem->am;	push,go;	;
+	movw,s d,cmdptr;	shmem->am;	loop,~zer;	;
+	incw postptr,postptr;	0->shmem;	;		;
+
+getcmd:	movw cmdptr,y;		am->shmemp;	;		;
+getcmd2: rolw 8,d,cmd;		shmem->am;	;		;		shp+	| 
+getcmd3: andw d,cmd,acc;	0x7F->am;	;		;			| 
+	rsubw,s d,acc,y;	VPMAX_CMD->am;	;		; 
+	rolw 8,cmd,cmd;		=cmdtbl->am;	;		;
+	addw d,acc,y;		am->brreg;	cjp,neg badcmd;	;			| if cmd > VPMAX_CMD, not valid
+	andw d,cmd,acc;		0xFF->am;	cjp,go;		;
+
+cmdtbl:	btstw,s	7,cmd;		;		jmap EOCL;	;			| 0
+#ifndef GPPLUS
+	rolw 9,acc,acc;		;		jmap USE_CONTEXT; ;			| 1
+#else GPPLUS
+	movw acc,r[0];		;		jmap USE_CONTEXT; ;			| 1
+#endif GPPLUS
+	subw,s d,fbindx,y;	shmem->am;	jmap PRVEC;	;			| 2
+	subw,s d,fbindx,y;	shmem->am;	jmap PRROPNF;	;			| 3
+	movw,s d,y;		shmem->am;	jmap PRROPFF;	;			| 4
+	subw,s d,fbindx,y;	shmem->am;	jmap PRPOLYSOL;	;			| 5
+	movw frameptr,y;	am->shmemp;	jmap SET_ZBUF;	;			| 6
+	incw cmdptr,cmdptr;	;		jmap SET_HIDDENSURF;;			| 7
+	incw cmdptr,cmdptr;	;		jmap SET_MAT_NUM; ;			| 8
+	negw d,countr;		shmem->am;	jmap MUL_POINT_FLT_2D;;			| 9
+	negw d,countr;		shmem->am;	jmap MUL_POINT_FLT_3D;;			| 10
+	movw d,r[11];		shmem->am;	jmap XF_PGON_FLT_3D;;			| 11 (r[11] is nbnds)
+	movw d,r[11];		shmem->am;	jmap XF_PGON_FLT_2D;;			| 12 (r[11] is nbnds)
+	negw d,countr;		shmem->am;	jmap CORENDCVEC_3D;;			| 13 Command used only by Core
+	negw d,countr;		shmem->am;	jmap CGIVEC;	;			| 14
+	movw,s d,r[0];		shmem->am;	jmap SET_CLIP_LIST; ;		shp+	| 15
+	incw cmdptr,cmdptr;	;		jmap SET_FBINDX; ;			| 16
+	movw 0,y;		am->fpdp;	jmap SET_VWP_3D; ;			| 17
+	movw 0,y;		am->fpdp;	jmap SET_VWP_2D; ;			| 18
+	add2nw 1,cmdptr;	shmem->am;	jmap SET_ROP;	;			| 19
+	incw cmdptr,cmdptr;	;		jmap SET_CLIP_PLANES;;			| 20
+	negw d,countr;		shmem->am;	jmap MUL_POINT_INT_2D;;			| 21	
+	negw d,countr;		shmem->am;	jmap MUL_POINT_INT_3D;;			| 22
+	incw cmdptr,cmdptr;	;		jmap SET_PIX_PLANES;;			| 23
+	movw 0,y;		am->fpdp;	jmap SET_MAT_3D; ;			| 24
+	negw d,countr;		shmem->am;	jmap XFVEC_3D;	;			| 25
+	add2nw 1,cmdptr,cmdptr;	shmem->am;	jmap SET_MAT_OFFSET; ;			| 26
+	negw d,countr;		shmem->am;	jmap XFVEC_2D;	;			| 27
+	incw cmdptr,cmdptr;	;		jmap SET_COLOR;	;			| 28
+	movw 0,y;		am->fpdp;	jmap SET_MAT_2D; ;			| 29
+	movw d,r[11];		shmem->am;	jmap XF_PGON_INT_3D;;			| 30 same as CORENDCPOLY_3D
+	movw d,acc;		shmem->am;	jmap COPY_MAT;	;		shp+	| 31
+	movw d,acc;		shmem->am;	jmap MUL_MAT_2D; ;		shp+	| 32
+	movw d,acc;		shmem->am;	jmap MUL_MAT_3D; ;		shp+	| 33
+	movw 0,y;		am->fpdp;	jmap GET_MAT_2D; ;			| 34
+	movw 0,y;		am->fpdp;	jmap GET_MAT_3D; ;			| 35
+	negw,s d,countr;	shmem->am;	jmap PROC_LINE_FLT_3D; ;		| 36
+	movw d,r[11];		shmem->am;	jmap PROC_PGON_FLT_3D; ;		| 37 (r[11] is nbnds)
+	movw d,r[11];		shmem->am;	jmap PROC_PGON_FLT_2D; ;		| 38 (r[11] is nbnds)
+	;			;		jmap badcmd;	;			| 39
+	subw,s d,fbindx,y;	shmem->am;	jmap PR_LINE;	;			| 40 Textured & fat vectors.
+	subw,s d,fbindx,y;	shmem->am;	jmap PR_POLYLINE; ;			| 41 Textured & fat polylines.
+	incw,s 0,y;		;		jmap SET_LINE_TEX; ;			| 42 Set line texture.
+	movw 0,y;		am->fpdp;	jmap SET_LINE_WIDTH; ;			| 43 Set line width.
+	negw d,countr;		shmem->am;	jmap CGI_LINE;	;			| 44 CGI textured & fat vectors.
+	incw cmdptr,cmdptr;	;		jmap XF_LINE_FLT_2D; ;			| 45 
+	incw cmdptr,cmdptr;	;		jmap XF_LINE_FLT_3D; ;			| 46
+	incw cmdptr,cmdptr;	;		jmap XF_LINE_INT_3D; ;			| 47
+	subw,s d,fbindx, y;	shmem->am;	jmap PR_PGON_TEX; ;			| 48
+	;			;		jmap badcmd;	;			| 49
+	;			;		jmap PR_ROP_TEX; ;			| 50
+	rolw 9,acc,acc;		;		jmap SET_PGON_TEX_BLK; ;		| 51
+	;			;		jmap SET_PGON_TEX; ;			| 52
+	add2nw 1,cmdptr;	;		jmap SET_PGON_TEX_ORG_SCR; ;		| 53
+	movw 0,y;		am->fpdp;	jmap SET_PGON_TEX_ORG_XF_2D; ;		| 54
+	movw 0,y;		am->fpdp;	jmap SET_PGON_TEX_ORG_XF_3D; ;		| 55
+	;			;		jmap badcmd;	;			| 56
+	incw cmdptr,cmdptr;	;		jmap XF_LINE_INT_2D; ;			| 57  
+	movw d,r[11];		shmem->am;	jmap XF_PGON_INT_2D; ;			| 58 (r[11] is nbnds)
+	movw d,r[11];		shmem->am;	jmap PROC_PGON_INT_2D;;			| 59 (r[11] is nbnds)
+	negw,s d,countr;	shmem->am;	jmap PROC_LINE_FLT_2D; ;		| 60	
+	negw,s d,countr;	shmem->am;	jmap PROC_LINE_INT_2D; ;		| 61
+	negw,s d,countr;	shmem->am;	jmap PROC_LINE_INT_3D; ;		| 62
+	movw d,r[11];		shmem->am;	jmap PROC_PGON_INT_3D;;			| 63
+#ifdef GPPLUS
+	movw 0,y;		am->fpdp;	jmap SET_PICK_ID; ;			| 64 
+	movw 0,y;		am->fpdp;	jmap SET_PICK_WINDOW; ;			| 65
+	incw cmdptr,cmdptr;	;		jmap GET_PICK;	;			| 66
+	incw cmdptr,cmdptr;	;		jmap SET_PICK;	;			| 67
+	incw cmdptr,cmdptr;	;		jmap CLEAR_PICK; ;			| 68
+ 	movw 0,r[18];		;		jmap XF_POINT_2D; ;			| 69 GP1_XF_POINT_INT_2D
+ 	movw 0,r[18];		;		jmap XF_POINT_3D; ;			| 70 GP1_XF_POINT_INT_3D
+ 	mov2nw 0,r[18];		;		jmap XF_POINT_2D; ;			| 71 GP1_XF_POINT_FLT_2D
+ 	mov2nw 0,r[18];		;		jmap XF_POINT_3D; ;			| 72 GP1_XF_POINT_FLT_3D
+	incw cmdptr,cmdptr;	;		jmap CLEAR_CONTEXT; ;			| 73 GP1_CLEAR_CONTEXT
+	incw cmdptr,cmdptr;	;		jmap SET_DEPTH_CUE; ;			| 74 GP1_SET_DEPTH_CUE
+	incw cmdptr,cmdptr;	;		jmap SET_DEPTH_CUE_COLORS; ;		| 75 GP1_SET_DEPTH_CUE_COLORS
+#else GPPLUS
+	mov2nw 1,acc;		;		jmap SET_PICK_ID; ;			| 64 
+	mov2nw 2,acc;		;		jmap SET_PICK_WINDOW; ;			| 65
+	mov2nw 3,acc;		;		jmap GET_PICK;	;			| 66
+	add2nw 0,cmdptr;	am->shmemp;	jmap getcmd2;	;			| 67 GP1_SET_PICK
+	add2nw 0,cmdptr;	am->shmemp;	jmap getcmd2;	;			| 68 GP1_CLEAR_PICK
+ 	movw 0,r[18];		;		jmap XF_POINT;  ;			| 69 GP1_XF_POINT_INT_2D
+ 	mov2nw 1,r[18];		;		jmap XF_POINT;  ;			| 70 GP1_XF_POINT_INT_3D
+ 	movw 0,r[18];		;		jmap XF_POINT;  ;			| 71 GP1_XF_POINT_FLT_2D
+	mov2nw 1,r[18];		;		jmap XF_POINT;	;			| 72 GP1_XF_POINT_FLT_3D
+	incw cmdptr,cmdptr;	;		jmap CLEAR_CONTEXT; ;			| 73 GP1_CLEAR_CONTEXT
+	incw cmdptr,cmdptr;	am->shmemp;	jmap getcmd2;	;			| 74 GP1_SET_DEPTH_CUE
+	incw cmdptr,cmdptr;	;		jmap SET_DEPTH_CUE_COLORS; ;		| 75 GP1_SET_DEPTH_CUE_COLORS
+#endif GPPLUS
+
+stop
+badcmd:	;			;		cjp,go .;	;			| hang GP until restarted
+
+
+|	btstw,s	7,cmd;		;		jmap EOCL;	;
+EOCL:	andw d,postptr,acc;	BUFLMSK->am;	push,~go;	;
+	;			PPACK->fifo1;	loop,f1nf;	;
+	movw postptr,y;		am->fifo1;	cjp,f1f .;	;
+freebf:	movw,s d,r[0];		shmem->am;	cjp,zer vpidle;	;		shp+
+	movw,s d,r[1];		shmem->am;	cjp,zer frbf2;	;
+frbf1:	;			BUFVEC1->shmemp;;		;
+	xorw d,r[0],r[0];	shmem->am;	;		;
+	movw r[0],y;		am->shmem;	cjp,zer vpidle;	;
+frbf2:	;			BUFVEC2->shmemp;;		;
+	xorw d,r[1],r[1];	shmem->am;	;		;
+	movw r[1],y;		am->shmem;	cjp,go vpidle;	;
+
+
+#ifndef GPPLUS
+|	rolw 9,acc,acc;		;		jmap USE_CONTEXT;	;
+USE_CONTEXT: andw d,acc,frameptr; 0x0E00->am;	;		;			| 
+#else GPPLUS
+|	movw acc,r[0];		;		jmap USE_CONTEXT;	;
+USE_CONTEXT: andw d,acc,acc;	7->am;		push,~go;	;			| save context number for PP
+	;			PPSETCONTEXT->fifo1; loop,f1nf;	;			| sync PP with VP with context command
+	rolw 9,acc,frameptr;	;		cjs,go wrfifo;	;			| send context number to PP
+#endif GPPLUS
+	addw d,frameptr,frameptr;0x3000->am;	;		;
+	incw cmdptr,cmdptr;	am->shmemp;	jmap getcmd2;	;	
+
+
+|   This routine is called when the gp is initialized or restarted.  It sets up shmemp and clears the context, which
+|   is in the acc.
+clear_ctx:
+	rolw 9,acc,frameptr;	0x3000->am;	;		;			| set up frameptr for clear_context routine
+	addw d,frameptr,frameptr; am->shmemp;	ldct 511;	;			| 
+	movw 0,y;		am->shmem;	rpct .;		;			| loop till clear
+	movw d,frameptr;	;		crtn,go;	;			| set frameptr to context 0
+
+
+wrfifo:	movw acc,y;		am->fifo1;	crtn,f1nf;	;
+	;			;		cjp,go wrfifo;	;
+
+
+| set up shmemp, fpdp, and counter prior to call
+	;			shmem->fpregl;	;		;		shp+,dp+
+shm_to_fpr: ;			shmem->fpregh;	rpct .-1;	;		shp+
+	;			shmem->fpregl;	crtn,go;	;		shp+,dp+
+
+
+getfbaddr: andw d,acc,fbindx;	0x3->am;	;		;
+	addw d,fbindx,acc;	=cg2_board_addr0->am;;		;
+	movw acc,y;		am->brreg;	;		;
+	;			;		cjs,go;		;
+	;			;		cjs,neg getvalidfb;;
+	;			;		push,~go;	;
+	;			PPFBADDR->fifo1;loop,f1nf;	;			| send PPFBADDR command to PP
+	movw acc,y;		am->fifo1;	cjp,f1f .;	;			| send address
+	;			;		crtn,go;	;
+
+
+getvalidfb: movw 0,fbindx;	;		cjs,go cg2_board_addr0;;		| cycle through all 4 boards until a
+	;			;		crtn,~neg;	;			| valid address is found;  set fbindx to
+	incw fbindx,fbindx;	;		cjs,go cg2_board_addr1;;		| correspond to this address;  return
+	;			;		crtn,~neg;	;			| top 8 bits of address in acc
+	incw fbindx,fbindx;	;		cjs,go cg2_board_addr2;;
+	;			;		crtn,~neg;	;
+	incw fbindx,fbindx;	;		cjs,go cg2_board_addr3;;
+	;			;		crtn,~neg;	;
+	;			;		cjp,go getvalidfb;;			| try again until succeed
+
+
+#undef postoffset
+#undef countr
+#undef lptmp
+#undef lptmp 
+
+
+#include "pixrect.vp.u"
+#include "attributes.vp.u"
+#include "recip.vp.u"
+#include "cgi.vp.u"
+#include "2Dfp.vp.u"
+#include "3Dfp.vp.u"
+#include "gbuffer.vp.u"
+#include "multiply.vp.u"
+#ifndef GPPLUS
+#include "polyscan.vp.u"
+#include "tex.vp.u"
+#else
+#include "xfpoint.vp.u"
+#include "zbline.vp.u"
+#endif GPPLUS
+
+|   This code resides on the second bank
+#include "statpixrect.vp.u"
+#include "statatts.vp.u"
+#ifndef GPPLUS
+#include "dummy.vp.u"
+#else
+#include "polyscan.vp.u"
+#include "pick.vp.u"
+#include "statmultiply.vp.u"
+#include "statrecip.vp.u"
+#include "depthcue.vp.u"
+#include "stattex.vp.u"
+#endif GPPLUS
+
+#undef cmd 
+
+#undef postptr 
+#undef cmdptr 
+#undef frameptr
+#undef fbindx 
+
+#undef pkcnthi
+#undef pkcntlo 
+
+

@@ -1,0 +1,78 @@
+|  "@(#)setlineatts.pp.u 1.1 94/10/31" 
+
+| Copyright 1986 by Sun Microsystems, Inc.
+| Written by Stuart Levy
+
+#define numsegs		r[0]
+#define patln		r[1]
+#define stoff		r[2]
+#define options		r[3]
+
+#define t5080		0
+
+|   Setlinetex expects to receive the starting offset, the options field (from which it determines if we are
+|   dealing with a 5080 texture or not), and then the pattern, which is either less than sixteen segments long,
+|   and null terminated, or it is exactly 16 long, and is not null terminated.
+setlinetex: movw d,stoff;	fifo1->am;	cjp, f1e .;			| fifo1->stoff.
+	;			OffsetAddr->scrmemp; ;				|
+	movw stoff,y;		am->scrmem;	;			scrmp+	| stoff->scrmem.
+	btstw,s t5080,d;	fifo1->am;	cjp, f1e .;			| fifo1->options.
+	movw d,options;		am->scrmem;	cjp, ~zer set5080tex;	scrmp+	| Jump if are dealing w/5080 texture.
+	movw 0,numsegs;		PatternAddr->scrmemp; ;				| Load addr. where to store pattern.
+	movw 0,patln;		fifo1->am;	cjp, f1e .;			| 
+	movw,s d,y;		am->scrmem;	ldct 14;		scrmp+	| Load counter (0 based) w/15.
+	addw d,patln,patln;	;		cjp, zer setsvnum;		| patln += segment. Jump if solid.
+setloop: movw,s d,acc;		fifo1->am;	cjp, f1e .;			| Test value.
+	incw numsegs,numsegs;	;		cjp, zer setzerseg;		| numsegs++, jump if hit zero segment.
+	addw d,patln,patln;	;		;				| patln += segment.
+	movw d,y;		am->scrmem;	rpct setloop;		scrmp+	| segment->scrmem, are pulling 16 max.
+setsvnum: ;			NumsegsAddr->scrmemp; ;				| Load address to store attributes.
+	movw numsegs,y;		am->scrmem;	;			scrmp+	| numsegs->scrmem.
+	movw patln,y;		am->scrmem;	cjp, go start;			| patln->scrmem & return.
+setzerseg: movw d,y;		am->scrmem;	cjp, go setsvnum;		| 0 seg->scrmem & jump to store numsegs
+
+#undef numsegs
+#undef patln
+#undef stoff
+#undef options
+
+#undef t5080
+
+	
+
+setlinewidth: ;			fifo1->am;	cjp, f1e .;			| Width->am.
+	;			WidthAddr->scrmemp; ;				| 
+	movw d,y;		am->scrmem;	;			scrmp+	| width->scrmem.
+swloop:	;			fifo1->am;	cjp, f1e .;			| 
+	movw d,y;		am->scrmem;	jmap start;			| width.options->scrmem & return.
+
+
+
+#define bmask	r[0]
+#define wdcnt	r[1]
+#define on	r[2]
+#define off	r[3]
+#define numsegs	r[4]
+#define firston	r[5]
+#define stoff	r[6]
+#define temp	r[7]
+
+
+|   For the first segment, we want to compute 'on' if the highest bit is set, ie, our first segment is on.
+|   This is because we do not want to enter the onseg routine, and not return (because on is zero, indicating
+|   the last segment was off), and send a non-existant 'off' segment.  For the offseg routine all is fine,
+|   since 'on' is zero and we just return.
+set5080tex:
+	;			;		jmap start;			| Not implemented in gp.
+
+
+#undef bmask
+#undef wdcnt
+#undef on	
+#undef off
+#undef numsegs
+#undef firston	
+#undef stoff
+#undef temp
+
+

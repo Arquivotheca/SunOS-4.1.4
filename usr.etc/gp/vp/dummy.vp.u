@@ -1,0 +1,75 @@
+| Copyright (c) 1988 by Sun Microsystems, Inc.
+| @(#)dummy.vp.u 1.1 94/10/31 SMI
+
+
+#define mtype		r[22]
+#define attr_vec	r[18]	/* bit 1 - 3D */
+#define npts		r[2]
+
+
+|	incw cmdptr,cmdptr;	;		jmap CLEAR_CONTEXT; ;			| 73 GP1_CLEAR_CONTEXT
+CLEAR_CONTEXT:
+	movw cmdptr,y;		am->shmemp;	jmap getcmd2;	;			| 
+	
+	
+|	incw cmdptr,cmdptr;	;		jmap SET_DEPTH_CUE_COLORS;	
+SET_DEPTH_CUE:
+	movw cmdptr,y;		am->shmemp;	jmap getcmd2;	;			| 
+	
+	
+|	incw cmdptr,cmdptr;	;		jmap SET_DEPTH_CUE_COLORS;	
+SET_DEPTH_CUE_COLORS:
+	add2nw 2,cmdptr;	am->shmemp;	jmap getcmd2;	;			| 
+	
+	
+		
+|   	mov2nw 1,acc;		;		jmap SET_PICK_ID; ;			| 64
+SET_PICK_ID:
+	incw acc,acc;		;		cjp,go bump_cmdptr; ;			| 3 words total
+	
+
+|   	mov2nw 2,acc;		;		jmap SET_PICK_WINDOW; ;			| 65
+SET_PICK_WINDOW:
+	incw acc,acc;		;		cjp,go bump_cmdptr; ;			| 5 words total
+
+
+|   	mov2nw 3,acc;		;		jmap GET_PICK;	;			| 66
+GET_PICK:
+	movw 0,y;		am->shmem;	;		;		shp+	| clear ready and latch flags
+	movw 0,y;		am->shmem;	;		;			| 
+	incw acc,acc;		;		cjp,go bump_cmdptr; ;			| set ready flag, 9 words total
+
+
+XF_POINT: add2nw 2,cmdptr;	am->shmemp;	;		;			| skip command, scale, dx and dy
+	movw d,mtype;		shmem->am;	;		;		shp+	| get marker type
+	testw(attr_vec);	=markertype->am; ;		;			| get address of command table
+	addw d,mtype,y;		am->brreg;	;		;			| compute address
+	movw d,acc;		3->am;		;		;			| 
+	movw d,npts;		shmem->am;	cjp,go;		;		shp+	| jump into table, get npts for line and poly markers
+markertype: ;			;		cjp,go markerline; ;			| 
+	;			;		cjp,go markerpoly; ;			| 
+	movw d,npts;		shmem->am;	cjp,go skip_points; ;			| circles
+	movw d,npts;		shmem->am;	cjp,go skip_points; ;			| filled circles
+
+markerline: sub2nw 0,npts;	am->brreg;	;		;			| 
+	sub2nw 0,acc;		3->am;		push,go;	;			| acc = 6
+	addw d,acc,acc;		;		rfct;		;			| acc += 3*npts
+	addw cmdptr,acc,y;	am->shmemp;	;		;			| 
+	movw d,npts;		shmem->am;	;		;			| 
+	incw acc,acc;		;		cjp,go skip_points; ;			| acc = 7 + 3*npts
+	
+
+markerpoly: ;			;		;		;			| 
+
+
+|   acc has total shorts not including 2D or 3D points
+|   npts has been set from shmem, cc is zero for 2D, ~zer for 3D
+skip_points:
+	sub2nw 0,npts;		am->brreg;	cjp,~zer .+2;	;			| test 3D
+	mov2nw 2,y;		am->am;		cjp,go .+2;	;			| 4 shorts/2D point
+	;			6->am;		;		;			| 6 shorts/3D point
+	;			;		push,go;	;			| 
+	addw d,acc,acc;		;		rfct;		;			| fall through to bump routine
+ 
+
+bump_cmdptr: addw cmdptr,acc,cmdptr; am->shmemp; jmap getcmd2;	;			| 

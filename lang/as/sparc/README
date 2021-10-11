@@ -1,0 +1,118 @@
+#	@(#)README	1.1	10/31/94
+
+SCCS dates
+==========
+	 9/29/85:
+		Checked in all sources for v1.40 (?).
+		Began editing to add support for new object file format.
+
+	10/25/85:
+		Checked in all sources for v1.41, which had added support for
+		new object file format.  Began editing source for prototype C2.
+	
+	11/21/85:
+		Checked in all sources for v1.41 with bug fixes.
+		C2-isms need to be removed (and then redone), but haven't been
+		yet.
+
+	12/24/85:
+		Checked in all sources for v1.41, with VIRTUAL_ROOT stuff added
+		for exec'ing /lib/cpp.
+		C2-isms still need to be removed.
+
+	1/7/86:
+		Checked in changes to properly support SDCOMMON. 
+
+	??/??/86:
+		Checked in sources for v2.00 (with early peephole
+		optimizations).
+	8/19/86:
+		Checked in sources for v2.02; cross-jumping and loop-inversion
+		optimizations added.
+
+Opcode names:
+===============
+	...starting with '*' are internal assembler opcode names.  Usually
+		several of them are derived from a single assembler mnemonic.
+
+Symbol names:
+===============
+
+	...starting with '(' are symbolic expressions, computation of the
+		value of which are delayed until the last moment.
+
+	...starting with 'L' are local (assumed compiler-generated) symbols,
+		not to be written to obj file unless "-L" cmd-line flag is
+		used.
+
+	...starting with [A-Za-z_$.] are normal symbols (except for above).
+
+	...starting with [0-9] are local labels.
+
+	...starting with '&' are internal-only symbols which refer to the
+		beginning of a segment (needed to implement '.' as the
+		location counter).
+
+	...the predefined symbol name '.' refers to the address of the
+		beginning of the current assembly language statement.
+
+Notes on Pseudo-ops
+===================
+	(may be out-of-date; verify in lex_tables.c + func*.h)
+
+	op/flp/	del if	gens
+	 vlhp	dead?	code?*
+	-------	------	------
+				/* Subgroups for FG_PS functional group,
+				 * i.e. pseudo instructions
+				 */
+	  vlhp	 yes	yes	FSG_SGL,	/* ".single"	*/
+	  vlhp	 yes	yes	FSG_DBL,	/* ".double"	*/
+	  vlhp	 yes	yes	FSG_EXT,	/* ".ext"	*/
+	  vlhp	 yes	yes	FSG_ASCII,	/* ".ascii"	*/
+	  vlhp	 yes	yes	FSG_ASCIZ,	/* ".asciz"	*/
+	  vlhp	 no	no	FSG_SEG/*=FSG_common*/,/* ".seg"	*/
+	  vlhp	 no	no	FSG_GLOBAL,	/* ".global"	*/
+	  vlhp	 no	no	FSG_COMMON,	/* ".vlhp"	*/
+	  ----	 --	---	FSG_RESERVE,	/* ".reserve"	*/
+	  vlhp	 no	no	FSG_STAB,	/* ".stab[dns]"	*/
+
+	   op	 no	no	FSG_PROC,	/* ".proc"	*/
+	   op	 yes	yes	FSG_SKIP,	/* ".skip"	*/
+
+	  flp	 no	no	FSG_BOF,	/* "*.bof" (internal: beginning
+						 *	of file)
+						 */
+
+	 -none-	 yes	no	FSG_EMPTY,	/* ".empty"	*/
+
+	  			/* Subgroups for FG_PSVAL functional group,
+	  			 * i.e. pseudo instructions
+	  			 */
+	  op	 yes	yes	FSG_BYTE/*=FSG_COMMON*/,/* ".byte"	*/
+	  op	 yes	yes	FSG_HALF,	/* ".half"	*/
+	  op	 yes	yes	FSG_WORD,	/* ".word"	*/
+	  op	 no	no**	FSG_ALIGN,	/* ".align"	*/
+
+
+	  * i.e. generates code in CURRENT segment
+	 ** it may be more correct/conservative to consider ALIGN as
+		code-generating, since sometimes it is!
+
+#ifdef'd code:
+==============
+
+	"DOT" identifies code which was added to provide the special symbol
+	"." in the assembler.  These #ifdef/#endif's should be (were) removed
+	after "." had been satisfactorily tested.
+
+	"EXCL_COMMON_DEFINE" identifies code (all in actions_util.c) which
+	disallows the definition of a symbol overriding a previous ".common"
+	definition of it.  The current sense is that EXCL_COMMON_DEFINE should
+	NOT be defined, and should be eventually done away with.
+
+	"CHIPFABS" identifies code which implements the "-F" command-line
+	options, which allows the user to specify which fabrication of the
+	IU and FPU chips he/she wants the assembler to generate code for.
+	After the fabrications settle down and we have "perfect" chips,
+	this option (i.e. all code enclosed in #ifdef CHIPFABS) shoud go away.

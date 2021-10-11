@@ -1,0 +1,325 @@
+| "@(#)polyline.pp.u 1.1 94/10/31"
+
+| Copyright 1986 by Sun Microsystems, Inc.
+| Written by Stuart Levy
+
+ 
+|   The options field is broken down as follows:
+|  	 bit 15 - startpt	bit 14 - endpt		bit 13 - balancing	bit 12 - givenpattern
+|  	 bit 11 - fat		bit 10 - poly		bit 9 - mvlist		bit 8 - righthalf
+|   	 bit 7 - close		bit 6 - cliprt		bit 5 - solid		bit 4 - pixrect
+|   	 bit 3 - nosetup	bit 2 - clipbit		bit 1 - firstvec	bit 0- picking			(bit 0 used only in GP+)
+
+#define pickbit		0
+#define clipbit		2
+#define nosetup		3
+#define pixrect		4
+#define solid		5
+#define cliprt		6
+#define close		7
+#define right		8
+#define mvlist		9
+#define poly		10
+
+#define xfirst		r[0]
+#define yfirst		r[1]
+#define npts		r[7]
+#define xoff		r[8]
+#define yoff		r[9]
+#define dy		r[10]
+#define dx		r[11]
+#define y1		r[12]
+#define x1		r[13]
+#define y0		r[14]
+#define x0		r[15]
+
+#define temp		r[16]
+#define width		r[21]
+#define clip		r[23]
+#define options		r[24]
+
+#define savpolyfat	0x115
+#define savpolyfatwid	0x119
+#define savtex		0x120
+
+
+|   This routine assumes that the solid & mvlist fields have been filled in the options word.
+|   For lines without a mvlist, the close field has also been filled in advance, but for lines with
+|   a mvlist, the program fills in this field, with the value of the first mvlist element.  
+|   (GP+ only) Pickbit has been cleared in advance unless picking is on. 
+
+
+polyln:	movw d,xoff;		fifo1->am;	cjp,f1e .;			| xoff
+	movw d,yoff;		fifo1->am;	cjp,f1e .;			| yoff
+	movw d,width;		fifo1->am;	cjp,f1e .;			| width
+	movw 0,r[2];		;		;				| 0->numsegs
+	movw 0,r[4];		0x150->scrmemp; ;				| 0->patln
+polpatlp: movw,s d,r[3];	fifo1->am;	cjp,f1e .;			| pattern segments
+	addw d,r[4],r[4];	;		cjp,zer pol2;			| jump if zero,patln+=segment
+	movw d,y;		am->scrmem;	;			scrmp+	| segment->scrmem
+	incw r[2],r[2];		;		cjp,go polpatlp;		| numsegs++,loop
+pol2:	movw d,r[3];		fifo1->am;	cjp,f1e .;			| stoff
+	bclrw nosetup,options;	savtex->scrmemp; ;				| savtex->scrmemp,set right bit
+	movw d,y;		am->scrmem;	;			scrmp+	| stoff->scrmem
+	movw d,options;		fifo1->am;	cjp,f1e .;			| options
+	bsetw pixrect,options;	;		;				| tex->options.pixrect=1.
+	movw r[4],y;		am->scrmem;	;			scrmp+	| patln->scrmem
+	movw r[2],y;		am->scrmem;	;			scrmp+	| numsegs->scrmem
+	movw d,op;		fifo1->am;	cjp,f1e .;			| op
+	norw,s d,op,clip;	0xfffe->am;	;				| (PIX_DONTCLIP == 1) => (clip == 0).
+	bclrw clipbit,options;	;		cjp,zer pol3;			| clear clip in options
+	bsetw clipbit,options;	;		;				| set clip in options
+pol3:	movw d,color;		fifo1->am;	cjp,f1e .;			| color
+	rolw 11,op,acc;		;		;				| color in op?
+	andw,s d,acc,acc;	0x7ff->am;	;				| 
+	sr0w op,op;		;		cjp,zer pol4;			| op >>= 1. 
+	movw acc,color;		;		;				| 
+pol4:	movw d,npts;		fifo1->am;	cjp,f1e .;			| npts
+
+|   Begin drawing.
+polyst:	subw,s d,npts,y;	0x2->am;	;				| 
+	btstw,s mvlist,options;	;		crtn,neg;			| Return if npts = 0 or npts = 1.
+	btstw,s solid,options;	;		cjp,zer p3nmv;			| Jump if mvlist doesn't exist.
+	
+|   Case 1.  At this point,we know we have a valid movelist and a textured vector.
+p1mvtex: bclrw close,options;	;		cjs,go getxy0mv;		| Fetch x0,y0,mvlist. Clear close field.
+	btstw,s solid,options;	;		cjp,zer p1mv2;			| Jump if not closing polylines.
+	bsetw close,options;	;		;				| Are closing polylines.
+p1mv2:	movw x0,xfirst;		;		cjp,~zer p2mvsol;		| Jump to p2mvsol if solid vector.
+	bclrw poly,options;	;		cjp,go p1new2;			| 
+
+p1newply: bclrw poly,options;	;		;				| Fetch x0,y0,add offset,test mvlist.
+	movw x1,x0;		;		;				| x0 = x1.
+	movw y1,y0;		;		;				| y0 = y1.
+	movw x0,xfirst;		;		;				| xfirst = x0. Jump if mvlist is set.
+p1new2:	decws npts;		;		ldct pend;			| Actually,want to return without drawing!!!
+	movw y0,yfirst;		;		jsrp,~zer getxy1mv1;		| 
+	btstw,s close,options;	;		jsrp,zer pdraw;			| Draw if mvlist = 0,else to p1cldrw.
+	bsetw poly,options;	;		;				| tex->options.poly = 1.
+	movw x1,x0;		;		;				| x0 = x1. 
+p1loop:	decws npts;		;		ldct pend;			| npts-- (begin for loop).
+	movw y1,y0;		;		jsrp,~zer getxy1mv1;		| y0 = y1. Fetch next if npts != 0.
+	btstw,s close,options;	;		jsrp,zer pdraw;			| Draw if mvlist=0,else to p1cldrw.
+	movw x1,x0;		;		cjp,go p1loop;			| x0 = x1 & loop.
+
+|   Case 2.  At this point,we know we have a valid movelist and a solid vector.
+p2mvsol: decws npts;		;		ldct pend;			| npts--.
+	movw y0,yfirst;		;		jsrp,~zer getxy1mv2;		| yfirst = y0. Fetch x1,y1 if (npts).
+	btstw,s close,options;	;		jsrp,zer pdraw;			| pdraw if mvlist=0,else to p2cldrw.
+	movw x1,x0;		;		;				| x0 = x1.
+p2loop:	decws npts;		;		ldct pend;			| npts-- (begin for loop).
+	movw y1,y0;		;		jsrp,~zer getxy1mv2;		| y0 = y1. Fetch next if npts != 0.
+	btstw,s close,options;	;		jsrp,zer pdraw;			| Draw if mvlist=0,else to p1cldrw.
+	movw x1,x0;		;		cjp,go p2loop;			| x0 = x1 & loop.
+	
+|   Case 3.  At this point,we have no mvlist and don't care whether we have a solid or textured vector.
+p3nmv:	addw d,xoff,x0;		fifo1->am;	cjp,f1e .;			| Loop while fifo empty. x0 += xoff.
+	addw d,yoff,y0;		fifo1->am;	cjp,f1e .;			| Loop while fifo empty. y0 += yoff.
+	movw x0,xfirst;		;		;				| xfirst = x0.
+	movw y0,yfirst;		;		;				| y0 = yfirst & draw line.
+	bclrw poly,options;	;		;				| tex->options.poly = 0.
+	decw npts;		;		cjs,go getxy1dr;		| npts-- & fetch x1,y1.
+	bsetw poly,options;	;		;				| tex->options.poly = 1.
+	movw x1,x0;		;		;				| x0 = x1.
+p3loop:	decws npts;		;		ldct pend;			| npts-- & load brreg.
+	movw y1,y0;		;		jsrp,~zer getxy1dr;		| y0 = y1. Fetch & draw if npts != 0.
+	movw x1,x0;		;		cjp,go p3loop;			| x0 = x1 and loop.
+	
+pend:	btstw,s close,options;	;		cjpp,go pend2;			| Pop call off stack.
+pend2:	movw xfirst,x1;		am->am;		crtn,zer;			| x1 = xfirst & return if no close.
+	rsubw d,x0,dx;		;		;				| Compute dx.
+	xorw,s d,x0,y;		;		;				| Test if x0 = x1.
+	movw yfirst,y1;		am->am;		cjp,~zer pend3;			| y1 = yfirst.Jump if x0 != x1.
+	xorw,s d,y0,y;		;		;				| 
+pend3:	rsubw d,y0,dy;		SavePts->scrmemp; crtn,zer;			| Compute dy,return if all moves.
+	movw x0,y;		am->scrmem;	;			scrmp+	| Save	x0.
+	movw y0,y;		am->scrmem;	;			scrmp+	| 	y0.
+	movw x1,y;		am->scrmem;	;			scrmp+	| 	x1.
+	movw y1,y;		am->scrmem;	cjp,go fatcheck;		| 	y1 & draw.
+	
+|   Subroutines used by polyline routine.
+
+|   Getxy#mv1 both fetch,and add the offsets to the x and y values of a point.  They also compute dx and dy,
+|   as well as in the case of xy1,load the branch register.
+getxy0mv: addw d,xoff,x0;	fifo1->am;	cjp,f1e .;			| Loop while fifo empty. x0 += xoff.
+	movw x0,y;		am->am;		;				| 
+	subw d,xfirst,dx;	;		;				| Compute dx (based on xfirst).
+	addw d,yoff,y0;		fifo1->am;	cjp,f1e .;			| Loop while fifo empty. y0 += yoff.
+	movw y0,y;		am->am;		;				| 
+	subw d,yfirst,dy;	;		;				| Compute dy (based on yfirst).
+	movw,s d,y;		fifo1->am;	cjp,f1e .;			| Test mvlist.
+	;			;		crtn,go;			| Return.
+
+getxy1mv1: addw d,xoff,x1;	fifo1->am;	cjp,f1e .;			| Loop while fifo empty. x1 += xoff.
+	movw x1,y;		am->am;		;				| 
+	rsubw d,x0,dx;		;		;				| Compute dx.
+	addw d,yoff,y1;		fifo1->am;	cjp,f1e .;			| Loop while fifo empty. y1 += yoff.
+	movw y1,y;		am->am;		;				| 
+	rsubw d,y0,dy;		;		ldct p1cldrw;			| Compute dy & load brreg.
+	movw,s d,y;		fifo1->am;	cjp,f1e .;			| Test mvlist.
+	;			;		crtn,go;			| Return.
+
+|   The only difference between getxy1mv1 and 2 are the branch address,since for 2,don't want to go to newpolyline.
+getxy1mv2: addw d,xoff,x1;	fifo1->am;	cjp,f1e .;			| Loop while fifo empty. x1 += xoff.
+	movw x1,y;		am->am;		;				| 
+	rsubw d,x0,dx;		;		;				| Compute dx.
+	addw d,yoff,y1;		fifo1->am;	cjp,f1e .;			| Loop while fifo empty. y1 += yoff.
+	movw y1,y;		am->am;		;				| 
+	rsubw d,y0,dy;		;		ldct p2cldrw;			| Compute dy & load braddr.
+	movw,s d,y;		fifo1->am;	cjp,f1e .;			| Test mvlist.
+	;			;		crtn,go;			| Return.
+	
+getxy1dr: addw d,xoff,x1;	fifo1->am;	cjp,f1e .;			| Loop while fifo empty. x1 += xoff.
+	movw x1,y;		am->am;		;				| 
+	rsubw d,x0,dx;		;		;				| Compute dx.
+	addw d,yoff,y1;		fifo1->am;	cjp,f1e .;			| Loop while fifo empty. y1 += yoff.
+	movw y1,y;		am->am;		;				| 
+	rsubw d,y0,dy;		;		cjp,go pdraw;			| Compute dy & draw (note cjp,not cjs).
+	
+| For pdraw to work,it is necessary that the registers used by this routine are not stepping on any
+| other register needed between calls to fatvec.  This suggests that they should be in the upper half
+| of the register bank.  
+|   Note that x0,y0,x1 and y1 are needed by the vector routines @ SavePts for clipping reasons
+|   for thin vectors,and fat vectors (we call pdrfat) will save the coordinates there themselves.
+pdraw:	sub2nw,s 1,width,temp;	SavePts->scrmemp; ;				| Save polyline state.
+	movw x0,y;		am->scrmem;	cjp,~neg pdrfat;	scrmp+	| 	x0.
+	movw y0,y;		am->scrmem;	cjs,go pdrstx1;		scrmp+	| 	y0.
+	;			SavePts->scrmemp; ;				| Restore state.
+	movw d,x0;		scrmem->am;	cjp,go pdrres;		scrmp+	| 	x0.
+
+| Pdrst was created to save space.  It fills in the scrmem,& will return to the place from where it was called
+| directly from fatcheck.	
+pdrst:	movw y0,y;		am->scrmem;	;			scrmp+	| 	y0
+pdrstx1: movw x1,y;		am->scrmem;	;			scrmp+	| 	x1.
+	movw y1,y;		am->scrmem;	;			scrmp+	| 	y1.
+	movw width,y;		am->scrmem;	;			scrmp+	| 	width.
+	movw npts,y;		am->scrmem;	;			scrmp+	| 	npts.
+	movw xfirst,y;		am->scrmem;	;			scrmp+	| 	xfirst.
+	movw yfirst,y;		am->scrmem;	;			scrmp+	| 	yfirst.
+	movw xoff,y;		am->scrmem;	;			scrmp+	| 	xoff.
+	movw yoff,y;		am->scrmem;	cjp,go fatcheck;		| 	yoff & draw vector.
+
+| Pdrres is used for restoring the registers stored by pdrst.  It returns to the routine that originally
+| called pdraw.	
+pdrres:	movw d,y0;		scrmem->am;	;			scrmp+	| 	y0.
+	movw d,x1;		scrmem->am;	;			scrmp+	| 	x1.
+	movw d,y1;		scrmem->am;	;			scrmp+	| 	y1.
+	movw d,width;		scrmem->am;	;			scrmp+	| 	width.
+	movw d,npts;		scrmem->am;	;			scrmp+	| 	npts.
+	movw d,xfirst;		scrmem->am;	;			scrmp+	| 	xfirst.
+	movw d,yfirst;		scrmem->am;	;			scrmp+	| 	yfirst.
+	movw d,xoff;		scrmem->am;	;			scrmp+	| 	xoff.
+	movw d,yoff;		scrmem->am;	crtn,go;			| 	yoff & return.
+
+|   Pdrfat is reached when we have a fat polyline,and therefore do not want to save the coordinates at SavePts,as they
+|   will get overwritten in the fat vector code.  Instead we store them at savpolyfat,and restore them from this location.
+pdrfat:	;			savpolyfat->scrmemp; ;				| Save polyline state for fat vecs.
+	movw x0,y;		am->scrmem;	cjs,go pdrst;		scrmp+	| 	x0 & call store routine.
+	;			savpolyfat->scrmemp; ;				| Restore state.
+	movw d,x0;		scrmem->am;	cjp,go pdrres;		scrmp+	| 	x0 & jump to restore routine.
+			
+|   Pdrawcl is used when closing polylines,and therefore saves npts,x0,y0,x1,y1,width,npts,xoff & yoff,& computes dx,dy.
+pdrawcl: movw y0,y;		am->scrmem;	;			scrmp+	| 	y0.
+	movw xfirst,y;		am->scrmem;	;			scrmp+	| 	x1=xfirst.
+	movw yfirst,y;		am->scrmem;	;			scrmp+	| 	y1=yfirst.
+	movw width,y;		am->scrmem;	;			scrmp+	| 	width.
+	movw npts,y;		am->scrmem;	;			scrmp+	| 	npts.
+	movw xoff,y;		am->scrmem;	;			scrmp+	| 	xoff.
+	movw yoff,y;		am->scrmem;	;			scrmp+	| 	yoff.
+	movw x1,y;		am->scrmem;	;			scrmp+	| 	xfirst=x1.
+	movw y1,y;		am->scrmem;	;				| 	yfirst=y1
+	movw xfirst,x1;		am->am;		;				| x1 = xfirst.
+	rsubw d,x0,dx;		;		;				| Compute dx.
+	movw yfirst,y1;		am->am;		;				| y1 = yfirst.
+	rsubw d,y0,dy;		;		cjp,go fatcheck;		| Compute dy & jump.
+
+|   P1cldrw should cjpp newpolyline if close bit not set,otherwise it should draw & then cjpp to p1newply.
+p1cldrw: movw xfirst,acc;	;		cjpp,zer p1newply;		| Return if close bit not set.
+	sub2nw,s 1,width,temp;	SavePts->scrmemp; ;				| 
+	xorw,s x0,acc,y;	;		cjp,~neg p1clfat;		| jump if fat vector
+	movw yfirst,acc;	;		cjp,~zer p1cl2;			| Jump if x0 != xfirst.
+	xorw,s y0,acc,y;	;		;				| 
+	;			;		cjpp,zer p1newply;		| Return if had multiple moves.
+p1cl2:	movw x0,y;		am->scrmem;	cjs,go pdrawcl;		scrmp+	| Save x0 + call draw routine.
+	movw d,r[2];		SavePts->am;	;				| 
+	add2nw 2,r[2],r[2];	am->scrmemp;	;				| Restore state.
+	movw d,width;		scrmem->am;	;			scrmp+	| 	width.
+p1cl2res: movw d,npts;		scrmem->am;	;			scrmp+	| 	npts.
+	movw d,xoff;		scrmem->am;	;			scrmp+	| 	xoff.
+	movw d,yoff;		scrmem->am;	;			scrmp+	| 	yoff.
+	movw d,x1;		scrmem->am;	;			scrmp+	| 	x1 (->x0,xfirst). 
+	movw d,y1;		scrmem->am;	cjpp,go p1newply;		| 	y1 (->y0,yfirst).
+	
+p1clfat: ;			savpolyfat->scrmemp; ;				| 
+	movw yfirst,acc;	;		cjp,~zer p1clf2;		| 
+	xorw,s y0,acc,y;	;		;				| 
+	;			;		cjpp,zer p1newply;		| 
+p1clf2:	movw x0,y;		am->scrmem;	cjs,go pdrawcl;		scrmp+	| Save x0 + call draw routine.
+	;			savpolyfatwid->scrmemp; ;			| 
+	movw d,width;		scrmem->am;	cjp,go p1cl2res;	scrmp+	| jump to common restore code
+	
+
+|   P2cldrw should return if close bit not set,otherwise it should draw & then return.
+p2cldrw: movw xfirst,acc;	;		crtn,zer;			| Return if close bit not set.
+	sub2nw,s 1,width,temp;	SavePts->scrmemp; ;				| 
+	xorw,s x0,acc,y;	;		cjp,~neg p2clfat;		| jump if fat vector
+	movw yfirst,acc;	;		cjp,~zer p2cl2;			| Jump if x0 != xfirst.
+	xorw,s y0,acc,y;	;		;				| 
+	;			;		cjp,~zer p2cl2;			| Jump to draw not both moves.
+	movw x1,xfirst;		;		;				| New xfirst=x1.
+	movw y1,yfirst;		;		crtn,go;			| New yfirst=y1.
+p2cl2:	movw x0,y;		am->scrmem;	cjs,go pdrawcl;		scrmp+	| Save x0 + call draw routine.
+	movw d,r[2];		SavePts->am;	;				| 
+	add2nw 2,r[2],r[2];	am->scrmemp;	;				| Restore state.
+	movw d,width;		scrmem->am;	;			scrmp+	| 	width.
+p2cl2res: movw d,npts;		scrmem->am;	;			scrmp+	| 	npts.
+	movw d,xoff;		scrmem->am;	;			scrmp+	| 	xoff.
+	movw d,yoff;		scrmem->am;	;			scrmp+	| 	yoff.
+	movw d,xfirst;		scrmem->am;	;			scrmp+	| 	xfirst=x1.
+	movw d,yfirst;		scrmem->am;	;				| 	yfirst=y1.
+	movw xfirst,x1;		;		;				| Restore x1.
+	movw yfirst,y1;		;		crtn,go;			| Restore y1 & return.
+	
+p2clfat: ;			savpolyfat->scrmemp; ;				| 
+	movw yfirst,acc;	;		cjp,~zer p2clf2;		| Jump if x0 != xfirst.
+	xorw,s y0,acc,y;	;		;				| 
+	;			;		cjp,~zer p2clf2;		| Jump to draw not both moves.
+	movw x1,xfirst;		;		;				| New xfirst=x1.
+	movw y1,yfirst;		;		crtn,go;			| New yfirst=y1.
+p2clf2:	movw x0,y;		am->scrmem;	cjs,go pdrawcl;		scrmp+	| Save x0 + call draw routine.
+	;			savpolyfatwid->scrmemp; ;			| 
+	movw d,width;		scrmem->am;	cjp,go p2cl2res;	scrmp+	| jump to common code
+
+
+#undef clipbit
+#undef nosetup
+#undef pixrect
+#undef solid
+#undef cliprt
+#undef close
+#undef right
+#undef mvlist	
+#undef poly
+
+#undef xfirst
+#undef yfirst
+#undef npts	
+#undef xoff	
+#undef yoff	
+#undef dy	
+#undef dx	
+#undef y1	
+#undef x1	
+#undef y0	
+#undef x0
+
+#undef temp
+#undef width
+#undef clip	
+#undef options	
+	
+#undef savpolyfat
+#undef savpolyfatwid
+#undef savtex
+
+

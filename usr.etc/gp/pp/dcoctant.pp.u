@@ -1,0 +1,124 @@
+| Copyright (c) 1988 by Sun Microsystems, Inc.
+| @(#)dcoctant.pp.u 1.1 94/10/31 SMI
+
+|   Similar to octant routine, with the addition of some registers for color calculations.
+|   acc:		initial error.
+|   r[0], vloareg:	low address.
+|   r[1], vhiareg:	high address.
+|   r[2]:		number of pixels to draw.
+|   r[3]:		incr0 (added to error if error is negative).
+|   r[4]:		incr1 (added to error if error is positive).
+|   r[5]:		reflect (determines which octant:  0 => 0, 1 => 1, 2 => 7, 3 => 6).
+
+|   scrmp 0		dclow
+|   scrmp 1		dchigh
+
+
+
+#define err acc
+#define addrlo 	r[0]
+#define addrhi 	r[1]
+#define incr0 	r[3]
+#define incr1 	r[4]
+#define clo	r[14]
+#define chi	r[15]
+
+
+dcoctant: ;			=dcoct0176->am;	;				| Choose octant based on reflect.
+	addw d, r[5], y;	am->brreg;	;				| 
+	;			;		cjp, go;			| 
+dcoct0176:movw r[2], y;		am->brreg;	cjp, go dcoct0;			| Get ready to ld cntr.
+	movw r[2], y;		am->brreg;	cjp, go dcoct1;			| Get ready to ld cntr. (dx swapped w/ dy).
+	movw r[2], y;		am->brreg;	cjp, go dcoct7;			| Get ready to ld cntr.
+	movw r[2], y;		am->brreg;	cjp, go dcoct6;			| Get ready to ld cntr. (dx swapped w/ dy).
+
+
+dcoct0:	testw (acc);		=dcnerr0->brreg;push, go;			| Set cond. code, ld cntr, push loop.
+|   testing (-acc) < 0 is equivalent to testing (acc) > 0.
+|   Main vector drawing loop.  Octant 0.
+dcloop0: movw chi,y;		am->vwdreg;	cjp, ~neg.3 dcloop0;	vmewr	| if err < 0 goto dcnerr0.
+	incw,s addrlo, addrlo;	;		;				| Increment x.
+	movw addrlo, y;		am->vloareg;	cjp, ~cry dcncry0a;	scrmp 0	| 
+	incw addrhi, addrhi;	am->vhiareg;	;				| 
+dcncry0a: addw d,clo,clo;	scrmem->am;	;			scrmp+	| 
+	addcw d,chi,chi;	scrmem->am;	;				| 
+	addw,s incr0, acc, acc;	;		rfct;				| 
+
+	;			;		jmap zbquit_pp;			| 
+dcnerr0:addw,s d, addrlo, addrlo;IncXY->am;	;				| Increment x and y. (SWidth + 1).
+	movw addrlo, y;		am->vloareg;	cjp, ~cry dcncry0;	scrmp 0	| No need to rewrite vhiareg if no change.
+	incw addrhi, addrhi;	am->vhiareg;	;				| addrhi += carry.
+dcncry0: addw d,clo,clo;	scrmem->am;	;			scrmp+	| 
+	addcw d,chi,chi;	scrmem->am;	;				| 
+	addw,s incr1, acc, acc;	;		rfct;				| 
+	;			;		jmap zbquit_pp;			| 
+
+
+dcoct1:	testw (acc);		=dcnerr1->brreg;push, go;			| Set cond. code, ld cntr, push loop.
+|   Main vector drawing loop.  Octant 1.
+dcloop1: movw chi,y;		am->vwdreg;	cjp, ~neg.3 dcloop1;	vmewr	| if err < 0 goto dcnerr1.
+	addw,s d, addrlo, addrlo;SWidth->am;	;				| Increment y.
+	movw addrlo, y;		am->vloareg;	cjp, ~cry dcncry1a;	scrmp 0	| 
+	incw addrhi, addrhi;	am->vhiareg;	;				| 
+dcncry1a: addw d,clo,clo;	scrmem->am;	;			scrmp+	| 
+	addcw d,chi,chi;	scrmem->am;	;				| 
+	addw,s incr0, acc, acc;	;		rfct;				| 
+	;			;		jmap zbquit_pp;			| 
+
+dcnerr1:addw,s d, addrlo, addrlo;IncXY->am;	;				| Increment x and y. (SWidth + 1).
+	movw addrlo, y;		am->vloareg;	cjp, ~cry dcncry1;	scrmp 0	| No need to rewrite vhiareg if no change.
+	incw addrhi, addrhi;	am->vhiareg;	;				| addrhi += carry.
+dcncry1: addw d,clo,clo;	scrmem->am;	;			scrmp+	| 
+	addcw d,chi,chi;	scrmem->am;	;				| 
+	addw,s incr1, acc, acc;	;		rfct;				| 
+	;			;		jmap zbquit_pp;			| 
+
+
+dcoct7:	testw (acc);		=dcnerr7->brreg;push, go;			| Set cond. code, ld cntr, push loop.
+|   Main vector drawing loop.  Octant 7.
+dcloop7: movw chi,y;		am->vwdreg;	cjp, ~neg.3 dcloop7;	vmewr	| if err < 0 goto dcnerr7.
+	incw,s addrlo,addrlo;	;		;				| increment x.
+	movw addrlo, y;		am->vloareg;	cjp, ~cry dcncry7a;	scrmp 0	| 
+	incw addrhi, addrhi;	am->vhiareg;	;				| 
+dcncry7a: addw d,clo,clo;	scrmem->am;	;			scrmp+	| 
+	addcw d,chi,chi;	scrmem->am;	;				| 
+	addw,s incr0, acc, acc;	;		rfct;				| 
+	;			;		jmap zbquit_pp;			| 
+
+dcnerr7:addw,s d, addrlo, addrlo;IncXDecY->am;	;				| Increment x, decrement y. (-SWidth + 1).
+	movw addrlo, y;		am->vloareg;	cjp, cry dcncry7;		scrmp 0	| No need to rewrite vhiareg if no change.
+	decw addrhi, addrhi;	am->vhiareg;	;				| addrhi -= borrow
+dcncry7: addw d,clo,clo;	scrmem->am;	;			scrmp+	| 
+	addcw d,chi,chi;	scrmem->am;	;				| 
+	addw,s incr1, acc, acc;	;		rfct;				| 
+	;			;		jmap zbquit_pp;			| 
+
+
+dcoct6:	testw (acc);		=dcnerr6->brreg;push, go;			| Set cond. code, ld cntr, push loop.
+|   Main vector drawing loop.  Octant 6.
+dcloop6: movw chi,y;		am->vwdreg;	cjp, ~neg.3 dcloop6;	vmewr	| if err < 0 goto dcnerr6.
+	subw,s d, addrlo, addrlo;SWidth->am;	;				| Decrement y.
+	movw addrlo, y;		am->vloareg;	cjp, cry dcncry6a;	scrmp 0	| Not rewrite vhiareg if no change. cry==no borrow
+	decw addrhi, addrhi;	am->vhiareg;	;				| addrhi -= borrow.
+dcncry6a: addw d,clo,clo;	scrmem->am;	;			scrmp+	| 
+	addcw d,chi,chi;	scrmem->am;	;				| 
+	addw,s incr0, acc, acc;	;		rfct;				| 
+	;			;		jmap zbquit_pp;			| 
+
+dcnerr6:addw,s d, addrlo, addrlo;IncXDecY->am;	;				| Increment x, decrement y. (-SWidth + 1).
+	movw addrlo, y;		am->vloareg;	cjp, cry dcncry6;		scrmp 0	| No need to rewrite vhiareg if no change.
+	decw addrhi, addrhi;	am->vhiareg;	;				| addrhi -= borrow
+dcncry6: addw d,clo,clo;	scrmem->am;	;			scrmp+	| 
+	addcw d,chi,chi;	scrmem->am;	;				| 
+	addw,s incr1, acc, acc;	;		rfct;				| 
+	;			;		jmap zbquit_pp;			| 
+
+
+
+#undef err
+#undef addrlo
+#undef addrhi
+#undef incr0
+#undef incr1
+#undef chi
+#undef clo

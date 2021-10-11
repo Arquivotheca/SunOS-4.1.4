@@ -1,0 +1,259 @@
+| @(#)depthcue.vp.u 1.1 94/10/31 SMI
+| Copyright (c) 1988 by Sun Microsystems, Inc.
+
+| Written by Stuart Levy
+
+
+|   This routine computes various parameters necessary for depth cueing.
+|   For simplicity's sake, if either depth cueing or z-buffering is enabled,
+|   we compute the parameters necessary for both.  As it turns out, many of
+|   the necessary variables for depth cueing only are computed in the zbuffer
+|   code (z1, z2, and 1/dmaj).
+
+|   Floating point storage from the zbuffer routine:
+|   		1/dmaj				fpr[2]
+|   		screen coord z1 (float)		fpr[84]
+|		screen coord z2 (float)		fpr[85]
+
+|   Variables that need to be computed for each vector:		DEPTH_CUE routine
+|   		dc/dmaj 					* send to PP
+|		color1 = z1 * (front_color * dc/dzbuf)		* send to PP
+|		color2 = z2 * (front_color * dc/dzbuf)		* send to PP ?????
+
+|   Variables that can be computed once for a set of vectors:	DC_INIT	routine
+|   		dc = color_back - color_front			
+|   		dc/dzbuf = dc/64k
+|   		front_color * dc/dzbuf				* needed for each vector
+
+
+#define fhi		r[2]
+#define colorhi		r[1]
+#define colorlo		r[0]
+#define flo		acc
+
+#define SIXFOURK	0x0800		/* 2 Y**16, in floating point */
+
+#define ZSCL		36		/* from zbline.vp.u */
+
+#define FCOLOR		38		/* store front and back colors at fpr[4,5] respectively */
+#define BCOLOR		39
+#define COLOR1		40
+#define COLOR2		41
+#define DMAJREC		42		/* from zbline.vp.u */
+#define ZSCLREC		43
+#define Z1SCL		44		/* these are used by depthcue.vp.u for color calculations */ 
+#define Z2SCL		45
+#define COLORADV	46
+#define DCDMAJ		47		/* could be the same as DMAJREC */
+
+#define Z1		84		/* from zbline.vp.u */
+#define Z2		85
+
+#define MUL128		0x380
+#define MUL32K		0x780
+
+
+|   Dcinit computes dc, dc/dzbuf, and the constant (front_color * dc/dzbuf).  It is called from xfline_init.
+|   	dc - first convert the colors from 8.16 unsigned to 7.16 signed by shifting down 1 bit.
+|	     Then convert this to float, and compute (back - front).
+|       dc/dzbuf - this is based on the scaling parameter in z and t
+
+dcinit:	addw frameptr,DEPTHCOLORS_FRMOFF,y; FCOLOR->fpdp; ;	;			| fetch front and back colors
+	IMM;			am->shmemp;	ldct 1;		;			| loop twice
+dcshift: movw d,acc;		shmem->am;	;		;		shp+	| shift color down 1 bit (only use 7.16 precision)
+	sr0w acc,acc;		shmem->am;	;		;		shp+	| 
+	srqw d,y;		am->fpregl;	;		;			| 
+	movw acc,y;		am->fpregh;	rpct dcshift;	;		dp+	| 
+|   Take the reciprocal of the scale factor.  We will use this, combined with the scaled (but not offset)
+|   z values to compute the color values.
+	movw ZSCLREC,recaddr;	ZSCL->fpap;	;		;			| fpap holds number to be reciprocated
+	IMM;			;		cjs,go strecip;	;			| recaddr hold fpreg where result stored
+|   Now we compute color1, color2, and dc/dmaj (actual).	
+	movw BCOLOR,y;		;		;		;			| 
+	IMM;			am->fpap;	;		lmode rn,ai,pipe,fast;	| fpap <- fcolor
+	movw FCOLOR,y;		;		;		floata,la,hi;		| convert bcolor to float
+	IMM;			am->fpap;	;		;			| 
+	mov2nw 0,y;		am->brreg;	;		floata,la,hi;		| convert fcolor to float
+	;			;		push,go;	;			| 
+	;			;		;		pa,hi;			| loop twice
+	;			;		rfct;		;			| 
+	movw BCOLOR,y;		;		;		pa,a,hi;		| 
+	IMM;			am->fpdp;	;		;			| fpdp <- fcolor
+	movw BCOLOR,y;		;		;		pa,a,st,hi;		| store bcolor as float
+	IMM;			am->fpbp;	;		;			| fpbp <- fcolor
+	mov2nw 1,y;		am->brreg;	;		rsubr,lab,hi;		| compute dcolor = (bcolor - fcolor)
+	;			;		push,go;	;			| 
+	movw ZSCLREC,y;		;		;		pa,hi;			| will loop three times
+	IMM;			am->fpbp;	rfct;		;			| fpbp <- 1/dzbuf
+	;			;		;		pa,a,hi;		| 
+	;			;		;		;			| 
+	mov2nw 1,y;		am->brreg;	;		mabr,lab,hi;		| compute (dcolor * 1/dzbuf))
+	;			;		push,go;	;			| 
+	movw =dcinit_ret,y;	;		;		pa,hi;			| loop 3 times
+	IMM;			am->brreg;	rfct;		;			| 
+	movw COLORADV,y;	;		;		pa,m,hi;		| 
+	IMM;			am->fpdp;	;		;			| fpdp <- coloradv
+	movw COLORADV,y;	;		;		noflop,st,hi;		| 
+	IMM;			am->fpap;	jmap;		;			| store (dcolor * 1/dzbuf) 
+	
+
+|   Here we know that we are depth cueing, but not z-buffering.  Therefore, we compute the z parameters
+|   necessary for depth cueing, but nothing else.  We need to calculate scaled values of Z1 & Z2, as 
+|   1/dmaj has already been calculated.
+
+|   First, fake the z parameters for now, since the pp is expecting them.  There are 6 of them.
+dczboff: ;			;		ldct 5;		;			| 
+	movw 0,y;		am->fifo1;	cjp,f1f .;	;			| z0,z1,dz (high & low values)
+	;			;		rpct .-1;	;			| 
+	movw ZSCL,y;		Z1->fpap;	;		;			| 
+	IMM;			am->fpbp;	;		lmode rn,ai,pipe,fast;	| fpbp <- zscale (fpap has z1 (ndc coords))
+	;			;		;		maba,lab,hi;		| (z1 * vwpzscale)
+	;			;		;		;		ap+	| 
+	mov2nw 0,y;		am->brreg;	;		maba,lab,hi;		| (z2 * vwpzscale)
+	;			;		push,go;	;			| 
+	movw Z1SCL,y;		;		;		pa,hi;			| loop twice
+	IMM;			am->fpdp;	rfct;		;			| want to store scaled only version of z values
+	;			;		;		pa,m,hi;		| 
+	;			;		;		;			| fpbp <- vwpzoffset
+	;			;		;		pa,m,st,hi;		| store scaled z1
+	;			;		;		;		dp+	| 
+	;			;		;		noflop,st,hi;		| store scaled z2
+	;			;		;		;			| 
+
+
+|   Depthcue computes the depth cue parameters for each vector.  It is called from zbline.vp.u.
+|		dc/dmaj - dc computed by dcinit, 1/dmaj done by zbline.		
+|		color1 = ((z1 * dc/dzbuf) + front_color), where the z values are computed by zbline,
+|			 and the second term is computed by dcinit.
+|		color2 - same as color1
+depthcue:
+|   First we shift the Z values down 8 bits (divide by 128), so that our calculations remain in range.
+	;			Z1SCL->fpdp;	;		;			| 
+	movw MUL128,acc;	Z1SCL->fpap;	;		;			| 
+	IMM;			fpregh->am;	;		;			| 
+	rsubw d,acc,y;		am->fpregh;	;		;		adp+	| 
+	;			fpregh->am;	;		;			| 
+	rsubw d,acc,y;		am->fpregh;	;		;			| 
+	
+	movw Z1SCL,y;		COLORADV->fpbp;	;		;			| fpbp <- (dc/dzbuf)
+	IMM;			am->fpap;	;		lmode rn,ai,pipe,fast;	| fpap <- z1
+	;			;		;		maba,lab,hi;		| color1 = z1 * (dc/dzbuf)
+	;			;		;		;		ap+	| fpap <- z2
+	mov2nw 0,y;		am->brreg;	;		maba,lab,hi;		| color2 = z2 * (dc/dzbuf)
+	;			;		push,go;	;			| 
+	movw COLOR1,y;		;		;		pa,hi;			| loop twice
+	IMM;			am->fpap;	rfct;		;			| fpap <- color1
+	movw COLOR1,y;		;		;		pa,m,hi;		| 
+	IMM;			am->fpdp;	;		;			| fpdp <- color1
+	movw COLOR1,y;		;		;		fixr,la,m,st,hi;	| fix and store color1
+	IMM;			am->fpbp;	;		;		dp+	| fpbp <- color1
+	movw COLOR2,y;		;		;		subr,lab,st,hi;		| compute (color2 - color1), store color2
+	IMM;			am->fpap;	;		;			| fpap <- color2
+	;			;		;		fixa,la,hi;		| fix color2
+	;			;		;		;			| 
+	;			;		;		pa,hi;			| 
+	;			;		;		;			| 
+	movw COLOR1,y;		;		;		pa,a,hi;		| 
+	IMM;			am->fpdp;	;		;			| fpdp <- color1
+	movw DMAJREC,y;		;		;		pa,a,st,hi;		| store fixed color1
+	IMM;			am->fpbp;	;		;		dp+	| fpbp <- 1/dmaj, fpdp <- color2
+	;			;		;		mabr,lab,a,hi;		| compute dc/dmaj, where dc = color2 - color1 (actual)
+	;			;		;		;			| 
+	mov2nw 0,y;		am->brreg;	;		pa,st,hi;		| store fixed color2
+	;			;		push,go;	;			| 
+	;			;		;		pa,hi;			| loop twice
+	;			;		rfct;		;			| 
+	;			;		;		pa,m,hi;		| 
+	;			;		;		;			| fpdp <- dc/dmaj
+	mov2nw 1,y;		am->brreg;	;		fixr,la,hi;		| fix dc/dmaj
+	;			;		push,go;	;			| 
+	;			;		;		pa,hi;			| loop 3 times
+	;			;		rfct;		;			| 
+	movw DCDMAJ,y;		;		;		pa,a,hi;		| 
+	IMM;			am->fpdp;	;		;			| fpdp <- dc/dmaj
+	movw DXHOLD,y;		;		;		noflop,st,hi;		| store fixed dc/dmaj
+	IMM;			am->fpap;	;		;			| fpap <- color1
+|  Send color1 or color2 to pp, depending on sign of dx. Also send dc/dmaj to pp. 
+|  We now add the front color into the resultant color.
+	testw (d);		fpregh->am;	;		;			| do this for color1 & color2
+	;			;		cjp,neg dccol2;	;			| jump if dx negative
+dccol1:	;			COLOR1->fpap;	;		;			| will send color1 to fifo
+	sl0w d,colorlo;		fpregl->am;	;		;			| shift color back up
+	slqw d,colorhi;		fpregh->am;	cjp,go dcaddcol; ;			| 
+dccol2:	;			COLOR2->fpap;	;		;			| will send color2 to fifo
+	sl0w d,colorlo;		fpregl->am;	;		;			| shift color back up
+	slqw d,colorhi;		fpregh->am;	;		;			| 
+
+dcaddcol: ;			FCOLOR->fpap;	;		;			| 
+	sl0w d,flo;		fpregl->am;	;		;			| shift color back up
+	slqw d,fhi;		fpregh->am;	;		;			| 
+	addw,s colorlo,flo,colorlo; DCDMAJ->fpap; ;		;			| c1 = fcolor + (z1 * (dcolor/dzbuf))
+	movw fhi,y;		am->am;		;		;			| 
+	addw d,colorhi,colorhi;	;		cjp,~cry .+2;	;			| 
+	incw colorhi,colorhi;	;		;		;			| 
+	movw colorhi,y;		am->fifo1;	cjp,f1f .;	;			| colorhi->fifo1
+	movw colorlo,y;		am->fifo1;	cjp,f1f .;	;			| colorlo->fifo1
+
+	sl0w d,colorlo;		fpregl->am;	;		;			| shift color back up
+	slqw d,colorhi;		fpregh->am;	;		;			| 
+	movw colorhi,y;		am->fifo1;	cjp,f1f .;	;			| dc/dmaj hi->fifo1
+	movw colorlo,y;		am->fifo1;	cjp,f1f .;	;			| dc/dmaj lo->fifo1
+	;			;		jmap zbdcret;	;			| 
+
+
+#define color	r[12]	
+
+|   dcue_mark is called from the marker routines, which just need a color calculated once for a marker.
+|   Markers are, by definition, planar, so we don't need many of the calculations performed above.
+dcue_mark:
+|   Compute the depth cued color.	
+	movw Z1SCL,y;		COLORADV->fpbp;	;		;			| fpbp <- (dc/dzbuf)
+	IMM;			am->fpap;	;		lmode rn,ai,pipe,fast;	| fpap <- z1
+	mov2nw 1,y;		am->brreg;	;		maba,lab,hi;		| color = z1 * (dc/dzbuf)
+	;			;		push,go;	;			| 
+	movw COLOR1,y;		;		;		pa,hi;			| loop three times
+	IMM;			am->fpap;	rfct;		;			| fpap <- color
+	movw COLOR1,y;		;		;		pa,m,hi;		| 
+	IMM;			am->fpdp;	;		;			| fpdp <- color
+	mov2nw 1,y;		am->brreg;	;		fixr,la,hi;		| fix color1
+	;			;		push,go;	;			| 
+	;			;		;		pa,hi;			| loop three times
+	;			;		rfct;		;			| 
+	;			;		;		pa,a,hi;		| 
+	;			;		;		;			| 
+	;			;		;		noflop,st,hi;		| store fixed color
+	;			;		;		;			| 
+|   Now we shift the color back up, and add in the front color.
+	sl0w d,y;		fpregl->am;	;		;			| shift color back up, don't need fractional part
+	slqw d,color;		fpregh->am;	;		;			| 
+	;			FCOLOR->fpap;	;		;			| 
+	sl0w d,y;		fpregl->am;	;		;			| shift front color back up
+	slqw d,acc;		fpregh->am;	;		;			| 
+	addw,s color,acc,color;	;		jmap mldc_ret;	;			| c1 = fcolor + (z1 * (dcolor/dzbuf))
+
+
+#undef color
+
+#undef colorhi
+#undef colorlo
+#undef fhi
+#undef flo
+
+#undef DMAJREC		
+#undef FCOLOR		
+#undef BCOLOR		
+#undef DCOLOR		
+#undef COLORADV	
+#undef COLOR1	
+#undef COLOR2	
+#undef DCDMAJ	
+#undef DZBUF	
+#undef Z1SCL
+#undef Z2SCL
+#undef ZSCL
+
+#undef Z1
+#undef Z2
+
+#undef MUL128
+#undef MUL32K

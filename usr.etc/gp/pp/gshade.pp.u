@@ -1,0 +1,86 @@
+| "@(#)gshade.pp.u 1.1 94/10/31 SMI"
+
+| Copyright 1985 by Sun Microsystems, Inc.
+
+|   Gouraud shading.
+#define yy	r[3]	/* y of scan-line */
+#define x0	r[4]	/* starting x point, positive x incr. */
+#define numx	r[5]	/* number of points in line. */
+#define zlo	r[6]	/* starting z value. lo set to zero. */
+#define zhi	r[7]
+#define dzlo	r[8]	/* z increment. */
+#define dzhi	r[9]
+#define clo	r[10]	/* starting color.  lo set to zero. */
+#define chi	r[11]
+#define dclo	r[12]	/* color increment. */
+#define dchi	r[13]
+#define glo	r[14]
+#define ghi	r[15]
+debug concise
+|   Shading routine.  Assume color board has been initialized by gsinit.
+|   Also handles non-shaded segments.
+gshade:	movw d, yy;		fifo1->am;	cjp, f1e gshade;		| 
+gsx0:	movw d, x0;		fifo1->am;	cjp, f1e gsx0;			| 
+gsnumx:	movw d, numx;		fifo1->am;	cjp, f1e gsnumx;		| 
+gschi:	movw d, chi;		fifo1->am;	cjp, f1e gschi;			| 
+	movw 0, clo;		;		;				| 
+gsdchi:	movw d, dchi;		fifo1->am;	cjp, f1e gsdchi;		| 
+gsdclo:	movw d, dclo;		fifo1->am;	cjp, f1e gsdclo;	scrmp 0	| 
+gszhi:	movw d, zhi;		fifo1->am;	cjp, f1e gszhi;			| 
+	movw 0, zlo;		;		;				| 
+gsdzhi:	movw d, dzhi;		fifo1->am;	cjp, f1e gsdzhi;		| 
+gsdzlo:	movw d, dzlo;		fifo1->am;	cjp, f1e gsdzlo;		| 
+	movw dzlo, y;		am->scrmem;	;			scrmp +	| store dzlo in scratch memory location 2.
+	movw dzhi, y;		am->scrmem;	;			scrmp +	| store dzhi in scratch memory location 3.
+	movw dclo, y;		am->scrmem;	;			scrmp +	| store dclo in scratch memory location 0.
+	movw dchi, y;		am->scrmem;	;				| store dchi in scratch memory location 1.
+	;			=gsrmw->brreg;	;				| 
+gsrmw:	;			0xa000->gbhiptr;	cjp, ~gbr;		| Set read-modify-write mode.
+	movw yy, r[2];		;		cjs, go MulSWid;		| Calculate address.
+	movw x0, acc;		;		;				| 
+	addw r[0], acc, glo;	am->vloareg;	;				| 
+	addcw d, r[1], acc;	0x10->am;	;				| Pixel mode memory.
+	addw board, acc, y;	am->vhiareg;	;				| 
+	subw d, acc, ghi;	0x10->am;	;				| 
+gsghi:	movw ghi, y;		am->gbhiptr;	cjp, ~gbr gsghi;		| Not altering read-modify-write mode.
+gsglo:	movw glo, y;		am->gbloptr;	cjp, ~gbr gsglo;	gbrd	| At least 8 cycles after setting rmw.
+	sub2nw 0, numx;		=gsloop->brreg;	;				| 
+gsjunk:	movw,s numx, acc;	;		cjp, ~vir gsjunk;		| 
+	testw (dchi);		VByte->vctlreg;	;				| 
+	testw (dclo);		;		cjp, ~zer gsztst;		| Shaded segment.
+	;			;		cjp, ~zer gsztst;		| Shaded segment.
+	;			=segloop->brreg; ;				| 
+	;			;		cjp, zer segztst;		| Non-shaded segment.
+
+gsloop:	addw d, zlo, zlo;	;		;				| increment z.
+gsloop1: addcw d, zhi, zhi;	scrmem->am;	cjp, neg gsquit;	scrmp +	| 
+	addw d, clo, clo;	scrmem->am;	;			scrmp +	| increment color.
+	addcw d, chi, chi;	scrmem->am;	;			varegs+	| 
+gsztst:	subw,s d, zhi, y;	gbrdreg->am;	cjp, ~gbr gsztst;	scrmp 0	| compare z with z-buffer value.
+	decws acc;		scrmem->am;	cjp, cry gsabrmw;	scrmp +	| dec loop counter.
+gsnewz:	movw zhi, y;		am->gbwdreg;	cjp, ~gbr gsnewz;		| write new z.
+gsvme:	movw chi, y;		am->vwdreg;	cjp, ~neg.3 gsvme;	vmewr	| write color
+	;			;		cjp, go gsquit;			| 
+gsabrmw: addw d, zlo, zlo;	;		cjp, go gsloop1;	gbrd	| abort read-mod-write wr phase.  do 1st loop instr.
+
+
+segloop: addw d, zlo, zlo;	;		;				| increment z.
+segloop1: addcw d, zhi, zhi;	scrmem->am;	cjp, neg gsquit;	varegs+	| 
+segztst: subw,s d, zhi, y;	gbrdreg->am;	cjp, ~gbr segztst;	scrmp 0	| compare z with z-buffer value.
+	decws acc;		scrmem->am;	cjp, cry segabrmw;	scrmp +	| dec loop counter.
+segnewz: movw zhi, y;		am->gbwdreg;	cjp, ~gbr segnewz;		| write new z.
+segvme:	movw chi, y;		am->vwdreg;	cjp, ~neg.3 segvme;	vmewr	| write color
+	;			;		cjp, go gsquit;			| 
+segabrmw: addw d, zlo, zlo;	;		cjp, go segloop1;	gbrd	| abort read-mod-write wr phase.  do 1st loop instr.
+
+
+gsquit:	;			=gsquit1->brreg; ;				| End read-mod-write so g-buffer released.
+gsquit1: ;			0x6000->gbhiptr; cjp, ~gbr;			| 
+	;			;		cjp, go start;			| 
+
+|   Init color frame buffer for gouraud shading.
+gsinit:	movw d, board;		fifo1->am;	cjp, f1e gsinit;		| 
+	;			;		cjs, go ropreg;			| 
+gsinit1: ;			;		cjp, ~vir gsinit1;		| 
+	;			VByte->vctlreg;	;				| 
+	;			;		cjp, go start;			| 

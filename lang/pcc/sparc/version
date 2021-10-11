@@ -1,0 +1,91 @@
+#!/bin/csh
+# @(#)version	1.1 (Sun) 10/31/94
+# Usage:
+#	version diffs
+# produces a list of diffs since 10/31/94
+#	version get
+# retrieves the versions of the files in this
+# directory as of 10/31/94
+#
+if ($#argv != 1) then
+    echo usage: version "{diffs|get}"
+    exit(1)
+else
+    set cmd = $argv[1]
+    if ($cmd != "diffs" && $cmd != "get") then
+	echo usage: version "{diffs|get}"
+	exit(1)
+    endif
+endif
+set list = ( \
+    2.9 ../mip/xdefs.c \
+    2.23 ../mip/scan.c \
+    2.29 ../mip/pftn.c \
+    2.31 ../mip/trees.c \
+    2.12 ../mip/optim.c \
+    2.22 ../mip/reader.c \
+    2.13 ../mip/match.c \
+    1.5 ../mip/yyerror.c \
+    1.1 ../mip/symtab.c \
+    1.17 code.c \
+    1.8 local.c \
+    1.4 regvars.c \
+    1.8 local2.c \
+    1.4 order.c \
+    1.1 opmatch.c \
+    1.2 allo1.c \
+    1.9 allo2.c \
+    1.1 bound.c \
+    1.17 table.c \
+    1.3 float2.c \
+    1.3 myflags2.c \
+    1.3 stab.c \
+    1.6 optim2.c \
+    1.19 util2.c \
+    1.5 su.c \
+    1.14 gencall.c \
+    1.8 struct.c \
+    1.1 ../mip/ir_wf.c \
+    1.1 ../mip/ir_alloc.c \
+    1.1 ../mip/ir_misc.c \
+    1.1 ../mip/ir_debug.c \
+    1.1 ../mip/ir_map.c \
+    1.1 ../mip/ir_map_expr.c \
+    2.16 ../mip/cgram.y \
+    1.17 ../mip/common.c \
+    2.15 ../mip/fort.c \
+    2.15 ../mip/mip.h \
+    2.15 ../mip/cpass1.h \
+    2.12 ../mip/cpass2.h \
+    1.1 ../mip/pcc_types.h \
+    1.1 ../mip/pcc_ops.h \
+    1.1 ../mip/pcc_node.h \
+    1.1 ../mip/pcc_symtab.h \
+    1.1 ../mip/pcc_sw.h \
+    1.1 ../mip/pcc_f1defs.h \
+    1.9 machdep2.h \
+    1.7 machdep.h \
+./types.h \
+./ops.h \
+./node.h \
+./symtab.h \
+./sw.h \
+./f1defs.h \
+    1.1 ../mip/ir_misc.h \
+    1.1 ../mip/ir_c.h \
+    1.1 ../mip/ir_types.h \
+    1.19 ../../iropt/src/ir_common.h \
+    1.8 ../../iropt/src/opdescr.h \
+    1.9 Makefile \
+    0 )
+while ( $list[1] != 0 )
+    set vers = $list[1]
+    shift list
+    set file = $list[1]
+    shift list
+    if ($cmd == "get") then
+	sccs get -r$vers -G$file $file
+    else
+	sccs diffs -r$vers $file
+    endif
+end

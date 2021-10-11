@@ -1,0 +1,23 @@
+#
+# @(#)MakeCommon 1.1 94/10/31 SMI
+#
+
+DESTDIR=
+
+all: FRC
+	cd ${CPU}; make ${MFLAGS} CC="${CC}" AS="${AS}" YACC="${YACC}"
+
+
+xsparc: FRC
+	cd sparc; make ${MFLAGS} CC="${CC}" AS="${AS}" YACC="${YACC}"
+
+xall: FRC
+	cd sparc; make ${MFLAGS} CC="${CC}" AS="${AS}" YACC="${YACC}"
+
+install: FRC
+	cd ${CPU}; make ${MFLAGS} DESTDIR=${DESTDIR} install
+
+clean:
+	cd sparc; make ${MFLAGS} clean
+
+FRC:

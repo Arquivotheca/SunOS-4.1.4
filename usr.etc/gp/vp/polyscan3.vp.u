@@ -1,0 +1,692 @@
+| "@(#)polyscan3.vp.u 1.1 94/10/31 SMI"
+| Copyright (c) 1985 by Sun Microsystems, Inc.
+
+|   3D Polygon scan conversion.  See also polyscan.vp.u
+
+|   Polygon scan conversion.  Polygon may have multiple holes.
+|   Based on pr_polygon2.c which is derived from Foley and Van Dam pg. 459.
+|   Pixel vertices are offset by (-.5, 0)
+
+|   Input:
+|   	r[15]	colorop	PIX_OP | PIX_COLOR (color)
+|   	r[14]	pet	pointer to edge table in FP register memory.  First edge is a dummy.  Will be around 0x80.
+
+|   typedef struct EdgeZC {	(Edge for polyhedral shading)
+|	int ymn, ymx;	(16 bit integers, value in the hi 16 bits)
+|	float dx, dz, dc;	(These start off life as max values.  z is 0 to 2**16 - 1, c is -2**23 to 2**23 - 1.)
+|   		(color was 24 bits (0 to 2**24 - 1) but xfpolygon3.vp.u subtracted 2**23 from it).
+|	float xmn, zmn, cmn;	
+|	Edge *nxt;	(int in low 16 bits.)
+|   } EdgeZC;
+
+#define NxtOff	8	/* offset in data structure to *nxt. */
+#ifndef Half
+#define Half	95	/* Address of 0.5, COORDINATE WITH XFPOINT ROUTINE */
+#endif
+#define ShZRange	0x11	/* Address of -32768.0 to shift z range. */
+#define MulZ8bits	0x12	/* Address of 256.0 to shift z up 8 bits. */
+
+#define paet	r[17]
+#define nxt	r[18]
+#define p2	r[19]
+#define p1	r[20]
+#define sx	r[21]	/* similar to polyscan.vp.u. Impacted by pixrect.vp.u and attr.vp.u. */
+#define sy	r[22]
+#define dz	r[23]
+#define dzlo	r[24]
+#define dc	r[25]
+#define dclo	r[26]
+#define temp1	r[27]
+#define junk1	r[27]
+
+#define shadestyle	r[16]
+/*
+Bit 0	Shaded
+Bit 8	3D
+Bit 9	1-bit texture
+Bit 10	8-bit texture
+
+  0	2D Solid
+  1	2D Shaded
+200	2D 1-bit texture
+400	2D 8-bit texture
+100	3D Solid
+101	3D Shaded
+300	3D 1-bit texture
+500	3D 8-bit texture
+
+Solid2D is handled by polyscan.vp.u.
+*/
+
+#define colorop	r[15]	/* PIX_OP | PIX_COLOR (color) */
+#define pet	r[14]
+#define cury	r[13]
+#define xmn	r[12]
+#define xmnhi	r[12]	/* same as xmnhi */
+#define dx	r[11]
+#define dxlo	r[10]
+#define xmnlo	r[10]	/* same as dxlo */
+#define ymn	r[9]
+#define ymx	r[8]
+#define deltay	r[7]
+#define emask	r[6]
+#define emaskrev r[5]
+#define exp	r[4]
+#define swap	r[3]
+
+#define temp	r[0]
+#define junk	r[0]
+#define temphi	r[0]
+#define templo	r[1]
+
+
+polyscan3: ;			;		cjs,go oldpolyscan3; ;			| 
+	movw cmdptr,y;		am->shmemp;	jmap getcmd2;	;			| 
+
+#ifdef GPPLUS
+markerpolyscan3: ;		;		cjs,go oldpolyscan3; ;			| 
+	;			;		jmap retfrompolyscan3; ;		| 
+#endif
+
+
+oldpolyscan3: ;			Half->fpdp;	;		;			| 
+	;			0x3eff->fpregh; ;		;			| 0.4999995 - will add for rounding purposes
+	;			0xfff0->fpregl;	;		;		dp+	| 
+	;			0x4380->fpregh;	;		;			| Multiply z by 256 (shift up 8 bits).
+	;			0->fpregl;	;		;			| 
+	;			PET->fpdp;	;		;			| save pointer to edge table.
+	movw pet, y;		am->fpregl;	;		;			| 
+	;			NxtOff->am;	;		;			| p1= et [0].nxt.  Skip dummy first edge
+	addw d, pet, y;		am->fpap;	;		;			| 
+	movw d, emask;		0x7f80->am;	;		;			| 
+	movw d, emaskrev;	0x807f->am;	;		;			| 
+
+|   Initialize the edge values:  For all edges ymin must be lowest.
+p3iedge: movw,s d, p1;		fpregl->am;	;		lmode rz, ai, pipe, fast;| while (p1)
+	btstw,s 8, shadestyle;	;		cjp, zer p3sort; ;			| for all edges, ymin must be < ymx.
+	;			;		cjp, zer p3noz; ;			| 
+	;			3->am;		;		;			| Shift first z up 7 bits (7 + 16 == 23).
+	addw d, p1, y;		am->fpap;	;		;			| 
+	addw d, p1, y;		am->fpdp;	;		;			| 
+	movw d, temphi;		fpregh->am;	;		;			| 
+	movw d, acc;		0x380->am;	;		;			| 
+	addw temphi, acc, y;	am->fpregh;	;		;			| 
+	;			6->am;		;		;			| Shift second z up 7 bits (7 + 16 == 23).
+	addw d, p1, y;		am->fpap;	;		;			| 
+	addw d, p1, y;		am->fpdp;	;		;			| 
+	movw d, temphi;		fpregh->am;	;		;			| 
+	addw temphi, acc, y;	am->fpregh;	;		;			| Done shifting z.
+p3noz:	movw p1, y;		am->fpap;	;		;			| 
+	movw d, ymn;		fpregh->am;	;		;		ap+	| p1->ymn
+	movw d, ymx;		fpregh->am;	;		;			| 
+	subw,s d, ymn, deltay;	fpregh->am;	;		lmode rn, ai, flow, fast;| ymn - ymx
+	;			PDeltaY->fpdp;	;		;			| 
+	movw 0, y;		am->fpregh;	cjp, ~neg p3swap; ;			| 
+	negw deltay, y;		am->fpregl;	ldct 3;		;			| 
+	;			PDeltaY->fpap;	;		;			| 
+#ifndef GPPLUS	
+	movw =recip, y;		;		;		floata, la, hi;		| 
+#else	
+	movw =strecip, y;	;		;		floata, la, hi;		| 
+#endif GPPLUS
+	IMM;			am->brreg;	push, ~go;	;			| 
+	;			;		rfct;		;			| 
+	;			;		;		noflop, a, hi;		| 
+	;			;		;		;			| 
+	;			;		;		noflop, st, hi;		| 
+	;			;		;		;			| move from one register set to another.
+	movw d, r[2];		PDeltaY1->am;	cjs, go;	;			| load dp arg (r[2]) for recip of deltay.
+	add2nw 1, p1, junk1;	am->fpap;	;		lmode rz, ai, pipe, fast;| Reset mode after return from recip
+	;			5->am;		;		;			| 
+	addw d, p1, junk1;	am->fpbp;	;		;			| 
+	;			;		;		suba, lab, hi;		| p1->xmx - p1->xmn
+	;			;		;		;		abp+	| 
+	;			;		;		suba, lab, hi;		| p1->zmx - p1->zmn
+	;			;		;		;		abp+	| 
+	;			;		;		suba, lab, hi;		| p1->cmx - p1->cmn
+	;			;		;		;			| 
+	;			;		;		pa, hi;			| 
+	;			;		;		;			| 
+	incw 0, y;		am->fpbp;	;		pa, a, hi;		| PDeltaY1->fpbp
+	;			;		;		;			| 
+	;			;		;		mabr, lab, a, hi;	| * 1 / deltay.
+	;			;		;		;			| 
+	;			;		;		mabr, lab, a, hi;	| * 1 / deltay.
+	;			;		;		;			| 
+	;			;		;		mabr, lab, hi;		| * 1 / deltay.
+	;			;		;		;			| 
+	;			;		;		pa, hi;			| 
+	;			;		;		;			| 
+	add2nw 1, p1, junk1;	am->fpdp;	;		pa, m, hi;		| 
+	;			;		;		;			| 
+	;			;		;		pa, m, st, hi;		| Store dx.
+	;			;		;		;		dp+	| 
+	;			;		;		pa, m, st, hi;		| Store dz.
+	;			;		;		;		dp+	| 
+	add2nw 1, p1, junk1;	am->fpap;	;		pa, st, hi;		| Store dc.
+	add2nw 2, p1, junk1;	am->fpbp;	;		;			| 
+	movw,s d, temp;		fpregh->am;	;		;			| if (dx < 0)
+|	add2nw 1, p1, junk1;	am->fpdp;	cjp, ~neg p3dxok; ;			| 
+	add2nw 1, p1, junk1;	am->fpdp;	cjp, go p3dxok; ;			| 
+	bclrw 15, temp, temp;	am->fpregh;	;		;			| 
+p3dxok:	mov2nw 7, temp;		;		;		lmode rz, ai, flow, fast;| Wait to use fpregh.
+	andw,s d, emask, acc;	fpregh->am;	;		;			| 
+	subw temp, acc, acc;	;		cjp, zer p3xmn;	;		bp+	| dx / 2
+	romw 0, d, acc, emaskrev; am->fpregh;	;		;			| 
+p3xmn:	;			3->brreg;	;		;		dp+	| Wait for fpreg memory cycle.
+	;			;		;		adda, lab, hi;	dp+	| pxmn += dx / 2
+	;			;		push, go;	;		dp+	| 
+	;			;		rfct;		;			| 
+	;			;		;		noflop, a, hi;		| 
+	movw =p3xmn1, y;	;		;		;			| 
+	IMM;			am->brreg;	;		noflop, st, hi;		| Store pxmn.
+	add2nw 1, p1, junk1;	am->fpdp;	cjp, zer;	;			| 
+	andw d, emask, acc;	fpregh->am;	;		;			| 
+	addw temp, acc, acc;	;		;		;			| Restore dx * 2
+	romw 0, d, acc, emaskrev; am->fpregh;	;		;			| 
+p3xmn1:	addw d, p1, junk1;	NxtOff->am;	;		;			| 
+	movw junk1, y;		am->fpap;	cjp, go p3iedge; ;			| 
+
+
+|   if (p1->ymn > p1->ymx) i.e. neg:  deltay = p1->ymx - p1->ymn
+p3swap:	movw deltay, y;		am->fpregl;	ldct 3;		;			| 
+	;			PDeltaY->fpap;	;		;			| 
+	movw p1, y;		am->fpdp;	;		;			| 
+	movw ymx, y;		am->fpregh;	;		floata, la, hi;		| Swap ymn and ymx.
+	;			;		push, ~go;	;		dp+	| 
+#ifndef GPPLUS
+	;			=recip->brreg;	rfct;		;			| 
+#else
+	;			=strecip->brreg; rfct;		;			| 
+#endif GPPLUS	
+	movw ymn, y;		am->fpregh;	;		noflop, a, hi;		| 
+	movw 0, y;		am->fpdp;	;		;			| 
+	movw 0, y;		am->fpap;	;		noflop, st, hi;		| 
+	;			;		;		;			| 
+	movw d, r[2];		PDeltaY1->am;	cjs, go;	;			| load dp arg (r[2]) for recip of deltay.
+	;			5->am;		;		;			| 
+	addw d, p1, y;		am->fpbp;	;		lmode rz, ai, pipe, fast;| 
+	add2nw 1, p1, junk1;	am->fpap;	;		;			| 
+	movw d, dx;		fpregh->am;	;		rsuba, lab, hi;		| p1->xmn - p1->dx
+	movw d, dxlo;		fpregl->am;	;		;		abp+	| Save p1->dx for implicit swap
+	movw d, dz;		fpregh->am;	;		rsuba, lab, hi;		| p1->zmn - p1->dz
+	movw d, dzlo;		fpregl->am;	;		;		abp+	| Save p1->dz for implicit swap
+	movw d, dc;		fpregh->am;	;		rsuba, lab, hi;		| p1->cmn - p1->dc
+	movw d, dclo;		fpregl->am;	;		;			| Save p1->dc for implicit swap
+	;			;		;		pa, hi;			| 
+	;			;		;		;			| 
+	incw 0, y;		am->fpbp;	;		pa, a, hi;		| PDeltaY1->fpbp
+	;			;		;		;			| 
+	;			;		;		mabr, lab, a, hi;	| * 1 / deltay.
+	;			;		;		;			| 
+	;			;		;		mabr, lab, a, hi;	| * 1 / deltay.
+	;			;		;		;			| 
+	;			;		;		mabr, lab, hi;		| * 1 / deltay.
+	;			;		;		;			| 
+	;			;		;		pa, hi;			| 
+	;			;		;		;			| 
+	;			;		;		pa, m, hi;		| 
+	add2nw 1, p1, junk1;	am->fpdp;	;		;			| 
+	;			;		;		pa, m, st, hi;		| store dx.
+	;			;		;		;		dp+	| 
+	;			;		;		pa, m, st, hi;		| store dz.
+	;			;		;		;		dp+	| 
+	add2nw 1, p1, junk1;	am->fpap;	;		pa, st, hi;		| store dc.
+	add2nw 2, p1, junk1;	am->fpbp;	;		;			| 
+	movw,s d, temp;		fpregh->am;	;		;			| 
+|	add2nw 1, p1, junk1;	am->fpdp;	cjp, ~neg p3dxok1; ;			| 
+	add2nw 1, p1, junk1;	am->fpdp;	cjp, go p3dxok1; ;			| 
+	bclrw 15, temp, temp;	am->fpregh;	;		;			| 
+p3dxok1: mov2nw 7, temp;	;		;		lmode rz, ai, flow, fast;| 
+	andw,s d, emask, acc;	fpregh->am;	;		;			| 
+	subw temp, acc, acc;	;		cjp, zer p3xmn2; ;		bp+	| dx / 2
+	romw 0, d, acc, emaskrev; am->fpregh;	;		;			| 
+p3xmn2:	addw p1, 5, y;		3->brreg;	;		;			| 
+	IMM;			am->fpdp;	;		;			| 
+	movw dx, y;		am->fpregh;	;		;			| saveddx + (dx / 2)
+	movw dxlo, y;		am->fpregl;	;		;		dp+	| 
+	movw dz, y;		am->fpregh;	;		;			| saveddx + (dx / 2)
+	movw dzlo, y;		am->fpregl;	;		;		dp+	| 
+	movw dc, y;		am->fpregh;	;		;			| saveddx + (dx / 2)
+	movw dclo, y;		am->fpregl;	;		;			| 
+	add2nw 2, p1, junk1;	am->fpdp;	;		adda, lab, hi;		| pxmn += dx / 2
+	;			;		push, go;	;		dp+	| 
+	;			3->am;		rfct;		;			| 
+	;			;		;		noflop, a, hi;		| 
+	movw =p3xmn3, y;	;		;		;			| 
+	IMM;			am->brreg;	;		noflop, st, hi;		| Store pxmn.
+	add2nw 1, p1, junk1;	am->fpdp;	cjp, zer;	;			| 
+	andw d, emask, acc;	fpregh->am;	;		;			| 
+	addw temp, acc, acc;	;		;		;			| Restore dx * 2
+	romw 0, d, acc, emaskrev; am->fpregh;	;		;			| 
+p3xmn3:	addw d, p1, junk1;	NxtOff->am;	;		;			| 
+	movw junk1, y;		am->fpap;	cjp, go p3iedge; ;			| 
+
+
+
+|   Sort edge table on ymn and on xmn secondarily.
+|   Bubble sort (?) for now.
+|   From here on acc stores NxtOff.
+p3sort:	movw 0, swap;		PET->fpap;	;		;			| Assume non-empty edge table.  do {
+	movw d, pet;		fpregl->am;	;		;			| 
+	movw d, acc;		NxtOff->am;	;		;			| 
+	addw pet, acc, y;	am->fpap;	;		;			| p1= pet->nxt
+	movw d, p1;		fpregl->am;	;		;			| 
+p3sort0: addw p1, acc, y;	am->fpap;	;		;			| while (p1->nxt) {
+	movw,s d, nxt;		fpregl->am;	;		;			| 
+	movw p1, y;		am->fpap;	cjp, zer p3dowhile; ;			| 
+	movw d, ymn;		fpregh->am;	;		;			| if (p1->ymn > p1->nxt->ymn) {
+	addw p1, acc, y;	am->fpap;	;		;			| &p1->nxt
+	movw d, paet;		fpregl->am;	;		;			| paet= p1->nxt
+	;			fpregl->fpap;	;		;			| &p1->next->ymn
+	rsubw,s d, ymn, y;	fpregh->am;	;		;			| p1->ymn > p1->nxt->ymn
+	;			5->am;		;		;			| 
+	addw d, p1, y;		am->fpap;	cjp, ~neg p3sortx; ;			| p1->xmn
+p3swaps: addw paet, acc, y;	am->fpap;	;		;			| p1->nxt= p1->nxt->nxt
+	addw p1, acc, y;	am->fpdp;	;		;			| 
+	;			fpregl->fpregl;	;		;			| 
+	addw pet, acc, y;	am->fpap;	;		;			| paet->nxt= pet->nxt
+	addw paet, acc, y;	am->fpdp;	;		;			| 
+	incw 0, swap;		fpregl->fpregl;	;		;			| swap= 1
+	addw pet, acc, y;	am->fpdp;	;		;			| pet->nxt= paet
+	movw paet, y;		am->fpregl;	cjp, go p3sort1; ;			| 
+p3sortx: movw d, xmnhi;		fpregh->am;	cjp, ~zer p3sort1; ;			| p1->xmn
+	movw d, xmnlo;		fpregl->am;	;		;			| 
+	;			5->am;		;		;			| 
+	addw d, paet, y;	am->fpap;	;		;			| p1->nxt->xmn
+	xorw,s d, xmnhi, y;	fpregh->am;	;		;			| if (p1->xmn > p1->nxt->xmn) {
+	movw,s d, y;		fpregh->am;	cjp, ~neg p3same2; ;			| Start by comparing signs.
+	;			;		cjp, neg p3swaps; ;			| If different then sign of b is (a>b)
+	;			;		cjp, ~neg p3sort1; ;			| 
+p3same2: subw d, xmnlo, y;	fpregl->am;	cjp, ~neg p3samepos2; ;			| 
+	subcw,s d, xmnhi, y;	fpregh->am;	;		;			| 
+	;			;		cjp, zer p3sort1; ;			| 
+	;			;		cjp, ~cry p3swaps; ;			| 
+	;			;		cjp, cry p3sort1; ;			| 
+p3samepos2: subcw,s d, xmnhi, y; fpregh->am;	;		;			| 
+	;			;		cjp, zer p3sort1; ;			| 
+	;			;		cjp, cry p3swaps; ;			| 
+
+p3sort1: addw pet, acc, y;	am->fpap;	;		;			| pet= pet->nxt
+	movw d, pet;		fpregl->am;	;		;			| 
+	addw pet, acc, y;	am->fpap;	;		;			| p1= pet->nxt
+	movw,s d, p1;		fpregl->am;	cjp, go p3sort0; ;			| 
+
+p3dowhile: movw,s swap, y;	;		;		;			| } while (swap)
+	;			;		cjp, ~zer p3sort; ;			| 
+
+
+
+|   Ready to draw segments.
+	movw,s shadestyle, y;	;		;		;			| 
+	;			;		cjp, zer p3rdydraw; ;			| 
+
+p3inipp: ;			19->am;		;		;			| 
+	movw d, y;		am->fifo1;	cjp, f1f .;	;			| Send plhinit command (#19) to pp.
+	sr0w colorop, temp;	;		;		;			| 
+	andw d, temp, temp;	0xf->am;	;		;			| 
+| PIXOP_NEEDS_DST (op << 1)= (op^(op << 1)) & 0xa
+	movw temp, acc;		;		;		;			| 
+	sl0w acc, acc;		;		;		;			| 
+	xorw temp, acc, acc;	;		;		;			| 
+	andw,s d, acc, acc;	0xa->am;	;		;			| 
+	;			;		cjp, zer p3nodst; ;			| 
+	;			3->am;		;		;			| SWWPIX
+	;			;		cjp, go p3ropreg; ;			| 
+p3nodst: ;			1->am;		;		;			| SRWPIX
+p3ropreg: movw d, y;		am->fifo1;	cjp, f1f .;	;			| RopMode
+	movw temp, y;		am->fifo1;	cjp, f1f .;	;			| Op
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| Patt
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| Mask2
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| Mask1
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| Width
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| OpCnt
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| Shift
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| PrimeSrc2
+	movw d, acc;		NxtOff->am;	;		;			| 
+
+p3rdydraw: ;			PET->fpap;	;		;			| pet= et[0].nxt
+	;			fpregl->am;	;		;			| 
+	addw d, acc, y;		am->fpap;	;		;			| 
+	movw d, pet;		fpregl->am;	;		;			| 
+	movw d, paet;		AET->am;	;		;			| paet= aet
+	movw pet, y;		am->fpap;	;		;			| cury= pet->ymn + 0x8000
+	movw d, cury;		fpregh->am;	;		;			| 
+	addw paet, acc, y;	am->fpdp;	;		;			| paet->nxt= 0
+	;			0->fpregl;	;		;			| 
+
+|   Repeat until aet and et are empty.
+|   Get current edges out of edge table (et) and put in active edge table.
+p3do:	movw paet, p1;		=p3paint->brreg; ;		;			| p1= paet
+p3whily: movw,s pet, y;		am->fpap;	;		;			| while (pet && (pet->ymn <= cury)) {
+	subw,s d, cury, y;	fpregh->am;	cjp, zer;	;			| (pet->ymn <= cury)
+	;			5->am;		cjp, neg;	;			| save pet->xmn
+	addw d, pet, y;		am->fpap;	;		;			| 
+	movw d, xmnhi;		fpregh->am;	;		;			| 
+	movw d, xmnlo;		fpregl->am;	;		;			| 
+p3whilx: addw p1, acc, y;	am->fpap;	;		;			| while (p1->nxt && (
+	movw,s d, nxt;		fpregl->am;	;		;			| test p1->nxt for 0
+	;			;		cjp, zer p3etaet; ;			| 
+	;			5->am;		;		;			| 
+	addw d, nxt, y;		am->fpap;	;		;			| p1->nxt->xmn
+	xorw,s d, xmnhi, y;	fpregh->am;	;		;			| while( && (p1->nxt->xmn(a) < pet->xmn(b)))
+	movw,s d, y;		fpregh->am;	cjp, ~neg p3same; ;			| Start by comparing signs.
+	;			;		cjp, ~neg p3etaet; ;			| If different then sign of a is (a<b)
+	;			;		cjp, neg p3whilx0; ;			| 
+p3same:	rsubw d, xmnlo, y;	fpregl->am;	cjp, ~neg p3samepos; ;			| Do a-b
+	rsubcw,s d, xmnhi, y;	fpregh->am;	;		;			| a and b same sign, but negative.
+	;			;		cjp, zer p3etaet; ;			| 
+	;			;		cjp, ~cry p3etaet; ;			| 
+	;			;		cjp, cry p3whilx0; ;			| 
+p3samepos: rsubcw,s d, xmnhi, y; fpregh->am;	;		;			| 
+	;			;		cjp, zer p3etaet; ;			| 
+	;			;		cjp, cry p3etaet; ;			| 
+p3whilx0: movw nxt, p1;		;		cjp, go p3whilx; ;			| { p1= p1->nxt }
+p3etaet: movw nxt, p2;		;		;		;			| p2= p1->nxt
+	addw p1, acc, y;	am->fpdp;	;		;			| p1->nxt= pet
+	movw pet, y;		am->fpregl;	;		;			| 
+	movw pet, y;		am->am;		;		;			| 
+	movw d, nxt;		;		;		;			| 
+	addw pet, acc, y;	am->fpap;	;		;			| pet= pet->nxt
+	movw d, pet;		fpregl->am;	;		;			| 
+	addw nxt, acc, y;	am->fpdp;	;		;			| p1->nxt->nxt= p2
+	movw p2, y;		am->fpregl;	cjp, go p3whily; ;			| }
+
+|   Paint the current scanline segments.  We are guaranteed that the edges come in pairs.
+|   p3paint: addw paet, acc, y;	am->fpap;	;		;			| p1= paet->nxt
+p3paint: addw paet, acc, y;	am->fpap;	;		;			| p1= paet->nxt
+	movw,s d, p1;		fpregl->am;	;		;			| 
+p3whp1:	addw p1, acc, y;	am->fpap;	cjp, zer p3remactive; ;			| while (p1) {  There are more edges
+	movw d, p2;		fpregl->am;	;		;			| 
+	btstw,s 8, shadestyle;	=p3ppnohse->brreg; ;		;			| 
+	btstw,s 0, shadestyle;	=p3ppcmd->brreg; cjp, zer;	;			| 
+	btstw,s 9, shadestyle;	PPPLHSH->am;	cjp, ~zer;	;			| 3D shaded.
+	btstw,s 10, shadestyle;	PPPLGTEX1->am;	cjp, ~zer;	;			| 3D 1-bit texture
+	;			PPPLGTEX8->am;	cjp, ~zer;	;			| 3D 8-bit texture
+	;			PPPLHSH->am;	cjp, go;	;			| 3D solid.
+p3ppnohse: btstw,s 9, shadestyle; PPPLGSH->am;	cjp, ~zer;	;			| 2D shaded
+	btstw,s 10, shadestyle;	PPPLGTEX1->am;	cjp, ~zer;	;			| 2D 1-bit texture
+	;			PPPLGTEX8->am;	cjp, ~zer;	;			| 2D 8-bit texture
+	;			PPPLGFILL->am;	;		;			| 2D solid
+|   Args to plhsh:    cury, x1, x2, op, zhi, dzhi, dzlo, chi, dchi, dclo (Solid: dchi = dclo = 0)
+|   Args to plgsh:    cury, x1, x2, op, chi, dchi, dclo
+|   Args to plgtex1:  cury, x1, x2, color, color0, op, sx, sy
+|   Args to plgtex8:  cury, x1, x2, op, sx, sy
+|   Args to plgfill:  cury, x1, x2, color, op
+p3ppcmd: movw d, y;		am->fifo1;	cjp, f1f .;	;			| Send command to fifo
+	movw cury, y;		am->fifo1;	cjp, f1f .;	;			| 
+	;			5->am;		;		;			| Offset from p1.
+	;			Half->fpbp;	;		;			| 
+|   First pixel x1= trunc (x + .4999 + dx/2)
+	addw d, p1, y;		am->fpap;	;		lmode rz, ai, pipe, fast;| x1= p1->xmn
+	;			;		;		;			| 
+	;			;		;		adda, lab, hi;		| x1 + 0.5
+	addw d, p2, y;		am->fpap;	;		;			| 
+	;			;		;		adda, lab, hi;		| x2 + 0.5
+	;			;		;		;			| 
+	;			;		;		pa, hi;			| 
+	;			;		;		;			| 
+	addw d, p1, y;		am->fpap;	;		pa, hi;			| 
+	addw d, p2, y;		am->fpbp;	;		;			| 
+	;			;		;		rsuba, lab, a, hi;	| x2 - x1
+	;			;		;		;			| 
+	;			;		;		fixr, la, a, hi;	| x1
+	;			;		;		;			| 
+	;			;		;		fixr, la, hi;		| x2
+	;			;		;		;		abp+	| 
+	;			;		;		rsuba, lab, hi;		| z2 - z1
+	;			;		;		;			| 
+	;			;		;		fixa, la, a, hi;	| z1
+	movw 0, y;		am->fpdp;	;		;		abp+	| 
+	;			;		;		rsuba, lab, a, st, hi;	| 0:  Store x2 - x1.  c2 - c1
+	;			;		;		;		dp+	| 
+	;			;		;		fixa, la, a, st, hi;	| 1:  (int) x1.  Fix c1
+	;			;		;		;		dp+	| 
+	;			;		;		pa, a, st, hi;		| 2:  (int) x2
+	;			;		;		;		dp+	| 
+	;			;		;		pa, a, st, hi;		| 3:  z2 - z1
+	;			;		;		;		dp+	| 
+	;			;		;		pa, a, st, hi;		| 4:  (int) z1
+	;			;		;		;		dp+	| 
+	;			;		;		pa, a, st, hi;		| 5:  c2 - c1
+	;			;		;		;		dp+	| 
+	incw 0, y;		am->fpap;	;		pa, a, st, hi;		| 6:  (int) c1
+	;			;		;		;			| 
+	incw d, xmn;		fpregl->am;	;		;			| Save xmn for use by sx at p3texoff
+	movw xmn, y;		am->fifo1;	cjp, f1f .;	;			| x1
+	;			;		;		;		ap+	| 
+	incw d, temp;		fpregl->am;	;		;			| 
+	movw temp, y;		am->fifo1;	cjp, f1f .;	;			| x2
+	movw,s shadestyle, y;	;		;		;			| 
+	btstw,s 0, shadestyle;	;		cjp, zer p3colorop; ;			| 
+	btstw,s 10, shadestyle;	;		cjp, ~zer p3notsld2d; ;			| 
+	btstw,s 9, shadestyle;	;		cjp, ~zer p3notsld2d; ;			| 
+	;			;		cjp, ~zer p3colorop; ;			| 
+	;			;		cjp, go p3notsld2d; ;			| 
+p3colorop: rolw 11, colorop, temp; ;		;		;			| Color from op for Solid 2D and tex 1.
+	andw d, temp, temp;	0x7ff->am;	;		;			| 
+	movw temp, y;		am->fifo1;	cjp, f1f .;	;			| 
+	btstw,s 9, shadestyle;	;		;		;			| 
+	;			;		cjp, zer p3notsld2d; ;			| 
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| color0.
+p3notsld2d: andw d, colorop, temp; 0x1f->am;	;		;			| 
+	movw temp, y;		am->fifo1;	cjp, f1f .;	;			| Op
+	movw,s shadestyle, y;	;		;		;			| 
+	btstw,s 9, shadestyle;	;		cjp, zer p3nexte; ;			| Finished Solid 2D segment. Go set fpap.
+	btstw,s 10, shadestyle;	;		cjp, ~zer p3texoff; ;			| 
+	;			;		cjp, ~zer p3texoff; ;			| 
+	;			;		cjp, go p3notex; ;			| 
+p3texoff: movw xmn, y;		am->am;		;		;			| 
+	rsubw d, sx, temp1;	;		;		;			| 
+	movw temp1, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw cury, y;		am->am;		;		;			| 
+	rsubw d, sy, temp1;	;		;		;			| 
+	movw temp1, y;		am->fifo1;	cjp, f1f .;	;			| 
+p3nexte: addw p2, acc, y;	am->fpap;	cjp, go p3nxtedge; ;			| Finished textured 2D segment. Set fpap.
+p3notex: btstw,s 8, shadestyle;	4->fpap;	;		;			| 2D Shaded, 3D HSE or shaded. (NEW TEST!)
+	rolw 9, d, temp;	fpregh->am;	cjp, zer p3recip; ;			| Shift z up from 23 bits to 32 bits. (NEW JUMP!)
+	romw 9, d, temp, 0x1ff;	fpregl->am;	;		;			| 
+	IMM;			;		;		;			| 
+	rolw 9, d, templo;	fpregl->am;	;		;			| 
+	andw d, templo, templo;	0xfe00->am;	;		;			| 
+	movw temp, y;		am->fifo1;	cjp, f1f .;	;			| zhi
+	movw templo, y;		am->fifo1;	cjp, f1f .;	;			| zlo (NEW!!)
+	
+	
+p3recip: mov2nw 0, r[2];	0->fpap;	;		;			| Store recip in fpreg [1] 
+#ifndef GPPLUS
+	;			;		cjs, go recip; ;			| 
+#else	
+	;			;		cjs, go strecip; ;			| 
+#endif GPPLUS	
+	movw d, acc;		NxtOff->am;	;		;			| Restore accumulator value.
+	;			3->fpbp;	;		;			| 
+	incw 0, y;		am->fpap;	;		lmode rz, ai, pipe, fast;| 
+	;			;		;		;			| NEW (removed fpdp)
+	movw 5, y;		;		;		maba, lab, hi;		| (z2 - z1) * 1 / (x2 - x1)
+	;			am->fpbp;	;		;			| 
+	;			;		;		maba, lab, hi;		| (c2 - c1) * 1 / (x2 - x1)
+	;			;		;		;			| 
+	;			;		;		pa, hi;			| 
+	;			;		;		;			| 
+	;			;		;		pa, hi;			| 
+	;			;		;		;			| 
+	movw 0, y;		am->fpdp;	;		pa, m, hi;		| 
+	;			;		;		;			| 
+	;			;		;		fixr, la, m, hi;	| 
+	;			;		;		;			| 
+	;			;		;		fixr, la, hi;		| 
+	;			;		;		;			| 
+	;			;		;		pa, hi;			| 
+	;			;		;		;			| 
+	;			;		;		pa, hi;			| 
+	;			;		;		;			| 
+	;			;		;		pa, a, hi;		| 
+	;			;		;		;			| 
+	;			;		;		pa, a, st, hi;		| 0: dz/dx
+	;			;		;		;		dp+	| 
+	btstw,s 8, shadestyle;	;		;		pa, st, hi;		| 1: dc/dx (NEW TEST!)
+	movw 0, y;		am->fpap;	;		;			| 
+	rolw 9, d, temp;	fpregh->am;	cjp, zer p3color; ;			| Jump if 2D (how did we get here??????)
+	romw 9, d, temp, 0x1ff;	fpregl->am;	;		;			| Shift dz up from 23 bits to 32 bits.
+	IMM;			;		;		;			| 
+	movw temp, y;		am->fifo1;	cjp, f1f .;	;			| dzhi
+	rolw 9, d, templo;	fpregl->am;	;		;			| 
+	andw d, templo, templo;	0xfe00->am;	;		;			| 
+	movw templo, y;		am->fifo1;	cjp, f1f .;	;			| dzlo
+
+p3color: btstw,s 0, shadestyle;	6->fpap;	;		;			| c= fpreg [5].
+	;			;		cjp, ~zer p3shade; ;			| 
+
+|   Reached only if shadestyle == 0x100.
+	rolw 11, colorop, temp; 0x7ff->am;	;		;			| 
+	andw d, temp, y;	am->fifo1;	cjp, f1f .;	;			| Color hi is taken from op. (shift rt. 5).
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| Color low.
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| dchi
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| dclo
+	addw p2, acc, y;	am->fpap;	cjp, go p3nxtedge; ;			| p1= p2->nxt
+
+|   Shadestyles 0x101 and 1.
+p3shade: movw d, templo;	fpregl->am;	;		;			| 
+	movw d, temphi;		fpregh->am;	;		;			| 
+	add2nw 7, temphi;	;		;		;			| add 2**23 to color. (undoes xfpolygon3.vp)| 
+	movw temphi, y;		am->fifo1;	cjp, f1f .;	;			| color high
+	movw templo, y;		am->fifo1;	cjp, f1f .;	;			| color lo.
+	;			1->fpap;	;		;			| 
+	movw d, templo;		fpregl->am;	;		;			| 
+	movw d, temphi;		fpregh->am;	;		;			| 
+	movw temphi, y;		am->fifo1;	cjp, f1f .;	;			| dchi
+	movw templo, y;		am->fifo1;	cjp, f1f .;	;			| dclo.
+	addw p2, acc, y;	am->fpap;	;		;			| p1= p2->nxt
+
+p3nxtedge: movw,s d, p1;	fpregl->am;	;		;			| Must have fpap= p2 + acc = p2->nxt
+	addw p1, acc, y;	am->fpap;	cjp, zer p3remactive; ;			| if (p1) p2= p1->nxt.  NB while (p1)
+	movw d, p2;		fpregl->am;	cjp, go p3whp1;	;			| 
+
+|   Remove active edges whose ymax <= cury
+p3remactive: incw cury, cury;	;		;		;			| cury++.  Step to next scanline
+	movw paet, p1;		;		;		;			| p1= paet
+	addw p1, acc, y;	am->fpap;	;		;			| while (p1->nxt) {
+p3remwh: movw,s d, nxt;		fpregl->am;	;		;			| 
+	incw nxt, y;		am->fpap;	cjp, zer p3upx;	;			| if (p1->nxt <= cury)
+	subw,s d, cury, y;	fpregh->am;	;		;			| 
+	addw nxt, acc, y;	am->fpap;	cjp, neg p3step; ;			| p1->nxt= p1->nxt->nxt
+	addw p1, acc, y;	am->fpdp;	;		;			| 
+	;			fpregl->fpregl;	cjp, go p3remwh; ;			| 
+p3step:	movw nxt, p1;		;		;		;			| else p1= p1->nxt
+	addw p1, acc, y;	am->fpap;	cjp, go p3remwh; ;			| 
+
+|   Update x values in aet
+p3upx:	movw paet, p1;		=p3resort->brreg; ;		;			| p1= paet
+p3whupx: addw p1, acc, y;	am->fpap;	;		;			| while (p1->nxt) {
+	movw,s d, nxt;		fpregl->am;	;		;			| 
+	movw nxt, p1;		5->am;		cjp, zer;	;			| p1= p1->nxt
+	add2nw 1, p1, temp1;	am->fpap;	;		;			| p1->xmn += p1->dx
+	addw d, p1, temp1;	am->fpbp;	;		;			| xmn.
+	movw temp1, y;		am->fpdp;	;		adda, lab, hi;		| p1->xmn += p1->dx
+	;			;		;		;		abp+	| 
+	;			;		;		adda, lab, hi;		| p1->zmn += p1->dz
+	;			;		;		;		abp+	| 
+	;			;		;		adda, lab, hi;		| p1->cmn += p1->dc
+	;			;		;		;		abp+	|
+	;			;		;		pa, hi;			| 
+	;			;		;		;			| 
+	;			;		;		pa, a, hi;		| 
+	;			;		;		;			| 
+	;			;		;		pa, a, st, hi;		| p1->xmn
+	;			;		;		;		dp+	| 
+	;			;		;		pa, a, st, hi;		| p1->zmn
+	;			;		;		;		dp+	| 
+	;			;		;		pa, a, st, hi;		| p1->cmn
+	;			;		;		;		dp+	| 
+	;			=p3whupx->brreg; ;		;			| 
+	;			=p3resort->brreg; cjp, go;	;			| 
+
+|   Resort on > xmn because previous step may have crossed edges.
+p3resort: movw paet, p1;	;		;		;			| p1= paet
+	addw p1, acc, y;	am->fpap;	;		;			| if (p1->nxt)
+	movw,s d, nxt;		fpregl->am;	;		;			| 
+	;			;		cjp, zer p3whend; ;			| 
+p3rsdo:	movw paet, p1;		;		;		;			| do { p1= paet
+	movw nxt, p2;		;		;		;			| p2= p1->nxt
+	movw 0, swap;		;		;		;			| swap= 0
+p3whp2nxt: addw p2, acc, y;	am->fpap;	;		;			| while (p2->nxt)
+	movw,s d, temp;		fpregl->am;	;		;			| 
+	;			;		cjp, zer p3doswap; ;			| 
+	;			5->am;		;		;			| if (p2->xmn > p2->nxt->xmn)
+	addw d, temp, y;	am->fpap;	;		;			| p2->nxt->xmn
+	movw d, xmnhi;		fpregh->am;	;		;			| 
+	movw d, xmnlo;		fpregl->am;	;		;			| 
+	;			5->am;		;		;			| p2->xmn
+	addw d, p2, y;		am->fpap;	;		;			| 
+	xorw,s d, xmnhi, y;	fpregh->am;	;		;			| if: start by comparing signs.
+	movw,s xmnhi, y;	;		cjp, ~neg p3same1; ;			| 
+	;			;		cjp, neg p3rsthen; ;			| If different then sign of b is (a>b)
+	;			;		cjp, ~neg p3rselse; ;			| 
+p3same1: rsubw d, xmnlo, y;	fpregl->am;	cjp, ~neg p3samepos1; ;			| Do a-b
+	rsubcw,s d, xmnhi, y;	fpregh->am;	;		;			| a and b same sign, but negative.
+	;			;		cjp, zer p3rselse; ;			| 
+	;			;		cjp, ~cry p3rsthen; ;			| 
+	;			;		cjp, cry p3rselse; ;			| 
+p3samepos1: rsubcw,s d, xmnhi, y; fpregh->am;	;		;			| 
+	;			;		cjp, zer p3rselse; ;			| 
+	;			;		cjp, ~cry p3rselse; ;			| 
+p3rsthen: addw p1, acc, y;	am->fpdp;	;		;			| p1->nxt= p2->nxt
+	movw temp, y;		am->fpregl;	;		;			| 
+	addw p2, acc, y;	am->fpdp;	;		;			| p2->nxt= p2->nxt->nxt
+	addw temp, acc, y;	am->fpap;	;		;			| 
+	;			fpregl->fpregl;	;		;			| 
+	addw p1, acc, y;	am->fpap;	;		;			| p1->nxt->nxt= p2
+	movw d, nxt;		fpregl->am;	;		;			| 
+	addw nxt, acc, y;	am->fpdp;	;		;			| 
+	movw p2, y;		am->fpregl;	;		;			| 
+	movw nxt, p1;		;		;		;			| p1= p1->nxt
+	incw 0, swap;		;		cjp, go p3whp2nxt; ;			| swap= 1
+
+p3rselse: addw p1, acc, y;	am->fpap;	;		;			| p1= p1->nxt
+	movw d, p1;		fpregl->am;	;		;			| 
+	addw p1, acc, y;	am->fpap;	;		;			| p2= p1->nxt
+	movw d, p2;		fpregl->am;	cjp, go p3whp2nxt; ;			| 
+
+p3doswap: movw,s swap, y;	;		;		;			| } while (swap)
+	;			;		cjp, ~zer p3rsdo; ;			| 
+
+p3whend: addw paet, acc, y;	am->fpap;	;		;			| } while (paet->nxt || pet)
+	movw,s d, y;		fpregl->am;	;		;			| paet->nxt
+	movw,s pet, y;		;		cjp, ~zer p3do;	;			| 
+	;			;		cjp, ~zer p3do;	;			| 
+	;			;		crtn;		;			| 
+
+#undef paet
+#undef nxt
+#undef p2
+#undef p1
+#undef dz
+#undef dzlo
+#undef dc
+#undef dclo
+
+#undef shadestyle
+#undef colorop
+#undef pet
+#undef cury
+#undef xmn
+#undef xmnhi
+#undef dx
+#undef dxlo
+#undef xmnlo
+#undef ymn
+#undef ymx
+#undef deltay
+#undef emask
+#undef emaskrev
+#undef exp
+#undef swap
+
+#undef temp
+#undef junk
+#undef temphi
+#undef templo
+
+#undef temp1
+#undef junk1

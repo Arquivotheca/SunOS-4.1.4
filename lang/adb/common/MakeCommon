@@ -1,0 +1,101 @@
+# @(#)MakeCommon	1.1 (Sun) 10/31/94
+
+#
+# This file "MakeCommon" is included by each processor-specific
+# Makefile for adb as well as the Makefiles for kadb.  It lists
+# the object and source files that are common across processors,
+# and contains the compilation rules for them and for their kadb
+# object files.  You must define "COMMON" before including this file.
+#
+
+#
+# If you add a new ".o", you need not add the rule for compiling it too.
+#
+OBJ_COM=\
+	access.o\
+	command.o\
+	expr.o\
+	fio.o\
+	format.o\
+	input.o\
+	main.o\
+	output.o\
+	pcs.o\
+	print.o\
+	runpcs.o\
+	sym.o\
+	ttycontrol.o
+
+#
+# If you add a new "k*.o", you must add the rule for compiling it too.
+KOBJ_COM=\
+	kaccess.o\
+	kcommand.o\
+	kexpr.o\
+	kfio.o\
+	kformat.o\
+	kinput.o\
+	koutput.o\
+	kpcs.o\
+	kprint.o\
+	krunpcs.o\
+	ksym.o
+
+H_COM=\
+	${COMMON}/adb.h\
+	${COMMON}/fio.h\
+	${COMMON}/process.h\
+	${COMMON}/symtab.h
+
+KC_COM=\
+	${COMMON}/access.c\
+	${COMMON}/command.c\
+	${COMMON}/expr.c\
+	${COMMON}/fio.c\
+	${COMMON}/format.c\
+	${COMMON}/input.c\
+	${COMMON}/output.c\
+	${COMMON}/pcs.c\
+	${COMMON}/print.c\
+	${COMMON}/runpcs.c\
+	${COMMON}/sym.c
+
+C_COM= ${KC_COM} \
+	${COMMON}/main.c\
+	${COMMON}/ttycontrol.c
+
+#### #### #### #### #### #### #### #### #### #### #### #### #### #### ####
+# Rules for the "processor-independent" kadb object files
+#
+kaccess.o:	${COMMON}/access.c
+	${CC} ${KCOPTS} -c ${COMMON}/access.c -o $@
+
+kcommand.o:	${COMMON}/command.c
+	${CC} ${KCOPTS} -c ${COMMON}/command.c -o $@
+
+kexpr.o:	${COMMON}/expr.c
+	${CC} ${KCOPTS} -c ${COMMON}/expr.c -o $@
+
+kfio.o:	${COMMON}/fio.c
+	${CC} ${KCOPTS} -c ${COMMON}/fio.c -o $@
+
+kformat.o:	${COMMON}/format.c
+	${CC} ${KCOPTS} -c ${COMMON}/format.c -o $@
+
+kinput.o:	${COMMON}/input.c
+	${CC} ${KCOPTS} -c ${COMMON}/input.c -o $@
+
+koutput.o:	${COMMON}/output.c
+	${CC} ${KCOPTS} -c ${COMMON}/output.c -o $@
+
+kpcs.o:	${COMMON}/pcs.c
+	${CC} ${KCOPTS} -c ${COMMON}/pcs.c -o $@
+
+kprint.o:	${COMMON}/print.c
+	${CC} ${KCOPTS} -c ${COMMON}/print.c -o $@
+
+krunpcs.o:	${COMMON}/runpcs.c
+	${CC} ${KCOPTS} -c ${COMMON}/runpcs.c -o $@
+
+ksym.o:	${COMMON}/sym.c
+	${CC} ${KCOPTS} -c ${COMMON}/sym.c -o $@

@@ -1,0 +1,96 @@
+Resolved by lenb@solaris on Tue Jun  9 16:12:30 PDT 1992
+Source      /net/fcs/space/413/usr/src
+Destination /usr/src
+Directories sys/nfs
+Resynced by lenb@solaris on Tue Jun  9 16:12:08 PDT 1992 in 00:12
+         1 files changed only in source
+        14 files did not change
+
+NEW_OLD    sys/nfs/nfs_subr.c 2
+
+Resolved by lenb@solaris on Tue Jun  9 16:11:51 PDT 1992
+Source      /net/fcs/space/413/usr/src
+Destination /usr/src
+Directories sys/ufs
+Resynced by lenb@solaris on Tue Jun  9 16:11:39 PDT 1992 in 00:13
+         1 files changed only in source
+        20 files did not change
+
+NEW_OLD    sys/ufs/ufs_inode.c 2
+
+Resolved by lenb@solaris on Tue Jun  9 16:11:21 PDT 1992
+Source      /net/fcs/space/413/usr/src
+Destination /usr/src
+Directories sys/sunif
+Resynced by lenb@solaris on Tue Jun  9 16:11:07 PDT 1992 in 00:15
+         1 files changed only in source
+        20 files did not change
+
+NEW_OLD    sys/sunif/if_ie.c 1
+
+Resolved by lenb@solaris on Tue Jun  9 16:10:44 PDT 1992
+Source      /net/fcs/space/413/usr/src
+Destination /usr/src
+Directories sys/os
+Resynced by lenb@solaris on Tue Jun  9 16:10:37 PDT 1992 in 00:21
+         1 files changed only in destination
+         1 files changed only in source
+        87 files did not change
+
+NEW_OLD    sys/os/heap_kmem.c 6
+
+OLD_NEW    sys/os/kern_subr.c 1
+
+Resolved by lenb@thecla on Mon Sep  9 02:44:11 PDT 1991
+Source      /net/gazos/space/412.stage
+Destination /usr/src
+Directories sys usr.lib/libkvm
+Resynced by lenb@thecla on Mon Sep  9 02:38:38 PDT 1991 in 00:59
+Summary:
+         1 new files from source
+        42 files changed only in source
+
+NEW_NONE sys/sun4/cscope.mk 
+
+NEW_OLD  sys/boot/os/heap_kmem.c 1 
+NEW_OLD  sys/os/heap_kmem.c 10 
+NEW_OLD  sys/os/kern_exec.c 1 
+NEW_OLD  sys/sun/openprom_util.c 1 
+NEW_OLD  sys/sun/seg_kmem.c 1 
+NEW_OLD  sys/sun/seg_kmem.h 1 
+NEW_OLD  sys/sun/ufs_machdep.c 4 
+NEW_OLD  sys/sun4/Locore.c 1 
+NEW_OLD  sys/sun4/genassym.c 1 
+NEW_OLD  sys/sun4/locore.s 7 
+NEW_OLD  sys/sun4/machdep.c 11 
+NEW_OLD  sys/sun4/param.h 3 
+NEW_OLD  sys/sun4/pte.h 1 
+NEW_OLD  sys/sun4/vm_machdep.c 4 
+NEW_OLD  sys/sun4/vmparam.h 3 
+NEW_OLD  sys/sun4c/Locore.c 1 
+NEW_OLD  sys/sun4c/genassym.c 1 
+NEW_OLD  sys/sun4c/locore.s 7 
+NEW_OLD  sys/sun4c/machdep.c 6 
+NEW_OLD  sys/sun4c/param.h 3 
+NEW_OLD  sys/sun4c/pte.h 1 
+NEW_OLD  sys/sun4c/vm_machdep.c 4 
+NEW_OLD  sys/sun4c/vmparam.h 3 
+NEW_OLD  sys/sun4m/Locore.c 2 
+NEW_OLD  sys/sun4m/genassym.c 1 
+NEW_OLD  sys/sun4m/locore.s 4 
+NEW_OLD  sys/sun4m/machdep.c 6 
+NEW_OLD  sys/sun4m/mmu.h 1 
+NEW_OLD  sys/sun4m/param.h 5 
+NEW_OLD  sys/sun4m/pte.h 1 
+NEW_OLD  sys/sun4m/seg_kmem.c 2 
+NEW_OLD  sys/sun4m/vm_machdep.c 1 
+NEW_OLD  sys/sun4m/vmparam.h 3 
+NEW_OLD  sys/sunif/if_ie.c 6 
+NEW_OLD  sys/sunif/if_le.c 9 
+NEW_OLD  sys/sunif/if_levar.h 2 
+NEW_OLD  sys/sys/kmem_alloc.h 1 
+NEW_OLD  sys/sys/map.h 1 
+NEW_OLD  sys/sys/mbuf.h 1 
+NEW_OLD  usr.lib/libkvm/kvm_impl.h 4 
+NEW_OLD  usr.lib/libkvm/kvmgetcmd.c 6 
+NEW_OLD  usr.lib/libkvm/kvmopen.c 5 

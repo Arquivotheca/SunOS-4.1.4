@@ -1,0 +1,212 @@
+| "@(#)setpatpr.pp.u 1.1 94/10/31"
+
+| Copyright 1986 by Sun Microsystems, Inc.
+| Written by Stuart Levy
+
+ 
+
+|   Expects the following registers to be loaded:
+|   r[6]	minax
+|   r[7]	majax
+|   r[10]	segaddr - changed by this routine
+|   r[11]	numsegs
+|   acc		error
+|   r[13]	patln
+
+
+|   These registers are loaded by texvec.pp.u. Majax, minax, & numsegs are used. Addrlo,addrhi,cnt, & patln are stored.
+|   Note: Majax and minax are moved to majerr and minerr, as the multiply and divide routines step on r[3] and r[4].
+
+#define err acc
+#define addrlo 		r[0]	
+#define addrhi 		r[1]
+#define cnt		r[2]
+#define minax 		r[3]
+#define majax 		r[4]
+#define reflect		r[5]
+#define segaddr 	r[6]
+#define options		r[7]
+#define stoff		r[8]
+#define cloff		r[9]
+#define patln		r[10]
+#define offset		r[13]
+#define seg		r[14]
+#define numsegs		r[15]
+
+|   These registers are used by setpattern.pp.u. Note that majax, minax & numsegs (r 3,4 & 15) come from texvec.pp.u.
+
+#define dvsr		acc
+#define diagsq		r[0]
+#define result		r[0]
+#define dvdnd		r[0]
+#define himult		r[1]
+#define lomult		r[2]
+#define quot		r[2]
+|   majax and minax go into majerr and minerr, as r[3] and r[4] get stepped on in multiply and divide.
+#define minerr		r[5]
+#define majerr		r[7]
+|   segaddr gets set and then isn't used in the routine, so the msb has been borrowed as a flag.
+#define nbegin		r[6]
+#define olderr		r[11]
+#define segcnt		r[12]
+#define segerr		r[13]
+#define tmperr		r[23]
+
+#define minsq		r[16]
+#define majsq		r[17]
+#define mincnt		r[18]
+#define majcnt		r[19]
+#define majcntol	r[20]
+#define nscnter		r[21]
+#define staddr		r[22]
+#define acaddr		r[14]
+
+#define right		8
+#define first		15
+		| msb used for flag: set after 1st time through
+
+#define savtex		0x120
+#define savoldpatln	0x131
+#define savfatoff	0x132
+#define savtemp		0x140
+
+
+setinit: movw d,staddr;		0x150->am;	;				|
+	movw d,acaddr;		0x160->am;	;
+	movw 0,segcnt;		;		cjp, ~zer setinx;		| 
+	movw d,staddr;		0x600->am;	;				| adjust addresses if not pixrect call.
+	movw d,acaddr;		0x700->am;	;				|
+setinx: btstw,s right,options;  savtemp->scrmemp; ;				| 
+	movw r[23],y;		am->scrmem;	;			scrmp+	| 
+	movw r[16],y;		am->scrmem;	;			scrmp+	| 
+	movw err,y;		am->scrmem;	;			scrmp+	| 	Error.
+	movw addrlo,y;		am->scrmem;	;			scrmp+	| 	Addrlo.
+	movw addrhi,y;		am->scrmem;	;			scrmp+	| 	Addrhi.
+	movw cnt,y;		am->scrmem;	;			scrmp+	| 	Cnt.
+	movw reflect,y;		am->scrmem;	;			scrmp+	| 	Reflect
+	movw options,y;		am->scrmem;	;				| 	Options
+	movw acaddr,y;		am->am;		;				| Get into d-latch.(added cycle) 
+	movw majax,majerr;	;		;				| Move majax into majerr.
+	movw minax,minerr;	;		cjp, ~zer setRt;		| Move minax into minerr, jump if Right.
+setLft: addw d,numsegs,segaddr; ;		;				| segaddr = ACaddr + numsegs - 1.
+	decw segaddr;		;		cjp, go setinita;		| 
+setRt:	movw d,segaddr;		;		;				| segaddr = ACaddr.
+setinita:
+	movw 0,majcntol;	;		;				| Now initialize registers for set_pattern.
+	movw d,minsq;		0x1->am;	;				| 
+	movw d,majsq;		0x1->am;	;				| 
+	movw 0,majcnt;		;		;				| 
+	movw 0,mincnt;		;		;				| 
+	movw 0,segerr;		;		;				| 
+
+setpat:	testw (majerr);		;		;				| Need to set flags.
+	srnovw majerr,r[2];	;		;				| ==>  error = -( majax >> 1)
+	movw r[2],err;		;		;
+	movw staddr,y;		am->scrmemp;	;				| (added cycle)
+	movw 0,nscnter;		;		push, go;			| Load scrmemp w beg addr of given  + load  cnter.
+outer:	addw d,segcnt,segcnt;	scrmem->am;	;				| seg_count += segment[i].
+	movw err, tmperr;	;		;				| Put error back in accumulator between segments.
+	movw segcnt,acc;	;		;				| For mult, need segcnt in acc and lomult.
+	movw acc,lomult;	;		cjs, go multiply;		| diag_sq = seg_count * seg_count.
+	movw majsq,acc;		;		;				| Compute initial segerr (err is in tmperr)
+	addw minsq,acc,acc;	;		;				| 
+	rsubw diagsq,acc,olderr; ;		;				| segerr = diagsq - (majsq + minsq)
+	bclrw first,nbegin;	;		;				| clear first time through
+	movw tmperr,err;	;		push, go;			| Put error in acc (don't forget to put back !)
+inner:	incw majcnt,majcnt;	;		;				| maj_count++.
+	sl1w majcnt,r[23];	am->am;		;				| maj_sq += maj_count + maj_count + 1.
+	addw,s minerr,err,err;	;		;				| error += minax.
+	addw d,majsq,majsq;	;		cjp, neg nominor;		| 
+	incw mincnt,mincnt;	;		;				| min_count ++.
+	sl1w mincnt,r[23];	am->am;		;				| min_sq += min_count + min_count + 1.	
+	addw d,minsq,minsq;	;		;				| 
+	addw majerr,err,err;	;		;				| error -= majax.
+nominor: btstw,s first,nbegin;	;		;				| seg_error = diag_sq - (maj_sq + min_sq). 
+	movw minsq,y;		am->am;		;				| 
+	addw d,majsq,r[23];	;		cjp, zer begin;			| 
+	movw segerr,olderr;	;		;				| old_error = seg_error.
+begin:	movw r[23],y;		am->am;		;				| NEW
+	subw,s d,diagsq,segerr;	;		;				| Put segerr on y-bus (and in d-latch) for test
+	movw segerr,y;		am->am;		;				| NEW
+	subw,s d,olderr,y;	;		cjp, ~neg posseg;		| If segerr pos, test (old - seg) >= 0.
+negseg: negw segerr,segerr;	am->am;		;				| NEW
+	subw,s d,olderr,y;	;		;				| 
+posseg: bsetw first,nbegin;	;		loop, neg;			| Loop until segerr > olderr. set flag.
+	movw acaddr,y;		am->am;		;				| (added cycle)
+	addw d,nscnter,y;	am->scrmemp;	;				| Write new pattern to section of scratch memory.
+	movw majcnt,y;		am->am;		;				| Just added (take out comment later).
+	rsubw d,majcntol,y;	am->scrmem;	;				| 
+	incw nscnter,nscnter;	am->am;		;				| Thanks Stuart.
+	subw,s d,numsegs,y;	;		;				| Now nscnter goes 1 to n, and numsegs goes 1 to n
+	movw majcnt,majcntol;	;		;				|
+	movw staddr,y;		am->am;		;				| Load old count for next segment. (added cycle)
+	addw d,nscnter,y;	am->scrmemp;	loop, zer;			| Go to top of outer loop if condition fails.
+newstoff: testw (stoff);	savoldpatln->scrmemp; ;				| Note: Majcnt is new pattern length!!!
+	movw majcnt,acc;	;		cjp, zer setres;		| stoff=stoff*patln+oldpatln/2
+	movw stoff,lomult;	;		cjs, go multiply;		| Leaves low result in r[0] (diagsq + result)
+	sr0w d,acc;		scrmem->am;	;				| 
+	addw result,acc,dvdnd;	;		;				| stoff=(stoff*patln+oldpatln/2)/oldpatln.
+	movw d,dvsr;		;		cjs, go divide;			| Divide wants top in r[0], bottom in r[1].
+	movw quot,stoff;	;		;				| 
+	movw majcnt,acc;	;		;				| 
+setres:	movw acc,patln;		;		;				| Set new patln=majcnt.
+	bclrw first,nbegin;	;		;				| Restore segaddr (added cycle)
+	movw minerr,minax;	;		;				| Restore minax
+	movw majerr,majax;	savtemp->scrmemp; ;				| Restore majax
+	movw d, r[23];		scrmem->am;	;			scrmp+	| Get ready to restore registers. 
+	movw d, r[16];		scrmem->am;	;			scrmp+	| 
+	movw d,err;		scrmem->am;	;			scrmp+	| 	Error.
+	movw d,addrlo;		scrmem->am;	;			scrmp+	| 	Addrlo.
+	movw d,addrhi;		scrmem->am;	;			scrmp+	| 	Addrhi.
+	movw d,cnt;		scrmem->am;	;			scrmp+	| 	Cnt. 
+	movw d,reflect;		scrmem->am;	;			scrmp+	| 	Reflect.
+	movw d,options;		scrmem->am;	cjp, go toctoff;		| 	Options and jump to toctoff.
+
+#undef err
+#undef addrlo 
+#undef addrhi 
+#undef cnt	
+#undef minax 	
+#undef majax 	
+#undef reflect	
+#undef segaddr 	
+#undef options	
+#undef stoff	
+#undef cloff	
+#undef patln	
+#undef offset	
+#undef seg	
+#undef numsegs	
+
+#undef diagsq
+#undef result
+#undef dvdnd	
+#undef himult	
+#undef dvsr	
+#undef lomult	
+#undef quot	
+#undef minsq	
+#undef majsq	
+#undef segerr	
+#undef olderr	
+#undef mincnt	
+#undef majcnt	
+#undef majcntol	
+#undef segcnt	
+#undef nscnter	
+#undef tmperr
+
+#undef minerr
+#undef majerr
+#undef nbegin
+#undef staddr
+#undef acaddr
+
+#undef right	
+#undef first
+
+#undef savtemp
+#undef savoldpatln
+#undef savfatoff
+#undef savtex
+

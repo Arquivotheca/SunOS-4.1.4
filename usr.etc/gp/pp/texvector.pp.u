@@ -1,0 +1,500 @@
+| "@(#)texvector.pp.u 1.1 94/10/31"
+
+| Copyright 1986 by Sun Microsystems, Inc.
+| Written by Stuart Levy
+
+ 
+
+|   texvec:  Mimics the action of pr_texvec.c
+|   Please refer to pr_texvec.c and follow along.
+
+
+#define pkptr	r[25]	/* used only in GP+ */
+#define options r[24]
+#define cloff 	r[23]
+#define clip	r[23]	
+#define reflect	r[22]
+#define ropmode	r[21]
+#define width	r[21]
+#define offsety	r[20]
+#define offsetx	r[19]
+#define sizey	r[18]
+#define sizex	r[17]
+#define clipptr	r[16]
+
+#define x0	r[15]
+#define y0	r[14]
+#define x1	r[13]
+#define y1	r[12]
+#define dx	r[11]
+#define dy	r[10]
+#define hierr	r[9]	/* Double precision for early init error calculations.  Not needed later. */
+#define err	r[8]
+#define startx	r[7]
+#define starty	r[6]
+#define count	r[5]
+
+#define temp0	r[4]
+
+#define addrlo	r[0]
+#define addrhi	r[1]
+
+#define pick 	0	/* used only in GP+ */
+
+#define clipbit	2
+#define nosetup 3
+#define pixrect	4
+#define solid 	5
+#define cliprt	6
+#define right	8
+
+#define savtex	0x120
+
+|   The options field is broken down as follows:
+|  	 bit 15 - startpt	bit 14 - endpt		bit 13 - balancing	bit 12 - givenpattern
+|  	 bit 11 - fat		bit 10 - poly		bit 9 - mvlist		bit 8 - righthalf
+|   	 bit 7 - close		bit 6 - cliprt		bit 5 - solid		bit 4 - pixrect
+|   	 bit 3 - nosetup	bit 2 - clipbit		bit 1 - firstvec	bit 0 - pick			| used only in GP+
+
+texvec:	movw 0,r[2];		SavePts->scrmemp; ;				| (Tvecs) Clear numsegs.
+	movw d, x0;		fifo1->am;	cjp, f1e texvec;		| 
+	movw d, y;		am->scrmem;	;			scrmp +	| 
+tec1:	movw d, y0;		fifo1->am;	cjp, f1e tec1;			| 
+	movw d, y;		am->scrmem;	;			scrmp +	| 
+	movw 0,r[4];		;		;				| (Tvecs) Clear patln.
+tec2:	movw d, x1;		fifo1->am;	cjp, f1e tec2;			| 
+	movw d, y;		am->scrmem;	;			scrmp +	| 
+	rsubw d, x0, dx;	;		;				| dx
+tec3:	movw d, y1;		fifo1->am;	cjp, f1e tec3;			| 
+	movw d, y;		am->scrmem;	;				| 
+	rsubw d, y0, dy;	0x150->scrmemp;	;				| dy. (Tvecs) (150)
+	movw d,width;		fifo1->am;	cjp, f1e .;			| (Tvecs) Width.
+	movw,s d,r[3];		fifo1->am;	cjp, f1e .;			| (Tvecs) Pattern segments.
+	movw d,y;		am->scrmem;	cjp, zer tec3sol;		| (Tvecs) Jump if solid vector.
+	addw d,r[4],r[4];	;		;				| (Tvecs) Patln computation.
+tec3a:	incw r[2],r[2];		;		;			scrmp+	| (Tvecs) Numseg computation.
+	movw,s d,r[3];		fifo1->am;	cjp, f1e .;			| (Tvecs) Pattern segments.
+	movw d,y;		am->scrmem;	cjp, zer tec3b;			| (Tvecs) Null terminated.
+	addw d,r[4],r[4];	;		cjp, go tec3a;			| (Tvecs) Loop until done.
+tec3b:	movw d,r[3];		fifo1->am;	cjp, f1e .;			| (Tvecs) Stoff.
+	sub2nw,s 0,r[2],r[0];	savtex->scrmemp; ;				| (Tvecs) Address to save for toctant. Test numsegs=1.
+	movw d,y;		am->scrmem;	;			scrmp+	| (Tvecs) Store stoff.
+#ifndef GPPLUS
+tec3c:	movw d,options;		fifo1->am;	cjp, f1e .;			| (Tvecs) Pull options.
+#else GPPLUS
+tec3c:	orw d,options,options;	fifo1->am;	cjp, f1e .;			| (Tvecs) Pull options.
+#endif GPPLUS
+	bsetw pixrect,options;	;		;				| (Tvecs) tex->options.pixrect=1.
+	movw r[4],y;		am->scrmem;	;			scrmp+	| (Tvecs) Store patln.
+	movw r[2],y;		am->scrmem;	cjp, ~zer tec4;		scrmp+	| (Tvecs) Store numsegs.
+	bsetw solid,options;	;		cjp, go tec4;			| Set solid bit if only have one pattern segment.
+tec3sol: movw d,options;	fifo1->am;	cjp, f1e .;			| If solid, options still passed.
+	bsetw pixrect,options;	;		;				| (Tvecs) tex->options.pixrect=1.
+tec4:	movw d, op;		fifo1->am;	cjp, f1e .;			| 
+	norw,s d, op, clip;	0xfffe->am;	;				| (PIX_DONTCLIP == 1) => (clip == 0).
+	bclrw clipbit,options;	;		cjp, zer tec5;			| (Tvecs) Clear clip field of options.
+	bsetw clipbit,options;	;		;				| (Tvecs) Set clip field of options.
+tec5:	movw d, color;		fifo1->am;	cjp, f1e .;			| 
+#ifndef GPPLUS
+	rolw 11, op, acc;	;		;				| color in op? 
+#else	
+	rolw 11, op, acc;	VecAtts->scrmemp; ;				| color in op? 
+	testw (d);		scrmem->am;	;				| test if zb or dc is enabled
+	;			;		cjs,~zer vec3fetch;		| 
+#endif GPPLUS	
+	andw,s d, acc, acc;	0x7ff->am;	;				| 
+	sr0w op, op;		;		cjp, zer fatcheck;		| op >>= 1. 
+	movw acc, color;	;		cjp, go fatcheck;		| Jump to fat vector check.
+top0:	andw d, op, op;		0xf->am;	;				| 
+|   PIXOP_NEEDS_DST (op<<1)= (op^(op<<1)) & 0xa
+	movw op, acc;		;		;				| 
+	sl0w acc, acc;		;		;				| 
+	xorw op, acc, acc;	ClipList->scrmemp; ;				| Get ready to get clipping rectangle.
+	movw d, clipptr;	ClipList->am;	;				| 
+	andw,s d, acc, acc;	0xa->am;	;				| 
+#ifndef GPPLUS
+	movw 0, nodst;		;		cjp, ~zer ttr;			| 
+#else GPPLUS
+	movw 0, nodst;		;		cjp, ~zer ptttr;		| 
+#endif GPPLUS
+	incw 0, nodst;		;		;				| 
+#ifdef GPPLUS
+
+ptttr:	btstw,s pick,options;	Pickmaybe->scrmemp; ;				| test if picking is on
+	movw 0,y;		am->scrmem;	;				| Set pickmaybe (used for 3d) to zero
+	movw clipptr,y;		am->scrmemp;	cjp,~zer pkvtr;			| reload scrmemp
+#endif GPPLUS
+
+|   code will return to ttr (through treset) after each clip rectangle.
+ttr:	movw 0,cloff;		;		;				| Textured line drawing begins here.
+	bsetw right,options;	;		;				| tex->options.right = 1.
+	bclrw cliprt,options;	;		;				| tex->options.cliprt = 0.
+	btstw,s clipbit,options; ;		;				| 
+	movw,s d, offsetx;	scrmem->am;	cjp, zer ttrnclip;	scrmp +	| Transform screen coords to pixrect relative.
+	subw d, x0, x0;		;		crtn, neg;			| End of clip list.
+	subw d, x1, x1;		;		;				| 
+	movw d, offsety;	scrmem->am;	;			scrmp +	| 
+	subw d, y0, y0;		;		;				| 
+	subw d, y1, y1;		;		;				| 
+	movw d, sizex;		scrmem->am;	;			scrmp +	| 
+	movw d, sizey;		scrmem->am;	;			scrmp +	| 
+	add2nw 2, clipptr, clipptr; ;		cjp, go ttrstat;		| 
+	
+treset:	btstw,s clipbit,options; SavePts->scrmemp; ;				| 
+	movw d, x0;		scrmem->am;	crtn, zer;		scrmp +	| if no clipping we are done.
+	movw d, y0;		scrmem->am;	;			scrmp +	| 
+	movw d, x1;		scrmem->am;	;			scrmp +	| 
+	rsubw d, x0, dx;	;		;				| 
+	movw d, y1;		scrmem->am;	;			scrmp +	| 
+	rsubw d, y0, dy;	;		;				| 
+	movw clipptr, y;	am->scrmemp;	cjp, go ttr;			|
+ 
+ttrnclip: movw 0, offsetx;	;		;				| 
+#ifndef GPPLUS
+	movw 0, offsety;	;		;				| 
+#endif GPPLUS
+	movw d, sizex;		SWidth->am;	;				| 
+	movw d, sizey;		SHeight->am;	;				| 
+#ifdef GPPLUS
+	movw 0, offsety;	;		cjp, go ttrstat;		|
+	;			;		cjp,go treset;			| 
+	
+#endif GPPLUS
+ttrstat: movw d, acc;		vstreg->am;	;				| Clear vme status register.
+
+|   Limits number of octants to 4.
+tnshrt:	testw (dx);		;		;				| Test dx.
+	movw 0, reflect;	;		cjp, ~neg tnoswap;		| reflect= 0.
+	movw x0, acc;		;		;				| 
+	movw x1, x0;		;		;				| Swap x.
+	movw acc, x1;		;		;				| 
+	movw y0, acc;		;		;				| Swap y.
+	movw y1, y0;		;		;				| 
+	movw acc, y1;		;		;				| 
+	negw dx, dx;		;		;				| dx= -dx.
+	negw dy, dy;		;		;				| dy= -dy.
+	bclrw right,options;	;		;				| (Tvecs) Left side.
+
+|   Clipper works with y positive going. If needed, reflect
+|   vector around the centerline.  Remember this in the reflect
+|   variable so it can be undone later.
+tnoswap:testw (dy);		;		;				| 
+	testw (dx);		;		cjp, ~neg tbound;		| (Tvecs) (added test)
+	negw dy, dy;		;		cjp, ~zer tnoswap1;		| (Tvecs) (added cond code)
+	bclrw right,options;	;		;				| (Tvecs)
+tnoswap1: subw d, sizey, acc;	1->am;		;				| size.y-1
+	subw y0, acc, y0;	;		;				| pos0.y= (size.y-1) - pos0.y.
+	subw,s y1, acc, y1;	;		;				| pos1.y= (size.y-1) - pos1.y.
+	add2nw 1, reflect;	;		cjp, go tbound1;		| reflect += 2
+|   Bounds check for vector ending before rectangle or starting after.
+tbound:	testw (y1);		;		;				| 
+tbound1: testw (x1);		;		cjp, neg clipoff;		| if (pos1.y < 0 || pos1.x < 0)
+	movw x0, acc;		;		cjp, neg clipoff;		| 
+	subw,s sizex, acc, y;	;		;				| || pos0.x >= size.x
+	movw y0, acc;		;		cjp, ~neg clipoff;		| 
+	subw,s sizey, acc, y;	=vropset1->brreg; ;				| || pos0.y >= size.y
+
+|   If vector is vertical, or horizontal, use fast algorithm.
+tvert:	testw (dx);		;		cjp, ~neg clipoff;		| (Tvecs) 
+	movw,s dy, acc;		;		cjp, zer tvroptst;		| (Tvecs) Jump if vertical.
+	;			;		cjp, ~zer tdxdy;		| Jump if not horizontal or vertical.
+|   Here we know vector is horizontal or vertical.	
+#ifndef GPPLUS	
+tvroptst: btstw,s nosetup,options; ;		;				| (Tvecs) 
+	;			;		cjp, ~zer tvhortst;		| Jump if no rop setup necessary.
+	testw (nodst);		;		cjs, go vropset;		| Set up raster op chips.
+#else GPPLUS
+tvroptst: btstw,s nosetup,options; VecAtts->scrmemp; ;				| (Tvecs) 
+	testw (d);		scrmem->am;	cjp, ~zer tvhortst;		| Jump if no rop setup necessary.
+	;			;		cjp, ~zer tdxdy;		| DEBUG (skip vmewrite)
+	testw (nodst);		;		cjs, go vropset;		| Set up raster op chips.
+#endif GPPLUS
+tvvrdone: romw 8, color, acc, 0xff00; ;		;				| instruction completes on next cycle.
+	IMM;			FBAllRopPrimeSrc1->vloareg;;			| vhiareg unchanged.
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+tvhortst: testw (dx);		;		;				| (Tvecs)
+	testw (y0);		am->am;		cjp, ~zer thoriz;		| (Tvecs) (d) Test (pos0.y < 0), jump if horizontal
+	movw y1, acc;		;		cjp, ~neg tvclip1;		| (Tvecs) tex->options.res_cliprt = 1.
+	btstw,s right,options;	;		;				| (Tvecs) if (tex->options.right)
+	movw 0, y0;		;		cjp, zer tvclip1rt;		| (Tvecs)(cc) if (pos0.y < 0) pos0.y= 0.
+	negw d,cloff;		;		cjp, go tvclip1;		| (Tvecs) cloff = -y0.
+tvclip1rt: bsetw cliprt,options; ;		;				| (Tvecs) tex->options.res_cliprt = 1.
+tvclip1: subw,s sizey, acc, y;	1->am;		;				| if (pos1.y >= size.y)
+	subw d, sizey, acc;	;		cjp, neg tvclip2;		| pos1.y= size.y - 1.
+	btstw,s right,options;	;		;				| (Tvecs)
+	rsubw y1,acc,temp0;	am->am;		cjp, ~zer tvcl1art;		| (Tvecs) (if (!(tex->options.right))
+	addw d,cloff,cloff;	;		cjp, go tvclip1a;		| (Tvecs) cloff += y1 - sizey + 1.
+tvcl1art: bsetw right,options;	;		;				| (Tvecs) tex->options.res_cliprt = 1.
+tvclip1a: movw acc, y1;		;		cjp, go tvclip3;		| 
+tvclip2:movw y1, acc;		;		;				| 
+tvclip3: subw,s y0, acc, count;	=tvnorefl->brreg; ;				| count= pos1.y - pos0.y (clipped!)
+	andw,s d, reflect, y;	2->am;		;				| if (reflect & 2)
+	subw d, sizey, acc;	1->am;		cjp, zer;			| size.y - 1
+	subw y1, acc, y0;	;		;				| pos0.y= size.y - 1 - pos1.y.
+tvnorefl:movw offsety, acc;	;		cjp, ~vir tvnorefl;		| 
+	addw y0, acc, Multiplier;;		cjs, go MulSWid;		| cg2_roppixel (dmd, pos0.x, pos0.y)
+	movw offsetx, acc;	VByte->vctlreg;	;				| 
+	addw x0, acc, acc;	;		cjs, go vcompvme;		| cg2_roppixel
+	negw dy, r[4];		;		;				| (Tvecs) (majax = -dy)
+	movw count, r[2];	;		;				| 
+	movw r[24],y;		am->am;		;				| move options field
+	movw d,r[7];		;		;				| 
+	movw d,r[5];		0x4->am;	;				| REFLECT.
+	movw cloff,y;		am->am;		;				| 
+	movw d,r[9];		;		cjp, go toctant;		| toctant will return to treset.
+
+|   Horizontal lines.
+thoriz:	testw (x0);		am->am;		;				| (Tvecs) test x0->d-latch
+	movw x1, acc;		;		cjp, ~neg thclip1;		| Jump if x0 positive
+	movw 0, x0;		;		;				| 
+	negw d,cloff;		;		;				| (Tvecs) cloff = -x0.
+thclip1: subw,s sizex, acc, y;	1->am;		;				| if (pos1.x >= size.x)
+	subw d, sizex, acc;	;		cjp, neg thclip2;		| pos1.x= size.x - 1.
+	bsetw cliprt,options;	;		;				| (Tvecs) tex->options.res_cliprt = 1.
+	movw acc,x1;		;		cjp, go thclip3;		| (Tvecs)
+thclip2:movw x1, acc;		;		;				| 
+thclip3: subw x0, acc, count;	;		;				| (Tvecs) count= x1 - x0 (neg?)
+thnorefl:movw offsety, acc;	;		cjp, ~vir thnorefl;		| 
+	addw y0, acc, Multiplier;;		cjs, go MulSWid;		| cg2_roppixel (dmd, pos0.x, pos0.x)
+	movw offsetx, acc;	VByte->vctlreg;	;				| 
+	addw x0, acc, acc;	;		cjs, go vcompvme;		| cg2_roppixel
+	negw dx, r[4];		;		;				| (Tvecs) (majax = -dx)
+	movw count, r[2];	;		;				| 
+	movw d,r[5];		0x5->am;	;				| 
+	movw r[24],y;		am->am;		;				| move options field
+	movw d,r[7];		;		;				| 
+	movw cloff,y;		am->am;		;				| 
+	movw d,r[9];		;		cjp, go toctant;		| toctant will return to treset.
+
+|   One more reflection. Note that dy in acc from vertical test.
+#ifndef GPPLUS
+tdxdy:	rsubw,s dx, acc, y;	;		;				| if (dx < dy)...
+#else GPPLUS
+tdxdy:	movw d,pkptr;		=tclipdraw->am;	;
+ttdxdy:	rsubw,s dx, acc, y;	;		;				| if (dx < dy)...
+#endif GPPLUS
+	movw x0, acc;		;		cjp, ~neg tiniterr;		| Swap (pos0.x, pos0.y).
+	movw y0, x0;		;		;				| 
+	movw acc, y0;		;		;				| 
+	movw x1, acc;		;		;				| Swap (pos1.x, pos1.y).
+	movw y1, x1;		;		;				| 
+	movw acc, y1;		;		;				| 
+	movw dy, dx;		;		;				| 
+	subw y0, acc, dy;	;		;				| Recompute dy (saves a cycle).
+	movw sizex, acc;	;		;				| Swap (size.x, size.y).
+	movw sizey, sizex;	;		;				| 
+	movw acc, sizey;	;		;				| Swap complete.
+	incw reflect, reflect;	;		;				| reflect += 1.
+tiniterr:sr0w dx, err;		;		;				| initerror= -(dx >> 1).
+	negw,s err, err;	;		;				| 
+	compw 0, hierr;		;		cjp, ~cry tierr1;		| 
+	incw hierr, hierr;	;		;				| 
+tierr1:	movw,s x0, startx;	am->am;		;				| start= pos0. 
+	movw y0, starty;	;		;				| 
+	negw startx, Mulcand;	;		cjp, ~neg tadvy;		| initerr += -start.x * dy.
+	negw d,cloff;		;		;				| (Tvecs) (cloff = -startx)
+	movw dy, Multiplier;	;		cjs, go multiply;		| pr_product
+	movw HiRslt, acc;	;		;				| double precision add.
+	movw LoRslt, y;		am->am;		;				| 
+	addw d, err, err;	;		;				| 
+	addcw hierr, acc, hierr;;		;				| 
+	movw 0, startx;		;		;				| start.x= 0.
+	decw dx, temp0;		am->am;		;				| count= (initerr + (dx-1)) / dx.
+	addw d, err, DLow;	;		;				| double precision add.
+	addcw d, hierr, DHigh;	0->am;		;				| 
+	movw dx, Dvsr;		;		cjs, go divlong;		| 
+	movw QLow, count;	;		;				| 
+	movw starty, acc;	;		;				| 
+	addw count, acc, starty;;		;				| start.y += count.
+	movw count, Mulcand;	;		;				| initerr -= count * dx.
+	movw dx, Multiplier;	;		cjs, go multiply;		| pr_product
+	movw HiRslt, y;		am->am;		;				| 
+	movw LoRslt, acc;	;		;				| 
+	rsubw err, acc, err;	;		;				| 
+	subcw d, hierr, hierr;	;		;				| 
+tadvy:	movw starty, acc;	;		;				| 
+	subw,s sizey, acc, y;	;		;				| if (start.y >= size.y)
+	movw,s starty, Multiplier; ;		cjp, ~neg clipoff;		| (Tvecs) If (start.y < 0), comp clip params.
+	movw x1, acc;		;		cjp, ~neg tcliprt;		| initerr += start.y * dx.
+	movw dx, Mulcand;	;		cjs, go multiply;		| pr_product
+	movw LoRslt, acc;	;		;				| double precision add.
+	movw HiRslt, y;		am->am;		;				| 
+	addw err, acc, err;	;		;				| 
+	addcw d, hierr, hierr;	;		;				| 
+tadvy1:	movw 0, starty;		;		;				| start.y= 0.
+	movw dy, acc;		;		;				| 
+	subw,s dx, acc, acc;	;		;				| count= ((dy-dx)-initerr) / dy.
+	movw 0, y;		am->am;		cjp, ~neg tadvy1a;		| d and acc (low) form (dy-dx).
+	compw 0, y;		am->am;		;				| 
+tadvy1a:subw err, acc, DLow;	;		;				| double precision subtract.
+	rsubcw d, hierr, DHigh;	;		;				| 
+	movw dy, Dvsr;		;		cjs, go divlong;		| 
+	movw QLow, count;	am->am;		;				| 
+	addw d, startx, startx;	;		;				| start.x += count.
+	addw d,cloff,cloff;	;		;				| (Tvecs) (cloff += count).
+	movw dy, Mulcand;	;		;				| initerr += count * dy.
+	movw count, Multiplier;	;		cjs, go multiply;		| pr_product
+	movw LoRslt, acc;	;		;				| double precision add.
+	movw HiRslt, y;		am->am;		;				| 
+	addw err, acc, err;	;		;				| 
+	addcw d, hierr, hierr;	;		;				| 
+tadvy3:	movw startx, acc;	;		;				| 
+	subw,s sizex, acc, y;	;		;				| if (startx >= size.x)...
+	movw x1, acc;		;		cjp, ~neg clipoff;		| (Tvecs) If pos, comp clipping parameters.
+tcliprt: subw,s sizex, acc, y;	1->am;		;				| if (pos1.x >= size.x)...
+	subw d, sizex, acc;	;		cjp, neg tlasty;		| pos1.x= size.x - 1.
+	movw acc, x1;		;		;				| 
+	subw x0, acc, Mulcand;	;		;				| (size.x-1) - pos0.x
+	movw dy, Multiplier;	;		cjs, go multiply;		| pr_product (..., dy).
+	sr0w dx, temp0;		am->am;		;				| acc= (dx - dx>>1 - 1).  temp0 is junk.
+	subw d, dx, acc;	;		;				| 
+	decw acc;		;		;				| dx > 0 so that acc >= 0, and high acc = 0.
+	addw LoRslt, acc, DLow;	;		;				| double precision add:  prod + (dx - dx>>1 - 1).
+	addcw d, HiRslt, DHigh;	0->am;		;				| 
+tcliprt2:movw dx, Dvsr;		;		cjs, go divlong;		| / dx
+	movw y0, acc;		;		;				| 
+	addw QLow, acc, y1;	;		;				| pos1.y= pos0.y + (...) / dx.
+	bsetw cliprt,options;	;		;				| (Tvecs) tex->options.res_cliprt = 1.
+tlasty:	movw y1, acc;		;		;				| 
+	subw,s sizey, acc, y;	;		;				| if (pos1.y >= size.y)...
+	decw sizey, ropmode;	am->am;		cjp, neg tclipdone;		| pos1.y= size.y - 1.  ropmode junk reg for am->am.
+	movw d, y1;		;		;				| 
+	rsubw d, y0, Mulcand;	;		;				| (size.y-1) - pos0.y
+	movw dx, Multiplier;	;		cjs, go multiply;		| pr_product (..., dx).
+	sr0w dx, temp0;		am->am;		;				| dx>>1.  temp0 junk (can't use acc).
+	addw d, LoRslt, DLow;	;		;				| + (dx>>1).  double precision add.
+	addcw d, HiRslt, DHigh;	0->am;		;				| 
+tlasty0:movw dy, Dvsr;		;		cjs, go divlong;		| / dy.
+	movw x0, acc;		;		;				| 
+	addw QLow, acc, x1;	;		;				| 
+	bsetw cliprt,options;	;		;				| (Tvecs) tex->options.res_cliprt = 1.
+#ifndef GPPLUS
+tclipdone: btstw,s nosetup,options; ;		;				| 
+	movw x1, acc;		=vropset1->brreg; ;				| Test if rop chips need setup.
+#else GPPLUS
+tclipdone:  movw pkptr,y;	am->brreg;	;
+	btstw,s nosetup,options; ;		cjp,go;				| continue or return to pick routine
+tclipdraw: movw x1, acc;	=vropset1->brreg; ;				| Test if rop chips need setup.
+#endif GPPLUS
+	subw startx, acc, count; ;		cjp, ~zer tcolor;		| count= pos1.x-start.x. Jump if chips rop chips ok.
+#ifdef GPPLUS
+	;			VecAtts->scrmemp; ;				| 
+	testw (d);		scrmem->am;	ldct t3dummy;			| test if z buffering enabled
+	testw (nodst);		;		jsrp,zer vropseta;		| call subroutine if z buf disabled
+#else	
+	testw (nodst);		;		cjs, go vropseta;		| Set up rasterop chips.
+#endif GPPLUS	
+tropdone: romw 8, color, acc, 0xff00; ;		;				| instruction completes on next cycle.
+	IMM;			FBAllRopPrimeSrc1->vloareg;;			| vhiareg unchanged.
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+tcolor:	movw color, y;		am->vwdreg;	cjp, ~vir .;			| load vwdreg for bresenham loop but don't write.
+	btstw,s 0, reflect;	VByte->vctlreg;	;				| if (reflect & 1)
+tcdumret: btstw,s 1, reflect;	;		cjp, zer tmajx;			| if (reflect & 2)
+	movw sizex, acc;	;		cjp, zer tmajy;			| 
+	decw acc;		;		;				| 
+	subw startx, acc, startx;;		;				| start.x= ((size.x-1) - start.x).
+tmajy:	movw offsety, acc;	;		;				| 
+	addw startx, acc, Multiplier;;		cjs, go MulSWid;		| cg2_roppixel (..., start.x).
+	movw offsetx, acc;	;		;				| 
+	addw starty, acc, acc;	;		cjs, go vcompvme;		| cg2_roppixel (..., start.y, ...).
+|   Bump error so that test in octant is as if it were done after adding dy.
+#ifdef GPPLUS
+|   Test for Z buffered lines.  If necessary, we will have to advance the z values based on
+|   our clipping results.  
+	;			VecAtts->scrmemp; ;				| 
+	testw (d);		scrmem->am;	;				| temp register to hold status
+	;			;		cjs,~zer vec3yjmap;		| haven't reflected back y, jump if z buffering is on NEW
+#endif GPPLUS	
+	movw err, acc;		;		;				| 
+	addw dy, acc, acc;	;		;				| 
+	decw acc;		;		;				| We can only directly test err >= 0 not err > 0.
+	movw dy, r[3];		am->am;		;				| (Tvecs) (these were switched!!!)
+	negw dx, r[4];		;		;				| (Tvecs) (majax)
+	movw count, r[2];	;		;				| 
+	movw cloff,y;		am->am;		;				| 
+	movw d,r[9];		;		;				| 
+	movw r[24],y;		am->am;		;				| move options field
+	movw d,r[7];		;		;				| 
+	movw reflect, y;	am->am;		;				| 
+	movw d, r[5];		;		cjp, go toctant;		| toctant will return to treset.
+
+tmajx:	movw sizey, acc;	;		cjp, zer tmajx1;		| 
+	decw acc;		;		;				| 
+	subw starty, acc, starty;;		;				| start.x= ((size.x-1) - start.x).
+tmajx1:	movw offsety, acc;	;		;				| 
+	addw starty, acc, Multiplier;;		cjs, go MulSWid;		| cg2_roppixel (..., start.x).
+	movw offsetx, acc;	;		;				| 
+	addw startx, acc, acc;	;		cjs, go vcompvme;		| cg2_roppixel (..., start.y, ...).
+#ifdef GPPLUS
+|   Test for Z buffered lines.  If necessary, we will have to advance the z values based on
+|   our clipping results.  
+	;			VecAtts->scrmemp; ;				| 
+	testw (d);		scrmem->am;	;				| NEW, CHECK NEXT LINE !!!
+	;			;		cjs,~zer vec3xjmap;		| haven't reflected back y, jump if z buffering is on NEW
+#endif GPPLUS	
+	movw err, acc;		;		;				| 
+	addw dy, acc, acc;	;		;				| 
+|   Bump error so that test in octant is as if it were done after adding dy.
+	decw acc;		;		;				| We can only directly test err >= 0 not err > 0.
+	movw dy, r[3];		am->am;		;				| 
+	negw dx, r[4];		;		;				| (Tvecs) Majax.
+	movw count, r[2];	;		;				| 
+	movw cloff,y;		am->am;		;				| 
+	movw d,r[9];		;		;				| 
+	movw r[24],y;		am->am;		;				| move options field
+	movw d,r[7];		;		;				| 
+	movw reflect, y;	am->am;		;				| 
+	movw d, r[5];		;		cjp, go toctant;		| toctant will return to treset.
+
+
+#ifdef GPPLUS
+t3dummy: ;			;		cjp,~vir .;			| 
+	btstw,s 0,reflect;	VByte->vctlreg;	;				| 
+	;			;		cjpp,go tcdumret;		| 
+#endif GPPLUS	
+
+#ifdef GPPLUS
+|   Return here from the textured vector z-buffering and depth cueing code
+tdcoct_ret: ;			;		cjp,go treset;			| return to treset from here
+#endif GPPLUS
+
+
+#undef clip
+#undef reflect
+#undef offsetx
+#undef offsety
+#undef ropmode
+
+#undef x0
+#undef y0
+#undef x1
+#undef y1
+#undef dx
+#undef dy
+#undef hierr
+#undef err
+#undef starty
+#undef startx
+#undef sizey
+#undef sizex
+#undef count
+#undef addrlo
+#undef addrhi
+#undef clipptr
+#undef width
+
+#undef cloff
+#undef options
+#undef pkptr
+
+#undef pick
+#undef clipbit
+#undef nosetup
+#undef pixrect
+#undef cliprt
+#undef solid
+#undef right
+
+#undef savtex
+
+#include "clipoff.pp.u"

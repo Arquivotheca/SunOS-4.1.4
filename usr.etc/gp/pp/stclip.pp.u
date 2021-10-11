@@ -1,0 +1,58 @@
+| "@(#)stclip.pp.u 1.1 94/10/31 SMI"
+
+| Copyright 1985 by Sun Microsystems, Inc.
+
+|   stclip:
+|   Resource Usage:  acc, r[0], r[1], scratch memory.
+
+|   stclip stores the clipping list from the fifo into
+|   the scratch memory at the location ClipList.  It consists
+|   of groups of four values: offsetx, offsety, sizex, and sizey.
+|   These are sanity checked against the edges of the screen.
+
+#define offx	r[0]
+#define offy	r[1]
+#define sizex	r[2]
+#define sizey	r[3]
+#define temp	r[4]
+
+stclip:	;			ClipList->scrmemp; ;				| Initialize scratch memory.
+strect:	movw d, acc;		fifo1->am;	cjp, f1e strect;		| Get number of rectangles.
+	decw acc;		am->brreg;	;				| 
+	;			;		push, go;			| Load counter, do loop.
+
+stx:	movw,s d, acc;		fifo1->am;	cjp, f1e stx;			| Get offsetx.
+	movw 0, offx;		;		cjp, neg sty;			| Compare with 0.
+	rsubw,s d, acc, y;	XMax->am;	;				| Compare with XMax.
+	movw acc, offx;		;		cjp, ~neg sty;			| 
+	movw d, offx;		XMax->am;	;				| 
+sty:	movw,s d, acc;		fifo1->am;	cjp, f1e sty;			| Get offsety.
+	movw 0, offy;		;		cjp, neg stw;			| Compare with 0.
+	rsubw,s d, acc, y;	YMax->am;	;				| Compare with YMax.
+	movw acc, offy;		;		cjp, ~neg stw;			| sizex ok.
+	movw d, offy;		YMax->am;	;				| 
+stw:	movw,s d, acc;		fifo1->am;	cjp, f1e stw;			| Get sizex.
+	addw offx, acc, temp;	=stwskip->brreg; cjp, neg stwskip;		| if (sizex <= 0) skip this rectangle.
+	rsubw,s d, temp, temp;	SWidth->am;	cjp, zer;			| if ((offsetx+sizex) > XMax) trim sizex
+	movw acc, sizex;	;		cjp, ~neg sth;			| Sizex ok.
+	addw temp, acc, sizex;	;		;				| Adjust sizex.
+sth:	movw,s d, acc;		fifo1->am;	cjp, f1e sth;			| Get sizey.
+	addw offy, acc, temp;	=strfct->brreg;	cjp, neg strfct;		| if (sizey <= 0) skip this rectangle.
+	rsubw,s d, temp, temp;	SHeight->am;	cjp, zer;			| if ((offsety+sizey) > XMax) trim sizey
+	movw acc, sizey;	;		cjp, ~neg stvals;		| Sizey ok.
+	addw temp, acc, sizey;	;		;				| Adjust sizey.
+stvals:	movw offx, y;		am->scrmem;	;			scrmp +	| Store values.
+	movw offy, y;		am->scrmem;	;			scrmp +	| 
+	movw sizex, y;		am->scrmem;	;			scrmp +	| 
+	movw sizey, y;		am->scrmem;	cjp, go strfct;		scrmp +	| 
+stwskip: ;			fifo1->am;	cjp, f1e stwskip;		| Discard sizey.  Skip this rectangle.
+strfct:	;			;		rfct;				| 
+
+	compw 0, y;		am->scrmem;	cjp, go start;		scrmp +	| 
+
+
+#undef offx
+#undef offy
+#undef sizex
+#undef sizey
+#undef temp

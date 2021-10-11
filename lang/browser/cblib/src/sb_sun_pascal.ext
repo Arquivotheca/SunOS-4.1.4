@@ -1,0 +1,717 @@
+/* @(#)sb_sun_pascal.ext 1.1 94/10/31 SMI */
+
+/*
+ *	Copyright (c) 1989, Sun Microsystems, Inc.  All Rights Reserved.
+ *	Sun considers its source code as an unpublished, proprietary
+ *	trade secret, and it is available only under strict license
+ *	provisions.  This copyright notice is placed here only to protect
+ *	Sun in the event the source is deemed a published work.  Dissassembly,
+ *	decompilation, or other means of reducing the object code to human
+ *	readable form is prohibited by the license agreement under which
+ *	this code is provided to the user or company in possession of this
+ *	copy.
+ *	RESTRICTED RIGHTS LEGEND: Use, duplication, or disclosure by the
+ *	Government is subject to restrictions as set forth in subparagraph
+ *	(c)(1)(ii) of the Rights in Technical Data and Computer Software
+ *	clause at DFARS 52.227-7013 and in similar clauses in the FAR and
+ *	NASA FAR Supplement.
+ */
+
+
+#ifndef sb_sun_pascal_ext_INCLUDED
+#define sb_sun_pascal_ext_INCLUDED
+
+language sun_pascal "(*" "*)" grep-able
+version 1
+
+/*
+ * These ref-focus-unit statements defines the tags that the focus
+ * facility uses. sb_focus.ext describe them in detail.
+ */
+#define REF_FOCUS_UNITS \
+ref-focus-unit File \
+ref-focus-unit Macro \
+ref-focus-unit Function \
+ref-focus-unit Block \
+ref-focus-unit Language
+
+#include "sb_language_master.ext"
+
+#define DEF ALL_HITS def
+#define REF ALL_HITS ref
+
+properties sun_pascal {
+	apollo
+	array
+	bound
+	call
+	def
+	enum
+	extern
+	field
+	formal
+	func
+	global
+	io
+	label
+	literal
+	local
+	lower
+	non_bound
+	non_field
+	non_formal
+	non_variant
+	private
+	proc
+	program
+	public
+	read
+	record
+	ref
+	routine
+	toplevel
+	type
+	upper
+	var
+	variable
+	variant
+	write
+}
+
+tags sun_pascal 60 {
+	decl_enum_item = DEF_WEIGHT
+			( DEF enum BASE.constant )
+			CPP_SECONDARY_SYMBOL
+
+	decl_field = DEF_WEIGHT
+			( DEF variable field non_bound non_variant )
+			CPP_SECONDARY_SYMBOL
+	decl_variant = DEF_WEIGHT
+			( DEF variable field non_bound variant )
+			CPP_SECONDARY_SYMBOL
+
+	decl_type = DEF_WEIGHT
+			( DEF type )
+			CPP_SECONDARY_SYMBOL
+	ref_type =
+			( REF type )
+			CPP_SECONDARY_SYMBOL
+
+	decl_var_public = DEF_WEIGHT
+			( DEF variable non_field non_bound
+			 public global toplevel )
+			CPP_SECONDARY_SYMBOL
+	decl_var_private = DEF_WEIGHT
+			( DEF variable non_field non_bound private )
+			CPP_SECONDARY_SYMBOL
+	decl_io = DEF_WEIGHT
+			( DEF variable non_field non_bound io toplevel )
+			CPP_SECONDARY_SYMBOL
+	decl_var = DEF_WEIGHT
+			( DEF variable non_field non_bound non_formal local )
+			CPP_SECONDARY_SYMBOL
+	decl_param = DEF_WEIGHT
+			( DEF variable non_field non_bound formal local )
+			CPP_SECONDARY_SYMBOL
+	decl_param_var = DEF_WEIGHT
+			( DEF variable non_field non_bound formal local func )
+			CPP_SECONDARY_SYMBOL
+	decl_param_func = DEF_WEIGHT
+			( DEF variable non_field non_bound formal local proc )
+			CPP_SECONDARY_SYMBOL
+	decl_param_proc = DEF_WEIGHT
+			( DEF variable non_field non_bound formal local var )
+			CPP_SECONDARY_SYMBOL
+	decl_lower_bound = DEF_WEIGHT
+			( DEF variable non_field bound lower formal local )
+			CPP_SECONDARY_SYMBOL
+	decl_upper_bound = DEF_WEIGHT
+			( DEF variable non_field bound upper formal local )
+			CPP_SECONDARY_SYMBOL
+	ref_var_read =
+			( REF variable non_field read )
+			CPP_SECONDARY_SYMBOL
+	ref_var_write =
+			( REF variable non_field write )
+			CPP_SECONDARY_SYMBOL
+	ref_var_read_write =
+			( REF variable non_field read write )
+			CPP_SECONDARY_SYMBOL
+	ref_array_read =
+			( REF variable non_field array read )
+			CPP_SECONDARY_SYMBOL
+	ref_array_write =
+			( REF variable non_field array write )
+			CPP_SECONDARY_SYMBOL
+	ref_array_read_write =
+			( REF variable non_field array read write )
+			CPP_SECONDARY_SYMBOL
+	ref_field_read =
+			( REF variable field read )
+			CPP_SECONDARY_SYMBOL
+	ref_field_write =
+			( REF variable field write )
+			CPP_SECONDARY_SYMBOL
+	ref_field_read_write =
+			( REF variable field read write )
+			CPP_SECONDARY_SYMBOL
+
+	decl_const = DEF_WEIGHT
+			( DEF BASE.constant )
+			CPP_SECONDARY_SYMBOL
+	ref_const =
+			( REF BASE.constant )
+			CPP_SECONDARY_SYMBOL
+
+	decl_func_extern = EXTERN_DEF_WEIGHT
+			( DEF routine extern func )
+			CPP_SECONDARY_SYMBOL
+	decl_func_public = DEF_WEIGHT
+			( DEF routine public toplevel func )
+			CPP_SECONDARY_SYMBOL
+	decl_func_private = DEF_WEIGHT
+			( DEF routine private func )
+			CPP_SECONDARY_SYMBOL
+	decl_func = DEF_WEIGHT
+			( DEF routine local func )
+			CPP_SECONDARY_SYMBOL
+	decl_proc_extern = EXTERN_DEF_WEIGHT
+			( DEF routine extern proc )
+			CPP_SECONDARY_SYMBOL
+	decl_proc_public = DEF_WEIGHT
+			( DEF routine public toplevel proc )
+			CPP_SECONDARY_SYMBOL
+	decl_proc_private = DEF_WEIGHT
+			( DEF routine private proc )
+			CPP_SECONDARY_SYMBOL
+	decl_proc = DEF_WEIGHT
+			( DEF routine local proc )
+			CPP_SECONDARY_SYMBOL
+	ref_proc =
+			( REF routine call proc )
+			CPP_SECONDARY_SYMBOL
+	ref_proc_hidden =
+			( HIDDEN ref routine proc )
+			CPP_SECONDARY_SYMBOL
+	ref_func =
+			( REF routine call func )
+			CPP_SECONDARY_SYMBOL
+	ref_func_hidden =
+			( HIDDEN ref routine func )
+			CPP_SECONDARY_SYMBOL
+
+	decl_label = DEF_WEIGHT
+			( DEF label )
+			CPP_SECONDARY_SYMBOL
+	ref_label =
+			( REF label )
+			CPP_SECONDARY_SYMBOL
+
+	string =
+			( REF BASE.string literal )
+			CPP_SECONDARY_STRING
+
+	decl_program = DEF_WEIGHT
+			( DEF program )
+			CPP_SECONDARY_SYMBOL
+
+
+	apollo =
+			( ALL_HITS apollo )
+			CPP_SECONDARY_SYMBOL
+}
+
+insert-menu-items gluemenu "Declarations" "Variables"
+menu {
+	"Programs"
+}
+
+menu {
+	CB_MENU_STRING_ALL_MATCHES equiv menu {
+		CB_MENU_STRING_ALL_MATCHES equiv
+			= ( ALL_HITS ) | ( CPP_ALL_HITS )
+			help "All mentions of the symbol"
+
+		"Variables" equiv menu {
+			"All Variables" equiv
+				= ( ALL_HITS variable )
+				help "All uses as a variable"
+			"Regular Variables" equiv
+				= ( ALL_HITS variable non_field )
+				help "All uses as a non-field variable"
+			"Field Variables" equiv
+				= ( ALL_HITS variable field )
+				help "All uses as a field"
+		} help "All uses as a variable"
+
+		"Routines" equiv "Functions"
+			= ( ALL_HITS routine )
+			help "All uses as a function or procedure"
+
+		"Types" equiv 
+			= ( ALL_HITS type )
+			help "All uses as a type"
+
+		"Labels" equiv
+			= ( ALL_HITS label )
+			help "All uses of labels"
+
+		"Constants" equiv menu {
+			"All Constants" equiv
+				= ( ALL_HITS BASE.constant ) |
+				  ( CPP_ALL_HITS BASE.constant cpp.macro )
+				help "All uses of constants"
+			"Macro Constants" equiv
+				= ( CPP_ALL_HITS BASE.constant cpp.macro )
+				help "All uses of macros without formals"
+		} help "All uses of constants"
+
+		"cpp Symbols" equiv menu {
+			"All Symbols" equiv
+				= ( CPP_ALL_HITS )
+				help "All cpp related symbols"
+			"Macros" equiv menu {
+				"All Macros" equiv
+					= ( CPP_ALL_HITS cpp.macro )
+					help "All cpp macros"
+				"With Formals" equiv
+					= ( CPP_ALL_HITS cpp.macro
+					   cpp.w_formals )
+					help "All cpp macros defined or " +
+					  "referenced with formals"
+				"Without Formals" equiv
+					= ( CPP_ALL_HITS cpp.macro
+					   cpp.wo_formals )
+					help "All cpp macros defined or " +
+					  "referenced without formals"
+			  } help "All cpp macros"
+		} help "All cpp related symbols"
+	} help "All mentions of the symbol"	
+
+	"Declarations" equiv menu {
+		"All Declarations" equiv
+			= ( DEF ) | ( CPP_DEF )
+			help "All declarations"
+
+		"Variables" equiv menu {
+			"All Variables" equiv
+				= ( DEF variable )
+				help "All variable declarations"
+			 "Public Variables" equiv "Toplevel Variables"
+			 	= ( DEF variable public )
+			 	help "All variable declarations not in a " +
+				  "function"
+			"Private Variables"
+				= ( DEF variable private )
+				help "All private variable declarations"
+			"Local Variables" equiv menu {
+				"All Locals" equiv
+					= ( DEF variable local )
+					help "All local variable declarations"
+				"Non-formals" equiv "Auto Locals"
+					= ( DEF variable local non_formal )
+					help "All regular local variable " +
+					  "declarations"
+				"Formals" equiv menu {
+					"All Formals" equiv
+						= ( DEF variable local formal )
+						help "Formal function argument"
+					"Regular formals"
+						= ( DEF variable local formal
+						   non_bound )
+						help "Formals that are not " +
+						  "conformant bounds"
+					"Conformant Bounds" menu {
+						"All Bounds"
+							= ( DEF variable local
+							   formal bound )
+							help "Formals that " +
+							  "are conformant " +
+							    "bounds"
+						"Lower Bounds"
+							= ( DEF variable local
+							   formal bound lower )
+							help "Formals that " +
+							  "are lower " +
+							    "conformant bounds"
+						"Upper Bounds"
+							= ( DEF variable local
+							   formal bound upper )
+							help "Formals that " +
+							  "are upper " +
+							    "conformant bounds"
+					} help "Formal function argument"
+				} help "Formal function argument"
+			} help "All local variable declarations"
+			"Fields" equiv menu {
+				"All Fields" equiv
+					= ( DEF variable field )
+					help "All field declarations"
+				"Regular Fields"
+					= ( DEF variable field non_variant )
+					help "All non variant field " +
+					  "declarations"
+				"Variant Fields"
+					= ( DEF variable field variant )
+					help "All variant field " +
+					  "declarations"
+			} help "All field declarations"
+		} help "All variable declarations"
+
+		"Programs" equiv
+			= ( DEF program )
+			help "Program names"
+
+		"Routines" equiv "Functions" menu {
+			"All Routines" equiv "All Functions"
+				= ( DEF routine )
+				help "All function or procedure declarations"
+			"Extern Routines" equiv "Extern Functions" 
+				= ( DEF routine extern )
+				help "All extern function or procedure " +
+				  "declarations"
+			"Local Routines" equiv "Local Functions" 
+				= ( DEF routine local )
+				help "Function or procedures declared" +
+				  " in a function or procedure scope"
+			"Private Routines"
+				= ( DEF routine private )
+				help "Functions or procedures declared private"
+			"Public Routines" equiv "Top Level Functions"
+				= ( DEF routine public )
+				help "Functions or procedures declared public"
+		} help "All function or procedure declarations"
+
+		"Types" equiv "Typedefs"
+			= ( DEF type )
+			help "Type declarations"
+
+		"Labels" equiv
+			= ( DEF label )
+			help "All label declarations"
+
+		"Constants" equiv menu {
+			"All Constants" equiv
+				= ( DEF BASE.constant )
+				help "All constant declarations"
+			"Enum Members" equiv
+				= ( DEF enum )
+				help "All enum member declarations"
+			"Macro Constants" equiv
+				= ( ALL_HITS BASE.constant cpp.macro cpp.def )
+				help "All cpp macro declarations without " +
+				  "formals"
+		} help "All constant declarations"
+
+		"cpp Symbols" equiv menu {
+			"All Symbols" equiv
+				= ( CPP_DEF )
+				help "Declarations of cpp symbols"
+			"Macros" equiv menu {
+				"All Macros" equiv
+					= ( CPP_DEF cpp.macro )
+					help "All macro definitions"
+				"With Formals" equiv
+					= ( CPP_DEF cpp.macro cpp.w_formals )
+					help "All cpp macros defined " +
+					  "with formals"
+				"Without Formals" equiv
+					= ( CPP_DEF cpp.macro cpp.wo_formals )
+					help "All cpp macros defined " +
+					  "without formals"
+				"From #undef" equiv
+					= ( CPP_DEF cpp.from_undef )
+					help "Undeclaration of macro"
+			} help "All macro definitions"
+			"Macro Formals" equiv
+				= ( CPP_DEF cpp.formal )
+				help "Macro formal defintions"
+		} help "Declarations of cpp symbols"
+	} help "All declarations"
+
+	"References" equiv menu {
+		"All References" equiv
+			= ( REF ) | ( CPP_REF )
+			help "All references to symbols"
+
+		"Variables" equiv menu {
+			"All Variables" equiv menu {
+				"All" equiv
+					= ( REF variable )
+					help "All references to variables " +
+					  "or fields"
+				"Write" equiv
+					= ( REF variable write )
+					help "All references to variables " +
+					  "or fields for write"
+				"Read" equiv
+					= ( REF variable read )
+					help "All references to variables " +
+					  "or fields for read"
+				"Read/Write" equiv
+					= ( REF variable read write )
+					help "All references to variables " +
+					  "or fields for update"
+			} help "All references to variables or fields"
+			"Non-Field Variables" equiv menu {
+				"All" equiv
+					= ( REF variable  )
+					help "All references to variables"
+				"Write" equiv
+					= ( REF variable  write )
+					help "All references to variables " +
+					  "for write"
+				"Read" equiv
+					= ( REF variable  read )
+					help "All references to variables " +
+					  "for read"
+				"Read/Write" equiv
+					= ( REF variable  read write )
+					help "All references to variables " +
+					  "for update"
+			} help "All references to variables"
+			"Fields" equiv menu {
+				"All Fields" equiv menu {
+					"All" equiv
+						= ( REF variable field )
+						help "All references to fields"
+					"Write" equiv
+						= ( REF variable field
+						   write )
+						help "All references to fields"
+						  + " for write"
+					"Read" equiv
+						= ( REF variable field
+						   read )
+						help "All references to fields"
+						  + " for read"
+					"Read/Write" equiv
+						= ( REF variable field
+						   read write )
+						help "All references to fields"
+						  + " for update"
+				} help "All references to fields"
+			} help "All references to fields"
+			"Arrays" menu {
+				"All"
+					= ( REF variable array )
+					help "All references to arrays"
+				"Write"
+					= ( REF variable array write )
+					help "All references to arrays"
+					  + " for write"
+				"Read"
+					= ( REF variable array read )
+					help "All references to arrays"
+					  + " for read"
+				"Read/Write"
+					= ( REF variable array
+					   read write )
+					help "All references to arrays"
+					  + " for update"
+			} help "All references to arrays"
+		} help "All references to variables or fields"
+
+		"Routines" equiv "Functions" menu {
+			"Routines" equiv "Regular Function Calls" menu {
+				"All" equiv
+					= ( REF routine call )
+					help "All calls to functions or " +
+					  "procedures"
+				"Function" equiv "Return Value Used"
+					= ( REF routine call func )
+					help "All calls to functions"
+				"Procedure" equiv "Return Value Not Used"
+					= ( REF routine call proc )
+					help "All calls to procedures"
+			} help "All calls to functions or procedures"
+		} help "All calls to functions or procedures"
+
+		"Types" equiv
+			= ( REF type )
+			help "All references to types"
+
+		"Labels" equiv
+			= ( REF label )
+			help "All references to labels"
+
+		"Constants" equiv menu {
+			"All Constants" equiv
+				= ( REF BASE.constant )
+				help "All references to constants"
+			"Macros" equiv
+				= ( ALL_HITS BASE.constant cpp.ref
+				    cpp.macro )
+				help "All references to cpp constants"
+		} help "All references to constants"
+
+		"cpp Symbols" equiv menu {
+			"All Symbols" equiv
+				= ( CPP_REF )
+				help "All cpp symbol references"
+			"Macros" equiv menu {
+				"All Macros" equiv menu {
+					"All Macros" equiv
+						= ( CPP_REF cpp.macro )
+						help "All macro references"
+					"From The Source" equiv
+						= ( CPP_REF cpp.macro
+						   cpp.from_source )
+						help "All macros referenced " +
+						  "from the source"
+					"From #if..." equiv menu {
+						"All #if..." equiv
+							= ( CPP_REF cpp.macro
+							   cpp.if )
+							help "All macros " +
+							  "referenced from " +
+							    "some kind of " +
+							      "#if statement"
+						"From #if" equiv
+							= ( CPP_REF cpp.macro
+							   cpp.from_if )
+							help "All macros " +
+							  "referenced from " +
+							    "#if"
+						"From #ifdef" equiv
+							= ( CPP_REF cpp.macro
+							   cpp.from_ifdef )
+							help "All macros " +
+							  "referenced from " +
+							    "#ifdef"
+						"From #ifndef" equiv
+							= ( CPP_REF cpp.macro
+							   cpp.from_ifndef )
+							help "All macros " +
+							  "referenced from " +
+							    "#ifndef"
+					} help "All macros referenced from " +
+					  "some kind of #if statement"
+				} help "All macro references"
+				"With Formals" equiv
+					= ( CPP_REF cpp.macro cpp.w_formals )
+					help "All macros referenced with " +
+					  "formals"
+				"Without Formals" equiv menu {
+					"All Macros" equiv
+						= ( CPP_REF cpp.macro
+						   cpp.w_formals )
+						help "All macros referenced " +
+						  "without formals"
+					"From The Source" equiv
+						= ( CPP_REF cpp.macro
+						   cpp.w_formals
+						   cpp.from_source )
+						help "All macros referenced " +
+						  "without formals from the " +
+						    "source"
+					"From #if..." equiv menu {
+						"All #if..." equiv
+							= ( CPP_REF cpp.macro
+							   cpp.if )
+							help "All macros " +
+							  "referenced from " +
+							    "some kind of " +
+							      "#if statement"
+						"From #if" equiv
+							= ( CPP_REF cpp.macro
+							   cpp.from_if )
+							help "All macros " +
+							  "referenced from " +
+							    "#if"
+						"From #ifdef" equiv
+							= ( CPP_REF cpp.macro
+							   cpp.from_ifdef )
+							help "All macros " +
+							  "referenced from " +
+							    "#ifdef"
+						"From #ifndef" equiv
+							= ( CPP_REF cpp.macro
+							   cpp.from_ifndef )
+							help "All macros " +
+							  "referenced from " +
+							    "#ifndef"
+					} help "All macros referenced from " +
+					  "some kind of #if statement"
+				} help "All macros referenced with formals"
+
+			} help "All macro references"
+			"Macro Actuals" equiv menu {
+				"All Actuals" equiv
+					= ( CPP_REF cpp.actual )
+					help "All references to macro actuals"
+				"Regular Actuals" equiv
+					= ( CPP_REF cpp.actual cpp.regular )
+					help "All references to macro actuals"+
+					  " that are not strings"
+				"String Actuals" equiv
+					= ( CPP_REF cpp.actual BASE.string )
+					help "All references to macro actuals"+
+					  " that are strings"
+			} help "All references to macro actuals"
+			"Macro Formals" equiv
+				= ( CPP_REF cpp.formal )
+				help "All references to macro formals"
+			"From Macro Body" equiv menu {
+				"All Body References" equiv
+					= ( CPP_REF cpp.in_body )
+					help "All references to non-formals " +
+					  "and strings from macro bodies"
+				"Regular" equiv
+					= ( CPP_REF cpp.in_body cpp.regular )
+					help "All references to non-formal " +
+					  "symbols from macro bodies"
+				"Strings" equiv
+					= ( CPP_REF cpp.in_body BASE.string )
+					help "All references to " +
+					  "strings from macro bodies"
+			} help "All references to non-formals " +
+			  "and strings from macro bodies"
+		} help "All cpp symbol references"
+	} help "All references to symbols"
+
+	"cpp Flow Control" equiv menu {
+		"Active #if/#ifdef/#ifndef blocks" equiv
+			= ( CPP_DEF cpp.active )
+			help "#if/#ifdef/#ifndef statements that " +
+			  "included their code"
+		"Inactive #if/#ifdef/#ifndef blocks" equiv
+			= ( CPP_DEF cpp.active )
+			help "#if/#ifdef/#ifndef statements that did not " +
+			  "include their code"
+	}
+
+	"Strings" equiv menu {
+		"All Strings" equiv
+			= ( ALL_HITS BASE.string )
+			help "All references to strings"
+		"Regular Strings" equiv
+			= ( ALL_HITS BASE.string literal )
+			help "All strings from the regular program text"
+		"#include String" equiv menu {
+			"All #include" equiv
+				= ( ALL_HITS BASE.string cpp.included_file )
+				help "All strings used from #include " +
+				  "directives"
+			"#include <>" equiv
+				= ( ALL_HITS BASE.string cpp.included_file
+				   cpp.system )
+				help "All strings used from #include " +
+				  "directives for system files"
+			'#include ""' equiv
+				= ( ALL_HITS BASE.string cpp.included_file
+				   cpp.local )
+				help "All strings used from #include " +
+				  "directives for local files"
+		} help "All strings used from #include directives"
+	} help "All references to strings"
+
+	BASE_STANDARD_MENU_ITEMS
+}
+
+
+
+#undef DEF
+#undef REF
+
+#endif

@@ -1,0 +1,204 @@
+| Copyright (c) 1985 by Sun Microsystems, Inc.
+|	@(#)clpvec2.vp.u 1.1 94/10/31 SMI
+
+|	clpvec2 -- clip a 2-D vector to a normalized window (-1.0 <= x,y <= 1.0)
+|
+|	Input Parameters:	inptr,fpap -- Address of vector to be clipped (N.B.: fpap must be set to inptr prior to call)
+|
+|
+|	Output:		clipped vector endpoints are written over input points
+|			return with inptr==fpap if vector is visible
+|			Am29116 Z condition flag Z: 0 (2910 branch condition ~zer) => all or part of input vector is visible
+|						    1 (2910 branch condition  zer) => input vector is not visible
+|
+#define inptr r[15]
+#define clipplanes r[11]
+#define outcode0 r[6]
+#define outcode1 acc
+#define outcodes r[5]
+#define clpplns r[4]
+#define t0_hi r[4]
+#define t0_lo r[3]
+#define recaddr r[2]
+#define t1_hi r[2]
+#define t1_lo r[1]
+#define hi_1 r[0]
+
+
+clpvec2: movw 0,y;		am->fpdp;	;		lmode rn,ai,pipe,fast;	  | fpreg's 0-15 are scratch memory
+	rolw 14,clipplanes,clpplns;0x3F80->fpregh;;		;			  | fpreg[0] = 1.0
+	;			0x0->fpregl;	;		;			  | clpplns is 2-D version of clipplanes
+	;			0->fpbp;	;		;			  | i.e. L|R|B|T is bits 3|2|1|0
+	mov2nw 1,y;		am->brreg;	;		adda,lab,hi;		  | wec0_left = 1.0 + x0
+	;			;		ldct;		;			  | Am2910 R reg <- 2 (used below)
+	addw inptr,2,y;		;		;		rsuba,la,hi;		  | wec0_right = 1.0 - x0
+	IMM;			am->fpbp;	;		;		ap+	  | fpbp <- &x1 (used at next lab)
+	compw 0,outcode0;	;		;		adda,la,hi;		  | wec0_bottom = 1.0 + y0
+	compw 0,outcode1;	;		;		;
+	movw =reject2,y;	;		;		rsuba,la,hi;		  | wec0_top = 1.0 - y0
+	IMM;			am->brreg;	;		;		ap+
+	;			;		;		adda,la,a,hi;		  | wec1_left = 1.0 + x1
+	;			;		;		;
+	;			;		;		rsuba,la,a,st,hi;	  | wec1_right = 1.0 - x1, store wec0_left
+	sl0b d,y;		fpstreg->am;	;		;		adp+
+	slqw outcode0,outcode0;	;		;		adda,la,a,st,hi;	  | wec1_bottom = 1.0 + y1, store wec0_right
+	sl0b d,y;		fpstreg->am;	;		;		dp+
+	slqw outcode0,outcode0;	;		;		rsuba,la,a,st,hi;	  | wec1_top = 1.0 - y1, store wec0_bottom
+	movw inptr,y;		am->fpap;	;		;		dp+
+	sl0b d,y;		fpstreg->am;	;		rsuba,lab,a,st,hi;	  | dx = x1 - x0, store wec0_top
+	slqw outcode0,outcode0;	;		;		;		abdp+
+	sl0b d,y;		fpstreg->am;	;		rsuba,lab,a,hi;		  | dy = y1 - y0
+	slqw outcode0,outcode0;	;		push,~go;	;
+	sl0b d,y;		fpstreg->am;	;		pa,a,hi;		  | rpt 3 times for outcode1 L,R, & B bits
+	slqw outcode1,outcode1;	;		rfct;		;
+	sl0b d,y;		fpstreg->am;	;		pa,a,st,hi;		  | outcode1 T bit & store dx
+	slqw outcode1,outcode1;	;		;		;		dp+
+	nandw outcode0,outcode1,y; am->am;	;		noflop,st,hi;		  | store dy
+	andw,s d,clpplns,outcodes;;		;		;			  | outcodes != 0 iff >= 1 pt outside window
+	norw outcode0,outcode1,y; am->am;	cjp,zer trivaccept2;;			  | trivial accept case
+	andw,s d,clpplns,y;	0->fpap;	;		;			  | result != 0 iff 2 pts outside >= 1 plane
+	andw,s outcodes,0xC,y;	0->fpdp;	cjp,~zer;	;			  | trivial reject case (=reject2 in brreg)
+	IMM;			fpregh->am;	;		;		ap+	  | need -wec0_left & -wec0_bottom for
+											  | intersection calculations below;
+											  | computed the negatives above to make
+											  | detection of outside points a simple fp
+											  | sign bit test; otherwise would have to
+											  | distinguish +0.0 from truly >0.0
+	add2nw 15,d,y;		am->fpregh;	;		;		adp+	  | negate wec0_left
+	mov2nw 3,recaddr;	fpregh->am;	;		;			  | store recips computed below at fpreg[8]
+	;			;		;		;		dp+	  | hardware can't dp+ in previous cycle 
+	add2nw 15,d,y;		am->fpregh;	cjp,~zer xrecip2;;			  | negate wec0_bottom and if line crosses
+											  | an x plane, compute dx_recip
+											  | outcodes bits indicate line crossings:
+											  | L|R|B|T is 3|2|1|0
+	mov2nw 2,y;		am->fpap;	cjp,go yrecip2;	;			  | if line didn't cross an x plane and was
+											  | not trivially accepted, it must cross a
+											  | y plane
+xrecip2: mov2nw 2,y;		am->fpap;	cjs,go recip;	;			  | fpap<-&dx, recaddr<-&dx_recip (fpreg[8])
+	andw,s d,outcodes,y;	0x3->am;	;		;			  | chk for line crossing y planes
+	;			;		cjp,zer t0t1_2;	;			  | if not, go compute intersections
+yrecip2: incw recaddr,recaddr;	;		cjs,go recip;	;		ap+	  | fpap<-&dy, recaddr<-&dy_recip (fpreg[9])
+											  | have now computed dx_recip and dy_recip
+											  | for the intersection calculations if the
+											  | corresponding t values will be used
+t0t1_2:	movw 0,t0_hi;		am->fpap;	;		lmode rn,ai,pipe,fast;	  | t0 = 0.0, param t value for line begin
+	movw 0,t0_lo;		8->fpbp;	;		;			  | fpap <- &wec0's, fpbp <- &dx_recip
+	movw 0x3F80,hi_1;	;		;		maba,lab,hi;		  | wec0_left * dx_recip (divide wec by dx)
+	IMM;			;		;		;		ap+	  | hi_1 <- high order 1.0
+	movw hi_1,t1_hi;	;		;		maba,la,hi;		  | wec0_right * dx_recip
+	movw 0,t1_lo;		am->fpdp;	;		;		abp+	  | t1 = 1.0, param t value for line end
+											  | fpdp<-0,store candidate t's at fpreg[0]
+	movw =intersect2,y;	;		;		maba,lab,hi;		  | wec0_bottom * dy_recip
+	IMM;			am->brreg;	;		;		ap+	  | set up brreg for calls to intersect2
+	compw outcode0,outcode0;;		;		maba,la,hi;		  | wec0_top * dy_recip; now outcode0 bits
+	movw 0,y;		am->fpap;	;		;			  | have same polarity as outcodes bits
+	rolw,s 12,outcodes,outcodes;;		;		pa,m,hi;		  | L|R|B|T now 15|14|13|12, advance pipe
+	rolw,s 12,outcode0,outcode0;;		cjs,neg;	;			  | call intersect2 if line crosses L plane
+	sl0w,s outcodes,outcodes;;		;		pa,m,hi;		  | R|B|T now 15|14|13, advance pipe
+	sl0w,s outcode0,outcode0;;		cjs,neg;	;			  | call intersect2 if line crosses R plane
+	sl0w,s outcodes,outcodes;;		;		pa,m,hi;		  | B|T now 15|14, advance pipe
+	sl0w,s outcode0,outcode0;;		cjs,neg;	;			  | call intersect2 if line crosses B plane
+	sl0w,s outcodes,outcodes;;		;		pa,m,hi;		  | T now 15, advance pipe
+	sl0w,s outcode0,outcode0;;		cjs,neg;	;			  | call intersect2 if line crosses T plane
+											  | now t0 and t1 represent clipped
+											  | endpoints iff t0 <= t1
+newpts2: movw,s t0_hi,y;	am->fpregh;	;		;			  | fpreg[0] <- t0 & test t0_hi==0 which
+	movw t0_lo,y;		am->fpregl;	;		;		dp+	  | implies t0==0.0 since fast Weitek mode
+	movw t1_hi,acc;		am->fpregh;	;		;			  | will not produce denormalized results
+	movw t1_lo,y;		am->fpregl;	cjp,zer t0eq0_2;;			  | fpreg[1]<-t1 & jump if t0==0.0
+	xorw,s hi_1,acc,y;	4->fpbp;	;		;			  | fpbp<-&dx, test t1_hi == high order 1.0
+											  | which means t1 == 1.0, since t1 started
+											  | at 1.0 and could only decrease
+vischk_2: subw d,t1_lo,y;	fpregl->am;	cjp,zer t1eq1_2;;			  | jump if t1==1.0, else check for t0>t1,
+	subcw,s d,t1_hi,y;	fpregh->am;	;		;			  | which means line is outside window
+	;			;		cjp,cry twonewpts_2;;			  | jump on no borrow (t1 - t0 >= 0.0)
+											  |
+reject2: movw,s 0,y;		;		crtn,go;	;			  | Z bit <- 1 (indicating rejection) & rtn
+											  |
+trivaccept2: movw,s inptr,y;	am->fpap;	crtn,go;	;			  | Z bit <- 0 (indicating acceptance),
+											  | fpap <- inptr, and return
+											  |
+t0eq0_2: mov2nw 2,y;		am->fpbp;	cjp,go t0eq0_2a;;		ap+	  | if t0 == 0.0, then the t0,t1 segment is
+											  | visible since t1 >= 0.0; also, t1 != 1.0
+											  | at this point since that would imply
+											  | trivial acceptance; fpbp<-&dx,fpap<-&t1,
+											  | & jump into the middle of the code to
+											  | compute two new endpoints;  we arrange
+											  | below to compute and store only the 2nd
+											  | point, thus saving a few cycles
+											  |
+t1eq1_2: 										  | if t1 == 1.0, then the t0,t1 segment is
+											  | visible since t0 <= 1.0; also, t0 != 0.0
+											  | at this point since that would imply
+											  | trivial acceptance; we fall into the
+											  | code to compute two new endpoints, but
+											  | arrange below to store only the 1st
+											  | point, thus saving a few cycles
+											  |
+twonewpts_2: ;			;		;		maba,lab,hi;		  | t0 * dx
+	;			;		;		;		bp+
+	;			;		;		maba,lab,hi;		  | t0 * dy
+	mov2nw 2,y;		am->fpbp;	;		;		ap+
+t0eq0_2a: movw =t0eq0_2b,y;	;		;		maba,lab,hi;		  | t1 * dx
+	IMM;			am->brreg;	;		;		bp+
+	;			;		;		maba,lab,hi;		  | t1 * dy
+	;			;		;		;
+	;			;		;		pa,m,hi;
+	movw inptr,y;		am->fpbp;	;		;			  | fpbp points to input pts
+	;			;		;		addr,lab,m,hi;		  | x0 + (t0 * dx)
+	;			;		;		;		bp+
+	;			;		;		addr,lab,m,hi;		  | y0 + (t0 * dy)
+	movw inptr,y;		am->fpbp;	;		;
+	;			;		;		addr,lab,m,hi;		  | x0 + (t1 * dx)
+	;			;		;		;		bp+
+	;			;		;		addr,lab,hi;		  | y0 + (t1 * dy)
+	movw inptr,y;		am->fpdp;	;		;			  | will store new pts over old pts
+	movw,s t0_hi,y;		;		;		pa,a,hi;		  | goto t0eq0_2b if t0==0.0, to
+	;			;		cjp,zer;	;			  | avoid overwriting x0 & y0
+	;			;		;		pa,a,st,hi;		  | store x0'
+	xorw,s t1_hi,0x3F80,y;	;		;		;		dp+	  | test for t1==1.0
+	IMM;			;		;		pa,a,st,hi;		  | store y0'
+	movw,s inptr,y;		am->fpap;	crtn,zer;	;		dp+	  | if t1==1.0, Z bit<-0,fpap<-inptr & rtn
+t0eq0_2c: ;			;		;		pa,a,st,hi;		  | store x1'
+	;			;		;		;		dp+
+	;			;		;		noflop,st,hi;		  | store y1'
+	;			;		crtn,go;	;			  | return with Z bit==0 & fpap==inptr
+											  |
+t0eq0_2b: movw =t0eq0_2c,y;	;		;		pa,hi;		dp+	  | pipe advance
+	IMM;			am->brreg;	;		;		dp+	  | increment dp to store x1'
+	;			;		;		pa,a,hi;
+	movw,s inptr,y;		am->fpap;	cjp,go;		;			  | Z bit<-0,fpap<-inptr, and goto t0eq0_2c
+											  |
+											  |
+intersect2: ;			;		;		noflop,st,hi;		  | fpreg[0] <- candidate value
+	not2nw 15,acc;		;		;		;			  | acc <- 0x7FFF
+	andw,s d,acc,acc;	fpregh->am;	cjp,~neg updt1_2;;			  | update t0 or t1 based upon previously
+											  | tested bit of outcode0; acc <- high
+											  | order t & 0x7FFF (to convert -0.0 to
+											  | +0.0,since t is guaranteed 0.0<=t<=1.0)
+updt0_2: subw d,t0_lo,y;	fpregl->am;	;		;			  | compare t with t0 (t0 - t)
+	rsubcw,s t0_hi,acc,y;	;		;		;
+	bclrw,s 15,outcodes;	;		cjp,cry chkthru2;;			  | no borrow means t <= t0
+	movw acc,t0_hi;		;		;		;			  | else t0 <- t
+	movw d,t0_lo;		;		cjpp,zer newpts2;;			  | outcodes==0 -> no more intersections
+	;			;		crtn,go;	;			  | else return to check next plane
+updt1_2: rsubw d,t1_lo,y;	fpregl->am;	;		;			  | compare t with t1 (t - t1)
+	subcw,s t1_hi,acc,y;	;		;		;
+	bclrw,s 15,outcodes;	;		cjp,cry chkthru2;;			  | no borrow means t >= t1
+	movw acc,t1_hi;		;		;		;			  | else t1 <- t
+	movw d,t1_lo;		;		cjpp,zer newpts2;;			  | outcodes==0 -> no more intersections
+	;			;		crtn,go;	;			  | else return to check next plane
+chkthru2: ;			;		crtn,~zer;	;			  | outcodes != 0 -> more intersections, rtn
+	;			;		cjpp,go newpts2;;			  | else pop stack and goto newpts2
+
+
+#undef outcode0
+#undef outcode1
+#undef outcodes
+#undef clpplns
+#undef t0_hi
+#undef t0_lo
+#undef recaddr
+#undef t1_hi
+#undef t1_lo
+#undef hi_1

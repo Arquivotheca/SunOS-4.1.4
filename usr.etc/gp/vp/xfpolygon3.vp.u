@@ -1,0 +1,1159 @@
+| Copyright (c) 1985 by Sun Microsystems, Inc.S
+| @(#)xfpolygon3.vp.u 1.1 94/10/31 SMI
+
+
+
+#define sx	r[21]
+#define sy	r[22]
+#define shadestyle r[16]
+#define colorop	r[15]
+#define edgptr	r[14]
+/* bit 15 of polyshadestyle used as flag for 2D or 3D calling routine */
+#define polyshadestyle r[24]
+#define onum r[23]
+#define inum r[22]
+#define noptsyet r[21]
+#define nomorepts r[20]
+#define putclpdpts r[19]
+#define getnxtpt r[18]
+#define nvptr r[17]
+#define tmp16 r[16]
+#define inptr	r[15]	/* used only temporarily. */
+#define outptr	r[14]	/* used only temporarily. */
+#define polycolorop r[13]
+#define polyclpplns r[12]
+#define nbnds r[11]
+
+#define Depth	r[15]
+#define Width	r[14]
+#define Height	r[13]
+#define Words	r[12]
+#define Rows	r[11]
+
+#define nvert r[10]
+#define nedges r[9]
+#define matrixptr r[9]
+#define nxtptr r[8]
+#define inbufptr r[7]
+#define outbufptr r[6]
+#define xf3ptr r[5]
+#define plnptr r[4]
+#define firsty r[4]
+#define vwpsclptr r[4]
+#define ptbufptr r[3]
+#define xfptptr r[3]
+#define cmdptptr r[3]
+#define recaddr r[2]
+#define outcodeprod r[2]
+#define outcodesum r[1]
+#define tmp1 r[1]
+#define clpplns r[0]
+#define tmp r[0]
+
+
+#define MAXEDGES 180
+#define DUMMYEDGE 230
+#define PTBUF 1915
+#define PTBUFp3 1918
+#define PTBUFp4 1919
+#define IBUF 1890
+#define IBUFm1 1889
+#define WBUF 1890
+#define SMALLNVERT 26
+#define LEFTPLNSTRCT 40
+#define TOPPLNSTRCT 55
+#define HITHERPLNSTRCT 70
+#define RIGHTPLNSTRCT 85
+#define BOTTOMPLNSTRCT 100
+#define YONPLNSTRCT 115
+#define BUF1 130
+#define BUF2 180
+
+
+|	movw d,nbnds;		shmem->am;	jmap XF_PGON_INT_3D;;			  | # of separate boundaries (same as CORENDCPOLY_3D)
+XF_PGON_INT_3D:
+	movw d,xf3ptr;		=xfint3->am;	;		;			  | xf3ptr pts to 3D transform routine
+											  | xfint3 converts from fix to float
+											  | before calling the regular xf3 routine
+	;			;		cjp,go xfpoly3D;;			  | fall into rest of polygon code
+
+
+
+|	movw d,nbnds;		shmem->am;	jmap XF_PGON_FLT_3D;;			  | # of separate boundaries
+XF_PGON_FLT_3D:
+	movw d,xf3ptr;		=xf3->am;	;		;			  | use the regular xf3 routine
+#ifndef GPPLUS
+xfpoly3D: movw frameptr,y;	am->shmemp;	cjs,go polygon_attr_3D;;		  | option bits passed to polygon_attr_3D
+#else GPPLUS
+xfpoly3D: addw frameptr,PICKCNT_FRMOFF,y; ;	;		;			  | get latest pick count
+	IMM;			am->shmemp;	cjs,go polygon_attr_3D;;		  | option bits passed to polygon_attr_3D
+#endif GPPLUS
+	movw matrixptr,y;	am->shmemp;	ldct 15;	;			  | in acc -- constant:0, Gouraud:1
+	mov2nw 4,y;		am->fpdp;	cjs,go shm_to_fpr;;			  | move matrix to fpr[16]
+	addw d,frameptr,acc;	VWPXSCL_FRMOFF->am;;		;
+	movw acc,y;		am->shmemp;	ldct 5;		;
+	mov2nw 5,y;		am->fpdp;	cjs,go shm_to_fpr;;			  | move viewport parameters to fpr[32]
+	
+
+										|
+										| edge structure is:
+										| fpreg[edgptr+0]: ymin    16-bit int in high word
+										|		   X       don't care in low word
+										| fpreg[edgptr+1]: ymax    16-bit int in high word
+										|		   X       don't care in low word
+										| fpreg[edgptr+2]: xmax    32-bit float
+										| fpreg[edgptr+3]: zmax    32-bit float
+										| fpreg[edgptr+4]: imax    32-bit float
+										| fpreg[edgptr+5]: xmin    32-bit float
+										| fpreg[edgptr+6]: zmin    32-bit float
+										| fpreg[edgptr+7]: imin    32-bit float
+										| fpreg[edgptr+8]: X       don't care in high word
+										|		   nxt     11-bit ptr in low word
+										|
+	| Initialization for edge table variables when the edge-building routines
+	|  are the consuming routines for the points output by the polygon clipper
+	movw d,nedges;		MAXEDGES->am;	;		;			  | nedges<-MAXEDGES
+	movw d,nxtptr;		DUMMYEDGE->am;	;		;			  | address of dummy 1st edge
+	add2nw 3,nxtptr,nxtptr; am->fpdp;	;		;			  | fpdp<-&dummy edge nxtptr
+	incw nxtptr,nxtptr;	am->fpregl;	;		;			  | dummy edge nxtptr<-ptr to 1st real edge
+	movw d,putclpdpts;	=mkedges3->am;	;		;			  | putclpdpts <- mkedges3, ptr to point-
+											  | consuming routine
+
+
+	| Start of reading input polygon and xform-clip-vwpscale pipeline
+procpoly3:
+	incw cmdptr,nvptr;	;		;		;			  | nvptr pts to vector of npts per boundary
+											  | (after increment below)
+	addw d,nbnds,acc;	2->am;		;		;
+	addw cmdptr,acc,cmdptr;	;		;		;			  | cmdptr now points to first vertex
+
+
+xf3nxtbnd: sub2nw,s 0,nbnds,nbnds;;		;		;			  | if ((nbnds -= 1)<0), goto xf3nxtstep
+	incw nvptr,nvptr;	am->shmemp;	cjp,neg xf3nxtstep;;			  | else get # of vertices for next
+	movw d,nvert;		shmem->am;	;		;			  | boundary
+	btstw,s 15,polyshadestyle; 3->fpdp;	;		;			  | test for 2D or 3D input routine
+	rolw 2,nvert,acc;	;		cjp,~zer xf32nxbnd; ;			  | if 2D, acc == nvert*4
+	btstw,s 0,polyshadestyle; ;		;		;			  | set cc to reflect shading type &
+	rolw 1,acc,acc;		;		cjp,~zer .+3;	;			  | fpdp <- 3 (used below); acc <- nvert*8
+	subw nvert,acc,acc;	;		;		;			  | if Gouraud shading, acc == nvert*8
+	subw nvert,acc,acc;	;		;		;			  | if constant shading, acc <- nvert*6
+xf32nxbnd: subw,s d,nvert,y;	3->am;		;		;			  | if 0 <= nvert < 3, not a good boundary
+	movw cmdptr,tmp16;	am->shmemp;	;		;			  | shmemp pts to vertices;update cmdptr to
+	addw cmdptr,acc,cmdptr;	;		cjp,~cry xf3nxtbnd;;			  | point to 1st loc after bndry's vertices
+	subw,s d,nvert,y;	SMALLNVERT->am;	;		;			  | if (nvert>=SMALLNVERT),goto xf3lrgpoly
+	sub2nw 0,nvert,tmp;	am->brreg;	cjp,~neg xf3lrgpoly;;			  | brreg <- nvert-1; tmp16 has shmem addr
+											  | of 1st vertex of this boundary -- this
+											  | is used if we jump to xf3lrgpoly
+
+xf3smlpoly:
+	movw d,outptr;		PTBUF->am;	;		;			  | outptr <- address for transformed pts
+	movw IBUFm1,tmp;	16->fpap;	;		;			  | fpap <- address of matrix; tmp <- addr
+	IMM;			0x3f80->fpregh;	;		;			  | to temporarily hold vertex intensities
+	btstw,s 15,polyshadestyle; 0->fpregl ;	;		;			  | test for 2D or 3D input routine
+	btstw,s 0,polyshadestyle; ;		cjp,~zer xf32smlp; ;			  | fpr[3] <- 1.0 (fpdp was set above)
+											  | set cc to reflect constant or Gouraud
+											  | shading (xf3 doesn't affect cc's)
+	movw xf3ptr,y;		am->brreg;	push,go;	;			  | brreg <- addr of transform routine
+											  | now loop through nvert pts & xform them
+	movw 0,inptr;		am->fpdp;	;		;			  | put untransformed pt at fpr[0]
+	;			shmem->fpregh;	;		;		shp+	  | fpr[0] <- x[i]
+	;			shmem->fpregl;	;		;		shp+,dp+
+	;			shmem->fpregh;	;		;		shp+	  | fpr[1] <- y[i]
+	;			shmem->fpregl;	;		;		shp+,dp+
+	;			shmem->fpregh;	;		;		shp+	  | fpr[2] <- z[i]
+	;			shmem->fpregl;	cjs,go;		;		shp+	  | transform pt and deposit in pt buffer
+	mov2nw 4,y;		am->fpap;	cjp,~zer .+3;	;			  | reload matrix ptr; if constant shading,
+	addw d,outptr,outptr;	5->am;		rfct;		;			  | increment outptr and loop
+	movw,s polyclpplns,y;	;		cjp,go xf3smlclp;;			  | if constant shading, goto xf3smlclp
+											  | when loop is complete
+											  | also set cc to reflect clipping state
+	incw tmp,tmp;		am->fpdp;	;		;			  | if Gouraud shading, fpdp<-IBUF loc for
+	addw outptr,5,outptr;	shmem->am;	;		;		shp+	  | ith vertex intensity; convert int[i]
+	IMM;			shmem->fpregl;	;		;		shp+	  | fixed point representation from unsigned
+	sub2nw 7,d,y;		am->fpregh;	rfct;		;			  | (8-bit integer, 16-bit fraction) to
+											  | signed (7-bit integer, 16-bit fraction)
+											  | by subtracting 2^^7 from integer since
+											  | Weitek float and fix ops only handle
+											  | 24-bit twos-complement integers
+											  | outptr += 5, and loop
+
+	mov2nw 1,y;		am->brreg;	;		lmode rn,ai,pipe,fast;	  | brreg <- 2; set Weitek pipeline mode
+	;			IBUF->fpap;	;		;			  | fpap <- addr of vertex intensities
+	movw PTBUFp4,tmp16;	;		;		floata,la,hi;		  | convert intensities to float
+	IMM;			am->fpdp;	push,go;	;		ap+	  | fpdp<-PTBUF+4,addr for 1st cnvrtd intns
+	movw 5,acc;		;		;		floata,la,hi;		  | repeat these 2 instructions 3 times
+	IMM;			;		rfct;		;		ap+	  | acc <- 5
+	sub2nw 0,nvert,tmp;	am->brreg;	;		floata,la,a,hi;		  | brreg <- nvert-1
+	;			;		push,go;	;		ap+	  | pipe full,enable unload of 1st intensity
+	movw,s polyclpplns,y;	;		;		floata,la,a,st,hi;	  | store int[i], start converting int[i+5]
+	addw tmp16,acc,tmp16;	am->fpdp;	rfct;		;		ap+	  | fpdp+=5;set cc to reflect clipping state
+
+xf3smlclp: movw 0,y;		am->fpdp;	cjp,zer fastpoly3;;			  | if clipping disabled, goto fastpoly3
+	andw polyclpplns,0x3F,polyclpplns; PTBUF->fpap;;	;			  | else do a fast clip test; fpdp <- 0
+	IMM;			PTBUFp3->fpbp;	;		;			  | fpap<-&x0;fpbp<-&w0;polyclpplns format:
+											  | L|R|B|T|H|Y is bits 5|4|3|2|1|0 with
+											  | leading zeroes where a "1" means clip
+											  | against the plane
+											  | Note that lmode is still rn,ai,pipe,fast
+											  | either from xf3 or from float cnvrt loop
+	movw polyclpplns,outcodeprod;;		;		adda,lab,hi;		  | left plane: w0 + x0; test sign below
+	compw polyclpplns,outcodesum;;		;		;			  | outcodeprod <- polyclpplns
+											  | outcodesum <- ~polyclpplns
+	movw 0,y;		am->fpregh;	;		rsuba,la,hi;		  | right plane: w0 - x0; test sign below
+	movw 0,y;		am->fpregl;	;		;		ap+	  | fpr[0] <- 0.0
+	sub2nw 0,nvert,tmp;	am->brreg;	;		adda,la,hi;		  | bottom plane: w0 + y0; test sign below
+	movw PTBUFp3,tmp;	;		;		;			  | tmp <- &w0 (PTBUF+3); brreg <- nvert-1
+	IMM;			;		;		rsuba,la,hi;		  | top plane: w0 - y0; test sign below
+	movw 0,y;		am->fpbp;	push,go;	;		ap+	  | fpbp pts to 0.0
+											  | loop through nvert pts (brreg set above)
+plyclptst3: movw 0,acc;		;		;		adda,lab,a,hi;		  | hither plane: 0.0 + z[i];test sign below
+	movw tmp,y;		am->fpbp;	;		;			  | zero acc; fpbp <- &w[i]
+	add2nw 2,tmp;		;		;		rsuba,lab,a,hi;		  | yon plane: w[i] - z[i]; test sign below
+	sl0b d,y;		fpstreg->am;	;		;		ap+	  | tmp += 4; save sign bit of w[i]+x[i]
+	slqw acc,acc;		;		;		pa,a,hi;	ap+	  | advance pipeline
+	incw tmp,tmp;		am->fpbp;	;		;		ap+	  | fpap <- &x[i+1]; fpbp <- tmp <- &w[i+1]
+	sl0b d,y;		fpstreg->am;	;		adda,lab,a,hi;		  | w[i+1]+x[i+1];save sign bit of w[i]-x[i]
+	slqw acc,acc;		;		;		;
+	sl0b d,y;		fpstreg->am;	;		rsuba,la,a,hi;		  | w[i+1]-x[i+1];save sign bit of w[i]+y[i]
+	slqw acc,acc;		;		;		;		ap+
+	sl0b d,y;		fpstreg->am;	;		adda,la,a,hi;		  | w[i+1]+y[i+1];save sign bit of w[i]-y[i]
+	slqw acc,acc;		;		;		;
+	sl0b d,y;		fpstreg->am;	;		rsuba,la,hi;		  | w[i+1]-y[i+1];save sign bit of 0.0+z[i]
+	slqw acc,acc;		;		;		;		ap+
+	sl0b d,y;		fpstreg->am;	;		;			  | save sign bit of w[i]-z[i]
+	slqw acc,acc;		0->fpbp;	;		;			  | fpbp pts to 0.0
+	orw outcodesum,acc,outcodesum;;		;		;			  | accumulate outcodesum
+	andw outcodeprod,acc,outcodeprod;;	rfct;		;			  | accumulate outcodeprod & loop until done
+
+	movw outcodeprod,acc;	;		;		;			  | acc <- outcodeprod
+	xorw,s polyclpplns,acc,y;;		;		;			  | if (outcodeprod == polyclpplns), then
+											  | all pts are inside the clip region,
+	compw,s outcodesum,acc;	;		cjp,zer fastpoly3;;			  | so goto fastpoly3
+	movw PTBUF,xfptptr;	=clppoly3->brreg;;		;			  | if (~outcodesum != 0), all pts were
+	IMM;			;		cjp,~zer xf3nxtbnd;;			  | outside at least 1 clipping plane so
+	movw d,getnxtpt;	=nxtxfpt3->am;	cjs,go;		;			  | goto xf3nxtbnd; else call clppoly3 with
+											  | xfptptr pointing to 1st transformed
+	;			;		cjp,go xf3nxtbnd;;			  | point and getnxtpt pointing to the
+											  | subroutine nxtxfpt3
+											  | after return, goto xf3nxtbnd
+
+
+fastpoly3: xorw,s d,putclpdpts,y; =mkedges3->am;;		;			  | if putclpdpts != mkedges3, goto
+	;			;		cjp,~zer procfastbnd3;;			  | procfastbnd3; else fall through to
+											  | the code below which is an accelerator
+											  | for the case of small polygons which
+											  | do not require clipping, when the edge-
+											  | building routines are output routines
+vwpsmlpoly3:
+	movw d,vwpsclptr;	PTBUF->am;	;		;			  | vwpsclptr<-PTBUF(address of xformed pts)
+	sub2nw 0,nvert,tmp;	am->brreg;	cjs,go vwpsclpts3;;			  | vwpsclpts3 assumes vwp params at fpr[32]
+											  | scale nvert pts to the viewport
+											  | scaling is done in-place
+											  | pass nvert-1 in brreg
+xf3smledgs:
+	incw vwpsclptr,y;	am->fpap;	;		lmode rn,ai,flow,fast;	  | fpap <- PTBUF + 1; use flowthrough mode
+	;			;		;		fixa,la,hi;		  | y[0]
+	;			;		;		;
+	;			;		;		;
+	sub2nw 1,nvert,tmp;	am->brreg;	;		;			  | brreg <- nvert-2
+	movw d,ptbufptr;	PTBUF->am;	;		;			  | ptbufptr <- PTBUF
+	;			5->am;		;		;			  | d<-5; wait for fixed y[0]
+	;			;		;		noflop,a,hi;
+	movw 0,y;		am->fpdp;	;		;
+	movw 0,y;		am->fpap;	;		noflop,st,hi;		  | fpreg[0] <- y[0] (integer)
+	addw d,ptbufptr,ptbufptr;;		;		;			  | ptbufptr <- &x[1]
+	movw d,firsty;		fpregl->am;	;		;			  | firsty <- low word of integer y[0]
+	movw firsty,acc;	5->am;		push,go;	;			  | acc<-y[0]; d<-5; start loop to build 1st
+xf3smledgloop:										  | n-1 edges;notation: i runs from 1 to n-1
+	incw ptbufptr,y;	am->fpap;	;		;			  | fpap <- &y[i]
+	add2nw 1,nxtptr,tmp;	am->fpdp;	;		fixa,la,hi;		  | fix y[i]; fpdp <- &edg.xmax
+	movw ptbufptr,y;	am->fpap;	;		;			  | fpap <- &x[i]
+	;			fpregh->fpregh;	;		;			  | edg.xmax <- x[i]
+	;			fpregl->fpregl;	;		;		adp+
+	;			;		;		;		ap+
+	;			fpregh->fpregh;	;		;			  | edg.zmax <- z[i]
+	;			fpregl->fpregl;	;		;		adp+
+	;			;		;		;		ap+
+	;			fpregh->fpregh;	;		;			  | edg.imax <- intensity[i]
+	;			fpregl->fpregl;	;		;		dp+
+	subw d,ptbufptr,y;	am->fpap;	;		;			  | fpap <- &x[i-1]
+	;			fpregh->fpregh;	;		;			  | edg.xmin <- x[i-1]
+	;			fpregl->fpregl;	;		;		adp+
+	;			;		;		;		ap+
+	;			fpregh->fpregh;	;		;			  | edg.zmin <- z[i-1]
+	;			fpregl->fpregl;	;		;		adp+
+	;			;		;		;		ap+
+	movw nxtptr,tmp;	fpregh->fpregh;	;		;			  | edg.imin <- intensity[i-1]; tmp<-nxtptr
+	add2nw 3,nxtptr,nxtptr;	fpregl->fpregl;	;		;		dp+	  | nxtptr += 8
+	incw nxtptr,nxtptr;	am->fpregl;	;		;			  | edg.nxt <- nxtptr <- addr of next edge
+	movw tmp,y;		am->fpdp;	;		;			  | fpdp <- address of this edge
+	movw acc,y;		am->fpregh;	;		noflop,a,hi;	dp+	  | edg.ymin <- y[i-1] (16-bit integer)
+	addw d,ptbufptr,ptbufptr;;		;		;			  | ptbufptr <- &x[i+1]
+	;			;		;		noflop,st,hi;		  | edg.ymax <- y[i] (32-bit integer)
+	incw tmp,y;		am->fpap;	;		;			  | fpap <- &edg.ymax
+	xorw,s d,acc,y;		fpregl->am;	;		;			  | check for horizontal edges
+	movw d,acc;		fpregl->am;	cjp,zer xf3horizedg;;			  | acc <- low order 16 bits of int y[i]
+	sub2nw,s 0,nedges,nedges;;		;		;			  | nedges -= 1
+	movw acc,y;		am->fpregh;	cjp,neg xf3edgovflw;;			  | move low 16 bits to high 16 bits where
+											  | scan conversion code expects to see it
+											  | also handle case of too many edges
+	;			5->am;		rfct;		;			  | d <- 5; loop back until last edge
+	;			;		cjp,go xf3lastedg;;
+
+xf3edgovflw:
+	compw 0,nedges;		;		;		;			  | nedges <- -1 and adjust nxtptr
+
+xf3horizedg:
+	movw tmp,nxtptr;	5->am;		rfct;		;			  | ignore horizontal and overflow edges
+											  | nxtptr -= 9
+											  | d<-5; loop back until last edge
+
+xf3lastedg:
+	xorw,s firsty,acc,y;	PTBUF->fpap;	;		;			  | ignore horizontal last edge; fpap<-&x[0]
+	movw nxtptr,y;		am->fpdp;	cjp,zer xf3nxtbnd;;			  | fpdp <- address of nth edge
+	movw acc,y;		am->fpregh;	;		;		dp+	  | edg.ymin <- y[n-1]
+	movw firsty,y;		am->fpregh;	;		;		dp+	  | edg.ymax <- y[0]
+	;			fpregh->fpregh;	;		;			  | edg.xmax <- x[0]
+	;			fpregl->fpregl;	;		;		adp+
+	;			;		;		;		ap+
+	;			fpregh->fpregh;	;		;			  | edg.zmax <- z[0]
+	;			fpregl->fpregl;	;		;		adp+
+	;			;		;		;		ap+
+	;			fpregh->fpregh;	;		;			  | edg.imax <- intensity[0]
+	;			fpregl->fpregl;	;		;		dp+
+	subw d,ptbufptr,y;	 am->fpap;	;		;			  | fpap <- &x[n-1]
+	;			fpregh->fpregh;	;		;			  | edg.xmin <- x[n-1]
+	;			fpregl->fpregl;	;		;		adp+
+	;			;		;		;		ap+
+	;			fpregh->fpregh;	;		;			  | edg.zmin <- z[n-1]
+	;			fpregl->fpregl;	;		;		adp+
+	;			;		;		;		ap+
+	;			fpregh->fpregh;	;		;			  | edg.imin <- intensity[n-1]
+	add2nw 3,nxtptr,nxtptr;	fpregl->fpregl;	;		;		dp+	  | nxtptr += 8
+	sub2nw,s 0,nedges,nedges;;		;		;			  | nedges -= 1
+	incw nxtptr,nxtptr;	am->fpregl;	cjp,~neg xf3nxtbnd;;			  | edg.nxt <- nxtptr <- addr of next edge
+	subw d,nxtptr,nxtptr;	9->am;		;		;			  | goto xf3nxtbnd; if (nedges < 0),
+	compw 0,nedges;		;		cjp,go xf3nxtbnd;;			  | nedges <- -1 and adjust nxtptr
+
+
+
+											  | completion code for putclpdpts==mkedges3
+											  | code from jump vector to get here:
+|	sub2nw 0,nxtptr,nxtptr;	am->fpdp;	cjp,go xf3doscan;;			  | fpdp <- &edg.nxt for last edge
+xf3doscan: 
+	btstw,s 9, polyshadestyle; ;		;		;			| 
+	btstw,s 10, polyshadestyle; ;		cjp, ~zer .+2;	;			| 
+	;			;		cjp, zer xf3polyscan; ;			| Go scan if no texturing.
+	;			TEX2DPPFRM_GL->shmemp; ;	;			| What texture is in PP?
+	movw d, r[0];		shmem->am;	;		;			| 
+	addw d, frameptr, acc;	TEX2FRAME_FRMOFF->am; ;		;			| Compare PP texture block ptr with our own.
+	movw acc, y;		am->shmemp;	;		;			| 
+	movw,s d, y;		shmem->am;	;		;			| Check for invalid tex block (-1)
+	subw,s d, r[0], y;	shmem->am;	cjp, ~neg xf3tex; ;			| Compare tex pointers.
+	andw d, polyshadestyle, polyshadestyle; 0xf9ff->am; ;	;			| mask out bits 9 and 10. (comp 0x600)
+	;			;		cjp, go xf3polyscan; ;			| 
+xf3tex:	;			;		cjp, zer xf3texoff; ;			| 
+	addw d, frameptr, acc;	TEX2DEPTH_FRMOFF->am; ;		;			| if (reload pp) shmemp = TEX2DEPTH_FRMOFF
+	movw acc, y;		am->shmemp;	push, ~go;	;			| 
+	;			PPLDTEX->fifo1;	loop, f1nf;	;			| 
+	movw polycolorop, r[0];	;		cjs, go stprep;	;			| Save polycolorop.  stprep incr shmemp.
+	movw Width, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw d, r[1];		shmem->am;	;		;			| TEX2FRAME (stprep incr shmemp)
+	;			TEX2DPPFRM_GL->shmemp; ;	;			| 
+	movw Height, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw r[1], y;		am->shmem;	;		;			| Remember what frame is on PP.
+	movw r[0], polycolorop;	;		;		;			| Restore polycolorop.
+	movw Depth, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw r[1], y;		am->shmemp;	;		;			| Address texture frame.
+xf3ltex: sub2nw,s 0, Rows, Rows; ;		push, go;	;			| Copy texture to PP.
+	;			shmem->fifo1;	cjp, f1f .;	;			| 
+	;			;		rfct;		;		shp+	| 
+	movw Words, y;		am->brreg;	cjp, ~zer xf3ltex; ;			| Copy next row of texture.
+xf3texoff: addw d, frameptr, acc; TEX2OFFKIND_FRMOFF->am; ;	;			| 
+	movw acc, y;		am->shmemp;	;		;			| 
+	movw,s d, acc;		shmem->am;	;		;			| if (Kind == TEX2_SXSY)
+	;			;		cjp, zer xf3sxsy; ;			| else (Kind == TEX2_3D) Addr of xform subr.
+	;			3->fpdp;	;		;			| 
+	;			0x3f80->fpregh;	;		;			| 4th coord of pt is 1.0 (homog.)
+	;			0->fpregl;	;		;			| 
+	movw 0, inptr;		am->fpdp;	;		;			| 
+	;			16->fpap;	;		;			| Address of matrix for transform.
+	addw d, frameptr, acc;	TEX2OFFX3_FRMOFF->am; ;		;			| 
+	movw acc, y;		am->shmemp;	;		;			| 
+	mov2nw 2, outptr;	shmem->fpregh;	;		;		shp+	| store 3 coords at 0 (inptr). outptr= 4.
+	;			shmem->fpregl;	;		;		shp+,dp+| 
+	;			shmem->fpregh;	;		;		shp+	| 
+	;			shmem->fpregl;	;		;		shp+,dp+| 
+	;			shmem->fpregh;	;		;		shp+	| 
+	;			shmem->fpregl;	cjs, go xf3;	;			| Transform point.
+	mov2nw 2, vwpsclptr;	0->brreg;	;		;			| Pt. Addr->vwpsclptr, num vertices->brreg.
+	;			;		cjs, go vwpsclpts3; ;			| Do in-place viewport scale.
+	mov2nw 2, y;		am->fpap;	;		lmode rn, ai, pipe, fast; | 
+	movw 0, y;		am->fpdp;	;		fixa, la, hi;		| Fix sx and sy. Ignore z coordinate.
+	;			;		;		;		ap+	| 
+	;			;		;		fixa, la, hi;		| 
+	;			;		;		;			| 
+	;			;		;		pa, hi;			| 
+	;			;		;		;			| 
+	;			;		;		pa, hi;			| 
+	;			;		;		;			| 
+	;			;		;		pa, a, hi;		| 
+	;			;		;		;			| 
+	;			;		;		pa, a, st, hi;		| 
+	movw =xf3polyscan, y;	;		;		;		dp+	| 
+	IMM;			am->brreg;	;		pa, st, hi;		| 
+	movw 0, y;		am->fpap;	;		;			| 
+	movw d, sx;		fpregl->am;	;		;		ap+	| 
+	movw d, sy;		fpregl->am;	cjp, go;	;			| goto xf3polyscan.
+xf3sxsy: addw d, frameptr, acc;	TEX2SX_FRMOFF->am; ;		;			| 
+	movw acc, y;		am->shmemp;	;		;			| retrieve sx and sy.
+	movw d, sx;		shmem->am;	;		;		shp+	| 
+	movw d, sy;		shmem->am;	;		;			| 
+xf3polyscan: movw nxtptr, y;	am->fpdp;	;		;			| Reload dp.
+	movw,s nedges,y;	0->fpregl;	;		;			  | load NULL nxtptr for last edge
+	subw,s nedges,MAXEDGES,nedges;;		cjp,neg xf3noscan;;			  | if # of edges > MAXEDGES, goto xf3noscan
+	IMM;			;		;		;			  | compute real # of edges
+	movw d,edgptr;		DUMMYEDGE->am;	;		;			  | if # of edges != 0, call polyscan3 with
+	movw polycolorop,colorop; ;		cjp,zer xf3noscan; ;			| edgptr, colorop, and shadestyle
+	movw polyshadestyle,shadestyle; ;	jmap polyscan3;	;			| 
+xf3noscan: ;			;		jmap getcmd;	;
+
+xf32smlp: movw xf3ptr,y;	am->brreg;	push,go;	;			  | brreg <- addr of transform routine
+											  | now loop through nvert pts & xform them
+	movw 0,inptr;		am->fpdp;	;		;			  | put untransformed pt at fpr[0]
+	;			shmem->fpregh;	;		;		shp+	  | fpr[0] <- x[i]
+	;			shmem->fpregl;	;		;		shp+,dp+
+	;			shmem->fpregh;	;		;		shp+	  | fpr[1] <- y[i]
+	;			shmem->fpregl;	;		;		shp+,dp+  | 
+	;			0->fpregh;	;		;			  | fpr[2] <- z==0
+	;			0->fpregl;	cjs,go;		;			  | transform pt and deposit in pt buffer
+	mov2nw 4,y;		am->fpap;	;		;			  | reload matrix ptr for constant shading
+	addw d,outptr,outptr;	5->am;		rfct;		;			  | increment outptr and loop
+	movw,s polyclpplns,y;	;		cjp,go xf3smlclp;;			  | if constant shading, goto xf3smlclp
+
+
+xf3nxtstep:
+	sub2nw 0,putclpdpts,tmp16; am->brreg;	;		;			  | next step after xform-clp-consumepts is
+	;			;		cjp,go;		;			  | determined from jump vector at
+											  | putclpdpts-1
+
+
+
+nxtxfpt3: movw inbufptr,y;	am->fpdp;	;		;			  | fpdp <- address for next pt to clip
+	movw xfptptr,y;		am->fpap;	;		;			  | fpap <- address of next transformed pt
+	sub2nw,s 0,nvert,nvert;	fpregh->fpregh;	;		;			  | transfer x; nvert-=1, set cc to
+											  | reflect result (neg means no more pts)
+	;			fpregl->fpregl;	crtn,neg;	;		adp+	  | return if no more pts
+	;			fpregh->fpregh;	push,go 2;	;			  | transfer y
+	movw 5,acc;		fpregl->fpregl;	;		;		adp+
+	IMM;			fpregh->fpregh;	rfct;		;			  | transfer z, w, and intensity
+	addw xfptptr,acc,xfptptr; fpregl->fpregl; crtn,go;	;			  | xfptptr += 5; return (cc is ~neg)
+
+
+
+xf3lrgpoly:
+	btstw,s 15,polyshadestyle; ;		;		;			  | test 2D or 3D input routine
+	movw tmp16,acc;		;		cjp,~zer xf32l;	;			  | if 2D assume constant shading
+	btstw,s 0,polyshadestyle; PTBUFp3->fpdp; ;		;			  | test constant or Gouraud shading
+	;			;		cjp,zer xf3lc;	;			  | 
+											  | Gouraud shading
+xf3lg:	movw d,getnxtpt;	=nxtcmdpt3g->am;;		;			  | getnxtpt points to subroutine nxtcmdpt3g
+	movw acc,cmdptptr;	;		cjp,go xf3l;	;			  | cmdptptr <- shmem addr of boundary pts
+
+xf32l:	movw d,getnxtpt;	=nxtcmdpt23->am; ;		;			  | 2D input routine
+	;			;		cjp,go xf3l;	;			  | getnxtpt points to subroutine nxtcmdpt23
+											  | constant shading
+xf3lc:	movw d,getnxtpt;	=nxtcmdpt3c->am;;		;			  | getnxtpt points to subroutine nxtcmdpt3c
+
+xf3l:	;			0x3F80->fpregh;	;		;			  | fpreg[PTBUF+3]<-1.0(used by nxtcmdpt3's)
+	movw 0,y;		am->fpregl;	cjs,go clppoly3;;			  | call clppoly3
+	;			;		cjp,go xf3nxtbnd;;			  | loop back to xf3nxtbnd
+
+
+
+nxtcmdpt3c: sub2nw,s 0,nvert,nvert; 16->fpap;	;		;			  | fpap pts to matrix; nvert -= 1, cc
+	movw inbufptr,outptr;	PTBUF->fpdp;	crtn,neg;	;			  | reflects result; return if no more pts
+											  | else fpdp<-PTBUF (addr for new pt)
+	movw xf3ptr,y;		am->brreg;	;		;			  | brreg pts to appropriate xform routine
+	;			shmem->fpregh;	push,go 1;	;		shp+	  | fpreg[PTBUF] <- next x; outptr <- addr
+	movw PTBUF,inptr;	shmem->fpregl;	;		;		shp+,dp+  | for xformed pt; transfer y and z
+	IMM;			shmem->fpregh;	rfct;		;		shp+	  | transfer y and z; inptr <- PTBUF
+	;			shmem->fpregl;	cjp,go;		;		shp+	  | jump to xform routine which returns to
+											  | caller after xfrming pt & putting result
+											  | at *inbufptr (fpreg[PTBUF+3] == 1.0)
+											  | shmemp now pts to next pt
+
+
+nxtcmdpt23: sub2nw,s 0,nvert,nvert; 16->fpap;	;		;			  | fpap pts to matrix; nvert -= 1, cc
+	movw inbufptr,outptr;	PTBUF->fpdp;	crtn,neg;	;			  | reflects result; return if no more pts
+											  | else fpdp<-PTBUF (addr for new pt)
+	movw xf3ptr,y;		am->brreg;	;		;			  | brreg pts to appropriate xform routine
+	;			shmem->fpregh;	;		;		shp+	  | fpreg[PTBUF] <- next x; outptr <- addr
+	movw PTBUF,inptr;	shmem->fpregl;	;		;		shp+,dp+  | for xformed pt; transfer y
+	IMM;			shmem->fpregh;	;		;		shp+	  | transfer y; inptr <- PTBUF
+	;			shmem->fpregl;	;		;		shp+,dp+  |
+	;			0->fpregh;	;		;			  | z == 0
+	;			0->fpregl;	cjp,go;		;			  | jump to xform routine which returns to
+											  | caller after xfrming pt & putting result
+											  | at *inbufptr (fpreg[PTBUF+3] == 1.0)
+											  | shmemp now pts to next pt
+
+nxtcmdpt3g: sub2nw,s 0,nvert,nvert; PTBUF->fpdp;;		;			  | fpdp<-PTBUF(addr for new pt);nvert -= 1,
+	add2nw 2,cmdptptr,tmp;	PTBUF->fpap;	crtn,neg;	;			  | cc reflects result;return if no more pts
+	add2nw 1,tmp,tmp;	am->shmemp;	;		;			  | fpap<-PTBUF;shmemp <- tmp <- shmem addr
+	;			shmem->am;	;		;		shp+	  | of vertex intensity; convert intensity
+	sub2nw 7,d,y;		am->fpregh;	;		lmode rn,ai,flow,fast;	  | fixed point representation from unsigned
+	;			shmem->fpregl;	ldct 2;		;			  | (8-bit integer, 16-bit fraction) to
+											  | signed (7-bit integer, 16-bit fraction)
+											  | by subtracting 2^^7 from integer since
+											  | Weitek float and fix ops only handle
+											  | 24-bit twos-complement integers
+											  | flow mode; 2910 R reg<-2
+	movw cmdptptr,y;	am->shmemp;	;		floata,la,hi;		  | convert intensity to float; shmemp <- &x
+	add2nw 1,tmp,cmdptptr;	;		push,~go;	;			  | cmdptptr += 8 (addr of next pt in shmem)
+	movw PTBUF,inptr;	shmem->fpregh;	;		;		shp+	  | transfer x, y, and z to fpreg[PTBUF]
+	IMM;			shmem->fpregl;	rfct;		;		shp+,dp+  | inptr<-PTBUF
+	movw xf3ptr,y;		am->brreg;	;		noflop,a,hi;		  | enable unload of converted intensity
+	add2nw 2,inbufptr,tmp;	am->fpdp;	;		;			  | brreg<-xf3ptr; fpdp<-addr for intensity
+	mov2nw 4,y;		am->fpap;	;		noflop,st,hi;		  | *(inbufptr+4) <-  converted intensity
+	movw inbufptr,outptr;	;		cjp,go;		;			  | fpap pts to matrix
+											  | outptr <- addr for xformed pt
+											  | jump to xform routine which returns to
+											  | caller after xfrming pt & putting result
+											  | at *inbufptr (fpreg[PTBUF+3] == 1.0)
+
+
+
+clppoly3:
+	movw,s 0,nomorepts;	LEFTPLNSTRCT->fpdp;;		;			  | nomorepts <- FALSE; cc == zer (tested
+											  | below at nxtpt3)
+	;			1->fpregh;	;		;			  | LEFTPLNSTRCT.firstvtx <- TRUE
+	incw 0,noptsyet;	TOPPLNSTRCT->fpdp;;		;			  | noptsyet <- TRUE
+	;			1->fpregh;	;		;			  | TOPPLNSTRCT.firstvtx <- TRUE
+	;			HITHERPLNSTRCT->fpdp;;		;
+	;			1->fpregh;	;		;			  | HITHERPLNSTRCT.firstvtx <- TRUE
+	;			RIGHTPLNSTRCT->fpdp;;		;
+	;			1->fpregh;	;		;			  | RIGHTPLNSTRCT.firstvtx <- TRUE
+	;			BOTTOMPLNSTRCT->fpdp;;		;
+	;			1->fpregh;	;		;			  | BOTTOMPLNSTRCT.firstvtx <- TRUE
+	;			YONPLNSTRCT->fpdp;;		;
+	;			1->fpregh;	;		;			  | YONPLNSTRCT.firstvtx <- TRUE
+
+nxtpt3: movw getnxtpt,y;	am->brreg;	crtn,~zer;	;			  | when reach here, cc reflects state of
+											  | nomorepts; return when out of pts; else
+											  | call routine to get next point with
+	movw d,inbufptr;	BUF1->am;	cjs,go;		;			  | inbufptr==BUF1; returns
+	movw,s polyclpplns,y;	;		cjp,neg closepoly3;;			  | with cc neg when out of points
+	incw 0,inum;		;		cjp,zer putpts3;;			  | inum<-1; if clip disabled, goto putpts3
+											  | else inbufptr points to new pt; inum==1
+nxtpt3a: movw d,outbufptr;	BUF2->am;	;		;			  | outbufptr<-BUF2
+
+clpleft3: btstw,s 5,polyclpplns; LEFTPLNSTRCT->am;;		;			  | if left clipping enabled, call clppln3
+	movw d,plnptr;		;		cjp,zer clptop3;;			  | with plnptr==LEFTPLNSTRCT
+	;			=wec_left3->brreg;;		;			  | and brreg==wec_left3
+	movw 0,onum;		;		cjs,go clppln3;	;
+	movw onum,inum;		;		cjs,go switchbuf3;;			  | # of output pts is # of input pts for
+											  | next stage; also switch buffers
+
+clptop3: btstw,s 2,polyclpplns;	TOPPLNSTRCT->am;;		;			  | if top clipping enabled, call clppln3
+	movw d,plnptr;		;		cjp,zer clphither3;;			  | with plnptr==TOPPLNSTRCT
+	;			=wec_top3->brreg;;		;			  | and brreg==wec_top3
+	movw 0,onum;		;		cjs,go clppln3;	;
+	movw onum,inum;		;		cjs,go switchbuf3;;			  | # of output pts is # of input pts for
+											  | next stage; also switch buffers
+
+clphither3: btstw,s 1,polyclpplns; HITHERPLNSTRCT->am;;		;			  | if hither clipping enabled, call clppln3
+	movw d,plnptr;		;		cjp,zer clpright3;;			  | with plnptr==HITHERPLNSTRCT
+	;			=wec_hither3->brreg;;		;			  | and brreg==wec_hither3
+	movw 0,onum;		;		cjs,go clppln3;	;
+	movw onum,inum;		;		cjs,go switchbuf3;;			  | # of output pts is # of input pts for
+											  | next stage; also switch buffers
+
+clpright3: btstw,s 4,polyclpplns; RIGHTPLNSTRCT->am;;		;			  | if right clipping enabled, call clppln3
+	movw d,plnptr;		;		cjp,zer clpbottom3;;			  | with plnptr==RIGHTPLNSTRCT
+	;			=wec_right3->brreg;;		;			  | and brreg==wec_right3
+	movw 0,onum;		;		cjs,go clppln3;	;
+	movw onum,inum;		;		cjs,go switchbuf3;;			  | # of output pts is # of input pts for
+											  | next stage; also switch buffers
+
+clpbottom3: btstw,s 3,polyclpplns; BOTTOMPLNSTRCT->am;;		;			  | if bottom clipping enabled, call clppln3
+	movw d,plnptr;		;		cjp,zer clpyon3;;			  | with plnptr==BOTTOMPLNSTRCT
+	;			=wec_bottom3->brreg;;		;			  | and brreg==wec_bottom3
+	movw 0,onum;		;		cjs,go clppln3;	;
+	movw onum,inum;		;		cjs,go switchbuf3;;			  | # of output pts is # of input pts for
+											  | next stage; also switch buffers
+
+clpyon3: btstw,s 0,polyclpplns; YONPLNSTRCT->am;;		;			  | if yon clipping enabled, call clppln3
+	movw d,plnptr;		;		cjp,zer putpts3;;			  | with plnptr==YONPLNSTRCT
+	;			=wec_yon3->brreg;;		;			  | and brreg==wec_yon3
+	movw 0,onum;		;		cjs,go clppln3;	;
+	movw onum,inum;		;		;		;			  | # of output pts is # of pts which are
+	movw outbufptr,inbufptr;;		;		;			  | passed to the pt consuming routine
+putpts3: movw putclpdpts,y;	am->brreg;	;		;			  | inbufptr points to the pts
+	movw inbufptr,inptr;	;		cjs,go;		;			  | call the consuming routine
+	movw,s nomorepts,y;	;		cjp,go nxtpt3;	;			  | get next input pt; cc reflects state of
+											  | variable nomorepts
+
+
+
+closepoly3: incw 0,nomorepts;	;		ldct putpts3;	;			  | nomorepts <- TRUE; inum <- 0
+	movw 0,inum;		;		jrp,~zer nxtpt3a;;			  | if clipping is disabled, goto putpts3;
+											  | else do one more pass
+											  | through clipping loop to flush out
+											  | possible intersection points by passing
+											  | each plane's saved 1st vertex to it as
+											  | its last vertex
+
+
+
+switchbuf3: movw outbufptr,tmp;	;		;		;			  | switch buffer ptrs
+	movw inbufptr,outbufptr;;		;		;
+	movw tmp,inbufptr;	;		crtn,go;	;
+
+
+
+clppln3: movw inbufptr,inptr;	;		;		;			  | use local copy of inbufptr
+	movw outbufptr,outptr;	;		;		;			  | use local copy of outbufptr
+cpln3loop: movw,s inum,y;	;		;		;			  | if inum == 0, goto chklastpt3
+	sub2nw,s 0,inum;	;		cjp,zer chklastpt3;;			  | if ((inum -= 1) < 0), return
+	movw plnptr,y;		am->fpap;	crtn,neg;	;			  | fpap <- plnptr
+	movw,s d,y;		fpregh->am;	;		;			  | if plnptr->firstvtxflg == FALSE, goto
+	movw inptr,y;		am->fpap;	cjp,zer subseqvtx3;;			  | subseqvtx3; fpap <- inptr
+firstvtx3: movw plnptr,y;	am->fpdp;	;		;			  | fpdp <- plnptr
+	movw 0,y;		am->fpregh;	push,go 4;	;		dp+	  | plnptr->firstvtxflg <- FALSE
+	;			fpregh->fpregh;	;		;			  | plnptr->firstvtx <- input pt
+	;			fpregl->fpregl;	rfct;		;		adp+
+	movw inptr,y;		am->fpap;	push,go 4;	;			  | fpap <- inptr
+	movw 5,acc;		fpregh->fpregh;	;		;			  | plnptr->savdvtx <- input pt
+	IMM;			fpregl->fpregl;	rfct;		;		adp+	  | acc <- 5
+	movw inptr,y;		am->fpap;	cjs,go;		;			  | call routine to compute window edge
+											  | coordinate for this plane and this pt
+											  | fpap <- inptr
+											  | (brreg has address of routine)
+											  | wec is stored in plnptr->savdwec
+	addw inptr,acc,inptr;	;		cjp,go cpln3vischk;;			  | inptr += 5;go check visibility using wec
+
+chklastpt3: movw,s nomorepts,y;	;		;		;			  | if there are more pts, return; else
+	movw plnptr,y;		am->fpap;	crtn,zer;	;			  | if plnptr->firstvtxflg == TRUE, return
+	movw,s d,y;		fpregh->am;	;		;
+	incw plnptr,inptr;	am->fpap;	crtn,~zer;	;			  | else fpap <- inptr <- &plnptr->firstvtx
+											  | and fall through to subseqvtx3
+
+subseqvtx3: add2nw 3,plnptr,tmp;8->fpdp;	cjs,go;		;			  | fpreg[8] <-  wec for this plane and pt
+	add2nw 1,tmp,tmp;	8->fpap;	;		;			  | fpap <- address of input wec
+	movw d,acc;		fpregh->am;	;		;			  | acc <- high word of input wec
+	incw tmp,y;		am->fpap;	;		;			  | fpap <- address of saved wec
+	xorw,s d,acc,y;		fpregh->am;	;		;			  | test sign of (input wec) ^ (saved wec)
+	;			;		cjs,neg plnintsct3;;			  | if signs differ a polygon edge crosses
+											  | this plane; call plnintsct3 to compute
+											  | the intersection and add it to the
+											  | output buffer
+	movw inptr,y;		am->fpap;	;		;			  | fpap <- address of input pt
+	addw d,plnptr,acc;	6->am;		;		;			  | acc <- &plnptr->savdvtx
+	movw acc,y;		am->fpdp;	push,go 4;	;			  | fpdp <- &plnptr->savdvtx
+	;			fpregh->fpregh;	;		;			  | plnptr->savdvtx <- input pt
+	;			fpregl->fpregl;	rfct;		;		adp+
+	;			8->fpap;	;		;			  | fpap <- address of input wec
+	addw inptr,5,inptr;	fpregh->fpregh;	;		;			  | plnptr->savdwec <- input wec
+	IMM;			fpregl->fpregl;	;		;			  | inptr += 5
+
+cpln3vischk: addw plnptr,11,y;	;		;		;
+	IMM;			am->fpap;	;		;			  | fpap <- &plnptr->savdwec
+	movw,s d,y;		fpregh->am;	;		;
+	movw,s inum,y;		;		cjp,neg cpln3loop;;			  | wec < 0 => pt not visible
+	movw outptr,y;		am->fpdp;	cjp,neg cpln3loop;;			  | (inum >= 0) => add pt to output
+											  | (nomorepts == TRUE) && (inum < 0) =>
+											  | this last pt is the same as the first pt
+											  | so ignore it (only reach here with
+											  | inum < 0 when nomorepts == TRUE)
+
+cpln3vis:										  | fpdp <- outptr (above)
+	addw plnptr,6,y;	5->am;		;		;			  | d <- 5
+	IMM;			am->fpap;	;		;			  | fpap <- &plnptr->savdvtx
+	incw onum,onum;		fpregh->fpregh;	push,go 3;	;			  | onum += 1
+	;			fpregl->fpregl;	;		;		adp+	  | output buffer <- current point
+	;			fpregh->fpregh;	rfct;		;
+	addw d,outptr,outptr;	fpregl->fpregl;	cjp,go cpln3loop;;			  | outptr += 5; goto cpln3loop
+
+
+
+wec_bottom3: ;			;		;		;		ap+	  | fpap pts to pt.y for wec_bottom3 OR
+wec_left3: addw inptr,3,y;	;		;		lmode rn,ai,flow,fast;	  | to pt.x for wec_left3
+	IMM;			am->fpbp;	ldct wec_wait3;	;			  | fpbp <- &pt.w
+	;			;		;		adda,lab,hi;		  | pt.w + pt.x (left plane wec) OR
+	;			;		jrp,~go;	;			  | pt.w + pt.y (bottom plane wec)
+											  | jump to wec_wait3
+
+wec_yon3: ;			;		;		;		ap+	  | fpap pts to pt.z for wec_yon3 OR
+wec_top3: ;			;		;		;		ap+	  | to pt.y for wec_top3 OR
+wec_right3: addw inptr,3,y;	;		;		lmode rn,ai,flow,fast;	  | to pt.x for wec_right3
+	IMM;			am->fpbp;	;		;			  | fpbp <- &pt.w
+	;			;		;		rsuba,lab,hi;		  | pt.w - pt.x (right plane wec) OR
+	;			;		;		;			  | pt.w - pt.y (top plane wec) OR
+											  | pt.w - pt.z (yon plane wec)
+
+wec_wait3: ;			;		push,go 2;	;
+	;			;		rfct;		;
+	;			;		;		noflop,a,hi;
+	;			;		;		;
+	;			;		;		noflop,st,hi;		  | store result and return; result < 0 =>
+	;			;		crtn,go;	;			  | pt is on invisible side of pln
+
+wec_hither3: add2nw 1,inptr,tmp1; am->fpap;	;		;			  | fpap <- &pt.z
+	;			fpregh->fpregh;	;		;			  | store pt.z (hither plane wec); z < 0 =>
+	;			fpregl->fpregl;	crtn,go;	;			  | pt is on invisible side of pln; return
+
+
+
+plnintsct3: addw plnptr,11,y;	8->fpbp;	;		;			  | fpbp pts to wec of new input pt
+	IMM;			am->fpap;	;		lmode rn,ai,flow,fast;	  | fpap pts to wec of saved pt
+	;			;		;		suba,lab,hi;		  | saved wec - input wec
+	;			;		;		;
+	;			;		push,go 2;	;			  | delay for flowthrough mode
+	;			9->fpdp;	rfct;		;			  | fpdp <- 9
+	movw 9,y;		;		;		noflop,a,hi;
+	IMM;			am->fpap;	;		;			  | fpap <- 9
+	movw 10,recaddr;	;		;		noflop,st,hi;		  | store wec_diff in fpreg[9]
+	IMM;			;		;		;			  | recaddr <- 10
+	;			;		cjs,go recip;	;			  | fpreg[10] <- reciprocal of difference
+	movw recaddr,y;		am->fpbp;	;		lmode rn,ai,pipe,fast;	  | fpbp <- 10; set pipeline mode
+	addw plnptr,11,y;	;		ldct 1;		;			  | 2910 R reg <- 1
+	IMM;			am->fpap;	;		;			  | fpap pts to wec of saved pt
+	;			;		;		maba,lab,hi;		  | compute t = (wec of saved pt)/wec_diff
+	movw inptr,y;		am->fpap;	;		;			  | fpap <- address of input pt
+	addw plnptr,6,y;	;		;		pa,hi;
+	IMM;			am->fpbp;	push,~go;	;			  | fpbp <- address of saved pt
+	;			;		;		suba,lab,hi;		  | dx (input x - saved x) and
+	;			;		rfct;		;		abp+	  | dy (input y - saved y)
+	movw 9,acc;		;		;		suba,lab,m,hi;		  | dz (input z - saved z)
+	IMM;			am->fpdp;	;		;		abp+	  | fpdp <- 9
+	movw 6,y;		;		;		suba,lab,st,hi;		  | fpreg[9] <- t; dw (input w - saved w)
+	IMM;			am->am;		;		;		abp+	  | d <- 6
+	mov2nw 2,tmp;		;		;		suba,lab,a,hi;		  | di (input i - saved i)
+	movw acc,y;		am->fpbp;	push,~go;	;			  | fpbp <- 9
+	sub2nw,s 0,tmp,tmp;	;		;		mabr,lab,a,hi;		  | dx * t; dy * t; dz * t; dw * t
+	;			;		loop,zer;	;
+	mov2nw 2,tmp;		;		;		mabr,lab,m,hi;		  | di * t
+	addw d,plnptr,y;	am->fpbp;	push,~go;	;			  | fpbp <- address of saved pt
+	sub2nw,s 0,tmp,tmp;	;		;		addr,lab,m,hi;		  | saved x + dx*t; saved y + dy*t
+	;			;		loop,zer;	;		bp+	  | saved z + dz*t; saved w + dw*t
+	mov2nw 2,tmp;		;		;		addr,lab,a,hi;		  | saved i + di*t
+	movw outptr,y;		am->fpdp;	push,~go;	;			  | fpdp <- outptr
+	sub2nw,s 0,tmp,tmp;	;		;		pa,a,st,hi;		  | store intersection x,y,z,w at *outptr
+	incw outptr,outptr;	;		loop,zer;	;		dp+	  | outptr += 4
+	incw outptr,outptr;	;		;		noflop,st,hi;		  | store intersection i at *(outptr+4)
+	incw onum,onum;		;		crtn,go;	;			  | outptr += 1; onum += 1; return
+
+
+
+vwpsclpts3:										  | in-place 3-D viewport scale
+											  | assumes vwp params are at fpr[32],
+											  | vwpsclptr points to pts to be scaled,
+											  | and brreg contains npts-1
+											  | call with max of PTBUF-WBUF (25) pts if
+											  | there are pts in PTBUF, else max of
+											  | 2048-WBUF (158) pts, so WBUF doesn't
+											  | overflow fpreg's
+	movw d,recaddr;		WBUF->am;	;		;			  | recaddr<-WBUF, addr for w reciprocals
+	movw vwpsclptr,acc;	;		;		;			  | tmp16 <- vwpsclptr
+	movw acc,tmp16;		3->am;		push,go;	;			  | d <- 3; loop through npts
+
+	addw d,tmp16,tmp16;	am->fpap;	cjs,go recip;	;			  | fpap <- &w[i];compute reciprocal of w[i]
+	incw recaddr,recaddr;	5->am;		rfct;		;			  | recaddr <- &WBUF[i+1] and loop back
+
+	movw vwpsclptr,tmp;	am->fpap;	;		lmode rn,ai,pipe,fast;	  | fpap <- tmp <- &x[0]; pipeline mode
+	;			WBUF->fpbp;	;		;			  | fpbp <- &wrecip[0]
+	movw 5,acc;		;		;		maba,lab,hi;		  | x0 * 1/w0
+	IMM;			;		;		;		ap+	  | acc <- 5
+	movw tmp,y;		am->am;		;		maba,la,hi;		  | y0 * 1/w0
+	movw d,tmp16;		am->fpdp;	;		;		ap+	  | fpdp <- tmp16 <- &x[0]
+	;			;		;		maba,la,hi;		  | z0 * 1/w0
+	addw tmp,acc,tmp;	am->fpap;	;		;		bp+	  | fpap<-&x[1]; fpbp<-&wrecip[1]
+	;			;		;		maba,lab,hi;		  | x1 * 1/w1
+	;			;		;		;		ap+
+	;			;		;		maba,la,m,hi;		  | y1 * 1/w1
+	;			;		push,go;	;		ap+	  | loop through all pts (brreg == npts-1)
+	;			;		;		maba,la,m,st,hi;	  | z[i] * 1/w[i]; store x[i-1]*1/w[i-1]
+	addw tmp,acc,tmp;	am->fpap;	;		;		bdp+	  | fpap<-&x[i+1]; fpbp<-&wrecip[i+1]
+	;			;		;		maba,lab,m,st,hi;	  | x[i+1] * 1/w[i+1]; store y[i-1]*1/w[i-1]
+	;			;		;		;		adp+
+	;			;		;		maba,lab,m,st,hi;	  | y[i+1] * 1/w[i+1]; store z[i-1]*1/w[i-1]
+	addw tmp16,acc,tmp16;	am->fpdp;	rfct;		;		ap+
+
+	mov2nw 5,tmp16;		am->fpbp;	;		;			  | fpbp <- tmp16 <- &VWPXSCL
+	movw vwpsclptr,tmp;	am->fpap;	;		;			  | fpap <- tmp <- &x[0]
+	movw tmp,y;		am->fpdp;	;		maba,lab,hi;		  | x[0] * VWPXSCL; fpdp points to input pts
+	add2nw 1,tmp16;		am->fpbp;	;		;		ap+
+	;			;		;		maba,lab,hi;		  | y[0] * VWPYSCL
+	add2nw 1,tmp16;		am->fpbp;	;		;		ap+
+	;			;		;		maba,lab,hi;		  | z[0] * VWPZSCL
+	sub2nw 2,tmp16;		am->fpbp;	;		;
+	;			;		;		pa,hi;			  | pipeline advance since can't change
+	addw tmp,acc,tmp;	am->fpap;	;		;			  | both fpap and fpbp fast enough
+	;			;		;		maba,lab,m,hi;		  | x[1] * VWPXSCL
+	add2nw 1,tmp16;		am->fpbp;	push,go;	;		ap+	  | loop through all pts
+	;			;		;		maba,lab,m,st,hi;	  | y[i] * VWPYSCL; store x[i-1]*VWPXSCL
+	add2nw 1,tmp16;		am->fpbp;	;		;		adp+
+	;			;		;		maba,lab,m,st,hi;	  | z[i] * VWPZSCL; store y[i-1]*VWPYSCL
+	sub2nw 2,tmp16;		am->fpbp;	;		;		dp+
+	;			;		;		pa,st,hi;		  | pipeline advance; store z[i-1]*VWPZSCL
+	addw tmp,acc,tmp;	am->fpap;	;		;		dp+
+	;			;		;		maba,lab,m,hi;	dp+	  | x[i+1] * VWPXSCL
+	add2nw 1,tmp16;		am->fpbp;	rfct;		;		adp+	  | fpdp <- &x[i]; loop back
+
+	sub2nw 0,tmp16;		am->fpbp;	;		;			  | fpbp <- tmp16 <- &VWPXOFF
+	movw vwpsclptr,tmp;	am->fpap;	;		;			  | fpap <- tmp <- &x[0]
+	movw tmp,y;		am->fpdp;	;		adda,lab,hi;		  | x[0] + VWPXOFF; fpdp points to input pts
+	add2nw 1,tmp16;		am->fpbp;	;		;		ap+
+	;			;		;		adda,lab,hi;		  | y[0] + VWPYOFF
+	add2nw 1,tmp16;		am->fpbp;	;		;		ap+
+	;			;		;		adda,lab,hi;		  | z[0] + VWPZOFF
+	sub2nw 2,tmp16;		am->fpbp;	;		;
+	;			;		;		pa,hi;			  | pipeline advance since can't change
+	addw tmp,acc,tmp;	am->fpap;	;		;			  | both fpap and fpbp fast enough
+	;			;		;		adda,lab,a,hi;		  | x[1] + VWPXOFF
+	add2nw 1,tmp16;		am->fpbp;	push,go;	;		ap+	  | loop through all pts
+	;			;		;		adda,lab,a,st,hi;	  | y[i] + VWPYOFF; store x[i-1]+VWPXOFF
+	add2nw 1,tmp16;		am->fpbp;	;		;		adp+
+	;			;		;		adda,lab,a,st,hi;	  | z[i] + VWPZOFF; store y[i-1]+VWPYOFF
+	sub2nw 2,tmp16;		am->fpbp;	;		;		dp+
+	;			;		;		pa,st,hi;		  | pipeline advance; store z[i-1]+VWPZOFF
+	addw tmp,acc,tmp;	am->fpap;	;		;		dp+
+	;			;		;		adda,lab,a,hi;	dp+	  | x[i+1] + VWPXOFF
+	add2nw 1,tmp16;		am->fpbp;	rfct;		;		adp+	  | fpdp <- &x[i]; loop back
+
+	;			;		crtn,go;	;			  | return
+
+
+
+											  | completion jump vector when putclpdpts
+											  | points to mkedges3; after putting all
+											  | pts through xform-clip-scale-mkedg,
+											  | jump here to complete processing
+	sub2nw 0,nxtptr,nxtptr;	am->fpdp;	cjp,go xf3doscan;;			  | fpdp <- &edg.nxt for last edge and
+											  | goto xf3doscan
+mkedges3: movw,s inum,y;	;		;		;
+	movw,s nomorepts,y;	;		cjp,~zer edgpts3;;			  | if (inum > 0) goto edgpts3
+	;			;		cjp,~zer lastedg3;;			  | else if no more pts in this boundary
+	;			;		crtn,go;	;			  | goto lastedg3; else return
+
+edgpts3: sub2nw 0,inum,tmp16;	am->brreg;	;		;			  | brreg <- inum-1
+	movw inptr,vwpsclptr;	;		cjs,go vwpsclpts3;;			  | vwpsclptr points to input pts
+											  | vwpsclpts3 assumes vwp params at fpr[32]
+											  | vwpsclpts3 scales pts in place
+	movw,s noptsyet,y;	;		;		;
+	movw 0,noptsyet;	;		cjp,zer mkedg3;	;			  | if not 1st pt of boundary, goto mkedg3
+											  | noptsyet <- FALSE
+firstpt3: movw inptr,y;		am->fpap;	;		lmode rn,ai,flow,fast;	  | fpap points to 1st pt y; flow mode
+	movw 0,y;		am->fpdp;	;		;			  | fpdp <- 0
+	sub2nw 0,inum,inum;	fpregh->fpregh;	;		;			  | fpreg[0] <- 1st pt x; inum -= 1
+	;			fpregl->fpregl;	;		;		adp+
+	addw inptr,5,inptr;	;		;		fixa,la,hi;		  | convert y to int
+	IMM;			;		;		;		ap+	  | inptr += 5
+	;			fpregh->fpregh;	;		;			  | fpreg[1] <- 1st pt z
+	;			fpregl->fpregl;	;		;		adp+
+	;			;		;		;		ap+
+	;			fpregh->fpregh;	;		;			  | fpreg[2] <- 1st pt i
+	;			fpregl->fpregl;	;		;		dp+
+	;			;		;		noflop,a,hi;
+	;			;		;		;
+	movw 3,y;		;		;		noflop,st,hi;		  | fpreg[3] <- fixed 1st pt y
+	IMM;			am->fpap;	;		;			  | fpap <- 3
+	movw d,acc;		fpregl->am;	;		;			  | acc <- low 16 bits of int y
+	movw acc,y;		am->fpregh;	;		;		dp+	  | low 16 bits to high word of fpreg[3]
+	movw 0,y;		am->fpap;	push,go 2;	;			  | fpap <- 0 (addr of 1st pt storage)
+	;			fpregh->fpregh;	;		;			  | prev pt <- 1st pt x,z,i
+	;			fpregl->fpregl;	rfct;		;		adp+
+	;			fpregh->fpregh;	;		;			  | fpreg[7,high] <- int y (prev pt storage)
+
+mkedg3:	sub2nw,s 0,inum,inum;	;		;		lmode rn,ai,flow,fast;	  | select flow mode; if((inum-=1)<0),
+	incw inptr,y;		am->fpap;	cjp,neg chklastedg3;;			  | goto chklastedg3; fpap <- &y[i]
+	add2nw 1,nxtptr,tmp;	am->fpdp;	;		fixa,la,hi;		  | fix y[i]; fpdp <- &edg.xmax
+	movw inptr,y;		am->fpap;	;		;			  | fpap <- &x[i]
+	movw nxtptr,tmp;	fpregh->fpregh;	;		;			  | edg.xmax <- x[i]; tmp <- nxtptr
+	;			fpregl->fpregl;	push,go 1;	;		adp+
+	;			;		;		;		ap+
+	;			fpregh->fpregh;	;		;			  | edg.zmax <- z[i]; edg.imax <- i[i]
+	;			fpregl->fpregl;	rfct;		;		adp+
+	mov2nw 2,y;		am->fpap;	push,go 2;	;			  | fpap <- &x[i-1] (prev pt)
+	movw 9,acc;		fpregh->fpregh;	;		;			  | edg.xmin <- x[i-1]; edg.zmin <- z[i-1]
+	IMM;			fpregl->fpregl;	rfct;		;		adp+	  | edg.imin <- i[i-1]; acc <- 9
+	addw nxtptr,acc,nxtptr;	am->fpregl;	;		;			  | edg.nxt <- nxtptr <- addr of next edge
+	movw tmp,y;		am->fpdp;	;		;			  | fpdp <- addr of this edge
+	addw inptr,5,inptr;	fpregh->fpregh;	;		noflop,a,hi;	dp+	  | edg.ymin <- y[i-1] (prev y,16-bit int)
+	IMM;			;		;		;			  | inptr <- &x[i+1]
+	movw d,acc;		fpregh->am;	;		noflop,st,hi;		  | edg.ymax<-y[i](32-bit int);acc<-prev y
+	incw tmp,y;		am->fpap;	;		;			  | fpap <- &edg.ymax
+	xorw,s d,acc,y;		fpregl->am;	;		;			  | check for horizontal edges
+	movw d,acc;		fpregl->am;	cjp,zer horizedg3;;		ap+	  | acc <- low order 16 bits of int y[i]
+	sub2nw,s 0,nedges,nedges;;		;		;			  | if (nedges -= 1) >= 0, goto savpt3
+	movw acc,y;		am->fpregh;	cjp,~neg savpt3;;			  | move low 16 bits to high word where
+											  | scan conversion code expects to see it
+
+edgovflw3: compw 0,nedges;	;		;		;			  | on edge overflow, nedges <- -1 and
+											  | adjust nxtptr
+horizedg3: subw d,nxtptr,nxtptr; 9->am;		;		;			  | ignore horizontal and overflow edges
+
+savpt3:	mov2nw 2,y;		am->fpdp;	push,go 2;	;			  | fpdp <- addr of prev pt (fpreg[4-7])
+	;			fpregh->fpregh;	;		;			  | prev pt <- current pt
+	;			fpregl->fpregl;	rfct;		;		adp+	  | 32-bit float x,z,i
+	movw acc,y;		am->fpregh;	cjp,go mkedg3;	;			  | 16-bit int y in high word; loop back
+
+chklastedg3: movw,s nomorepts,y;;		;		;
+lastedg3: movw,s noptsyet,y;	;		crtn,zer;	;			  | return if may be more pts in boundary
+	;			3->fpap;	crtn,~zer;	;			  | fpap <- addr of 1st y; return if no pts
+	movw d,tmp;		fpregh->am;	;		;			  | tmp <- 1st y (16-bit int)
+	;			7->fpap;	;		;			  | fpap <- addr of prev pt y
+	xorw,s d,tmp,y;		fpregh->am;	;		;			  | check for horizontal last edge
+	movw nxtptr,y;		am->fpdp;	crtn,zer;	;			  | rtn if horiz; fpdp<-addr for last edge
+	add2nw 3,nxtptr,nxtptr;	fpregh->fpregh;	;		;		dp+	  | edg.ymin <- prev y; nxtptr += 8
+	movw tmp,y;		am->fpregh;	;		;		dp+	  | edg.ymax <- 1st y
+	movw 0,y;		am->fpap;	push,go 2;	;			  | fpap <- addr of 1st pt x
+	;			fpregh->fpregh;	;		;			  | edg.xmax <- 1st x; edg.zmax <- 1st z
+	;			fpregl->fpregl;	rfct;		;		adp+	  | edg.imax <- 1st i
+	sub2nw,s 0,nedges,nedges;;		push,go 2;	;		ap+	  | fpap <- addr of prev pt x; nedges -= 1
+	;			fpregh->fpregh;	;		;			  | edg.xmin <- prev x; edg.zmin <- prev z
+	;			fpregl->fpregl;	rfct;		;		adp+	  | edg.imin <- prev i
+	incw nxtptr,nxtptr;	am->fpregl;	crtn,~neg;	;			  | edg.nxt <- nxtptr <- addr of next edge
+											  | if nedges >= 0, return
+	compw 0,nedges;		;		;		;			  | else nedges <- -1
+	subw d,nxtptr,nxtptr;	9->am;		crtn,go;	;			  | adjust nxtptr and return
+
+
+
+procfastbnd3:
+	movw 0,nomorepts;	;		;		;			  | nomorepts <- FALSE
+	incw 0,noptsyet;	;		;		;			  | noptsyet <- TRUE
+	movw nvert,acc;		;		;		;
+	movw acc,inum;		;		;		;			  | inum <- nvert, # of pts
+	movw putclpdpts,y;	am->brreg;	;		;			  | brreg <- addr of pt-consuming routine
+	movw d,inptr;		PTBUF->am;	cjs,go;		;			  | inptr<-PTBUF,addr of xfrmd,clptested pts
+											  | and call putclpdpts
+	incw 0,nomorepts;	;		;		;			  | nomorepts <- TRUE
+	movw putclpdpts,y;	am->brreg;	;		;			  | brreg <- addr of pt-consuming routine
+	movw 0,inum;		;		cjs,go;		;			  | inum <- 0, call pt-consuming routine
+	;			;		cjp,go xf3nxtbnd;;			  | loop back to xf3nxtbnd
+
+
+
+#define nprocvert r[9]
+#define vertptr r[18]
+#define NDCLIST 230
+#define MAXNDCLIST 1880
+#define BNDSTART 40	/* address of where points for each bound begin */
+
+
+|	movw d,nbnds;		shmem->am;	jmap PROC_PGON_INT_3D;;			  | # of separate boundaries
+PROC_PGON_INT_3D:
+	movw d,xf3ptr;		=xfint3->am;	;		;			  | set ptr to do fixtofloat and fall 
+											  | through to use regular xf3 routine
+	movw acc,polyshadestyle; ;		cjp,go cwpoly3;	;			  | after set ptr, use float routine
+
+
+|	movw d,nbnds;		shmem->am;	jmap PROC_PGON_FLT_3D;;		 	  | # of separate boundaries
+PROC_PGON_FLT_3D:
+	movw d,xf3ptr;		=xf3->am;	;		;			  | use the regular xf3 routine
+	movw acc,polyshadestyle;;		;		;
+cwpoly3: addw d,frameptr,acc;	CLPPLNS_FRMOFF->am; ;		;			  | 
+	movw acc,y;		am->shmemp;	;		;
+	movw d,polyclpplns;	shmem->am;	;		;		shp+	  | save clipplanes
+	bclrw 15,polyshadestyle; shmem->shmemp;	ldct 15;	;			  | shmemp <- matrixptr, clear 2D flag
+	mov2nw 4,y;		am->fpdp;	cjs,go shm_to_fpr;;			  | move matrix to fpr[16]
+	addw d,frameptr,acc;	VWPXSCL_FRMOFF->am;;		;
+	movw acc,y;		am->shmemp;	ldct 5;		;			  |shmemp <- addr of vwp params
+	mov2nw 5,y;		am->fpdp;	cjs,go shm_to_fpr;;			  | move viewport parameters to fpr[32]
+
+
+	| Initialization for NDC output polygon variables when corendcproc3 is
+	| the consuming routine for the points output by the polygon clipper
+cwp3:	movw d,nxtptr;		NDCLIST->am;	;		;			  | address of beginning of output list
+	movw nxtptr,y;		am->fpdp;	;		;			  | fpreg[NDCLIST] is nbndsout
+	incw nxtptr,nxtptr;	0->fpregh;	;		;			  | nbndsout <- 0; nxtptr keeps track of
+											  | next available location in NDC list
+	movw d,putclpdpts;	=corendcproc3->am;;		;			  | putclpdpts <- corendcproc3, ptr to
+											  | point-consuming routine
+	;			;		cjp,go procpoly3;;			  | goto procpoly3 to put input polygon thru
+											  | the xform-clip-consumepoint pipeline
+
+
+
+											  | completion jump vector when putclpdpts
+											  | points to corendcproc3; after putting
+											  | all pts through xform-clip-ndcproc,
+											  | jump here to complete processing
+	movw cmdptr,nvptr;	am->shmemp;	cjp,go corendcfinish3;;			  | shmemp <- &MAXLOCS
+											  |
+corendcproc3:
+	movw,s inum,y;		;		;		;
+	movw,s nomorepts,y;	;		cjp,~zer ndcpts3;;			  | if (inum > 0) goto ndcpts3
+	;			;		cjp,~zer lastndc3;;			  | else if no more pts in this boundary
+	;			;		crtn,go;	;			  | goto lastndc3; else return
+
+ndcpts3:
+	movw,s noptsyet,y;	;		;		;
+	movw 0,noptsyet;	;		cjp,zer ndcp3;	;			  | if not 1st pt of boundary, goto ndcp3
+											  | noptsyet <- FALSE
+firstndc3: movw 0,nprocvert;	BNDSTART->fpdp;	;		;			| nprocvert <- 0, store addr where points for this bound begin
+	movw nxtptr,y	;	am->fpregh;	;		;			| bndstart <- nxtptr
+	incw nxtptr,nxtptr;	;		;		;			  | nxtptr += 1
+
+ndcp3:	sub2nw 0,inum,tmp16;	am->brreg;	;		;			  | brreg <- inum-1
+	movw nxtptr,y;		am->fpdp;	;		;			  | fpdp <- addr for next output pt
+	movw inptr,y;		am->fpap;	push,go;	;			  | fpap <- addr of xfrm-clp input pts
+											  | for each input point
+	negw d,acc;		5->am;		;		;
+	incw,s acc,acc;		fpregh->fpregh;	;		;			  | copy input to output
+	;			fpregl->fpregl;	cjp,~zer .-1;	;		adp+	  | x,y,z,w,i
+	subw,s d,nxtptr,y;	MAXNDCLIST->am;	;		;			  | if nxtptr >= MAXNDCLIST, goto ndctoobig3
+	incw nprocvert,nprocvert;;		cjpp,~neg ndctoobig3;;			  | else nprocvert += 1
+	addw,s d,nxtptr,nxtptr;	5->am;		rfct;		;			  | nxtptr += 5, and loop back until done
+
+	movw,s nomorepts,y;	;		;		;
+lastndc3: movw,s noptsyet,y;	NDCLIST->fpap;	crtn,zer;	;			  | return if may be more pts in boundary
+											  | fpap <- &nbndsout
+	movw,s d,acc;		fpregh->am;	crtn,~zer;	;			  | return if noptsyet
+	;			NDCLIST->fpdp;	crtn,neg;	;			  | return if nbndsout < 0 (overflow)
+	;			BNDSTART->fpap;	;		;			| DEBUG NEW
+	;			fpregh->am;	;		;			| fetch address where points for this bound begin
+	;			NDCLIST->fpap;	;		;			| DEBUG END
+											  | fpdp <- &nbndsout
+	incw acc,acc;		am->fpregh;	;		;			  | nbndsout += 1
+	movw d,y;		am->fpdp;	;		;			| fpdp <- &boundary data for this boundary
+	movw nprocvert,y;	am->fpregh;	;		;			  | store # of pts in this boundary
+	sub2nw 0,nprocvert,tmp; am->brreg;	;		;			  | brreg <- nprocvert-1
+	incw d,vwpsclptr;	;		cjs,go vwpsclpts3; ;			| vwpsclptr points to output pts
+											  | vwpsclpts3 assumes vwp params at fpr[32]
+											  | vwpsclpts3 scales pts in place
+	;			BNDSTART->fpap;	;		;			| DEBUG NEW
+	;			fpregh->am;	;		;			| fetch address where points for this bound begin
+	rolw 2,nprocvert,acc;	;		;		;
+	addw nprocvert,acc,acc;	;		;		;
+	sub2nw 0,acc;		am->brreg;	;		lmode rn,ai,pipe,fast;	  | brreg <- 5*nprocvert - 1; pipeline mode
+	incw d,y;		am->fpap;	push,go 3;	;			| fpap <- &x[0]; 2910 R reg <- 3
+	;			;		;		fixa,la,hi;		  | convert x[0],y[0],z[0],w[0] to integer
+	;			;		rfct;		;		ap+
+	incw d,y;		am->fpdp;	;		fixa,la,a,hi;		| i[0]; fpdp <- &x[0]
+	;			;		push,go;	;		ap+
+	;			;		;		fixa,la,a,st,hi;	  | loop through 5*nprocvert values,
+	;			;		rfct;		;		adp+	  | converting to integer and storing back
+	;			;		crtn,go;	;			  | return
+
+
+
+ndctoobig3:
+	incw NDCLIST,nxtptr;	NDCLIST->fpdp;	;		;			  | list has overflowed, so record this fact
+	IMM;			0xFFFF->fpregh;	crtn,go;	;			  | nbndsout<- -1;nxtptr<-NDCLIST+1;return
+
+
+
+|	movw cmdptr,nvptr;	am->shmemp;	cjp,go corendcfinish3;;			  | shmemp <- nvptr <- &MAXLOCS
+corendcfinish3:
+	movw d,tmp;		shmem->am;	;		;			  | tmp0 <- MAXLOCS
+	add2nw 1,nvptr,nvptr;	am->shmemp;	;		;			  | shmemp <- nvptr <- &nbndsout
+	subw d,nxtptr,acc;	NDCLIST->am;	;		;			  | acc <- (nxtptr - NDCLIST)
+	sl0w acc,acc;		;		;		;			  | acc *= 2
+	rsubw,s tmp,acc,y;	;		;		;			  | if (2*(nxtptr - NDCLIST) > MAXLOCS), set
+	compw 0,nbnds;		;		cjp,neg .+3;	;			  | nbnds <- 0xFFFF (more stringent test
+	incw nvptr,vertptr;	NDCLIST->fpap;	;		;			  | could be done); else, fpap <- &nbndsclip
+	movw d,nbnds;		fpregh->am;	;		;		ap+	  | nbnds <- nbndsclip
+	movw,s nbnds,y;		am->shmem;	;		;		shp+	  | nbndsout <- nbnds; if neg or 0, goto
+	addw d,vertptr,vertptr;	;		cjp,neg corendcthru3;;			  | corendcthru3; vertptr<-nvptr+1+nbnds(d)
+corendcbndsloop3:
+	incw nvptr,nvptr;	am->shmemp;	cjp,zer corendcthru3;;			  | shmemp <- (nvptr+=1), addr for nvert[i]
+	movw,s d,nvert;		fpregh->am;	;		;			  | nvert <- nvert[i]
+	;			fpregh->shmem;	;		;		ap+	  | *nvptr <- nvert[i]
+	movw vertptr,y;		am->shmemp;	;		;			  | shmemp <- vertptr, addr for vertices
+corendcvertloop3:
+	;			;		cjp,zer corendcnxtbnd3;;
+	btstw,s 15,polyshadestyle; ;		;		;			  | test 2D or 3D output routine
+	;			;		cjp,~zer cwpout2; ;			  | go to 2D output routime
+	btstw,s 0,polyshadestyle;;		push,go 2;	;			  | cc reflects constant or Gouraud shading
+	incw vertptr,vertptr;	fpregh->shmem;	;		;		shp+	  | x,y,z to shmem
+	incw vertptr,vertptr;	fpregl->shmem;	rfct;		;		shp+,abp+ | vertptr += 6
+	;			;		;		;		ap+	  | skip w
+	movw d,tmp;		fpregh->am;	;		;			  | high intensity
+	movw d,tmp1;		fpregl->am;	cjp,zer .+8;	;		ap+	  | if intensity not needed, don't send it
+	xorw,s d,tmp,y;		0x7f->am;	;		;			  | otherwise, check for Weitek float to
+	incw,s tmp1,y;		;		cjp,~zer corendcnoadj;;			  | int conversion bug in which an intensity
+	;			;		cjp,~zer corendcnoadj;;			  | between 127 + (65535/65536) and
+	movw tmp,y;		am->shmem;	cjp,go .+2;	;		shp+	  | 127 + (65535.5/65536), corresponding to
+											  | an offset (by -2^23) float value between
+											  | -1.0 and -0.5, is converted to the value
+											  | 0x007FFFFF rather than 0xFFFFFFFF (after
+											  | float->int and before adding 2^23);
+											  | after adding back 0x00800000 (2^23),
+											  | the value would be 0xFFFFFF (255 +
+											  | (65535/65536)) rather than 0x007FFFFF
+											  | (127 + (65535/65536));
+											  | if this case has arisen, ensure that
+											  | the intensity is changed to 0x007FFFFF
+corendcnoadj:
+	add2nw 7,tmp,tmp;	am->shmem;	;		;		shp+	  | send intensity reconverted to
+	movw tmp1,y;		am->shmem;	;		;		shp+	  | unsigned 8-bit integer, 16-bit fraction
+	add2nw 1,vertptr,vertptr;;		;		;			  | vertptr += 2
+	sub2nw,s 0,nvert,nvert; ;		cjp,go corendcvertloop3; ;		  | nvert-=1 and loop back
+corendcnxtbnd3:
+	sub2nw,s 0,nbnds,nbnds;	;		cjp,go corendcbndsloop3;;		  | nbnds-=1 and loop back
+
+
+
+corendcthru3:
+	movw cmdptr,y;		am->shmemp;	;		;			  | shmem <- &data ready flag
+	incw cmdptr,cmdptr;	0->shmem;	;		;			  | data ready flag <- 0; cmdptr+=1
+	;			;		jmap getcmd;	;
+
+
+
+#undef nprocvert
+#undef vertptr
+#undef NDCLIST
+#undef MAXNDCLIST
+#undef BNDSTART
+
+#undef sx
+#undef sy
+#undef op
+#undef colorop
+#undef edgptr
+#undef onum
+#undef inum
+#undef noptsyet
+#undef nomorepts
+#undef putclpdpts
+#undef getnxtpt
+#undef nvptr
+#undef tmp16
+#undef inptr
+#undef outptr
+#undef polyclpplns
+#undef polycolorop
+#undef nbnds
+#undef nvert
+#undef nedges
+#undef matrixptr
+#undef nxtptr
+#undef inbufptr
+#undef outbufptr
+#undef xf3ptr
+#undef plnptr
+#undef firsty
+#undef vwpsclptr
+#undef ptbufptr
+#undef xfptptr
+#undef cmdptptr
+#undef recaddr
+#undef outcodeprod
+#undef outcodesum
+#undef tmp1
+#undef clpplns
+#undef tmp
+#undef MAXEDGES
+#undef DUMMYEDGE
+#undef PTBUF
+#undef SMALLNVERT
+#undef LEFTPLNSTRCT
+#undef TOPPLNSTRCT
+#undef RIGHTPLNSTRCT
+#undef BOTTOMPLNSTRCT
+#undef BUF1
+#undef BUF2

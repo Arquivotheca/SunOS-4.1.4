@@ -1,0 +1,214 @@
+/* @(#)sb_sun_c_plus_plus.ext 1.1 94/10/31 */
+
+/*
+ *	Copyright (c) 1989, Sun Microsystems, Inc.  All Rights Reserved.
+ *	Sun considers its source code as an unpublished, proprietary
+ *	trade secret, and it is available only under strict license
+ *	provisions.  This copyright notice is placed here only to protect
+ *	Sun in the event the source is deemed a published work.  Dissassembly,
+ *	decompilation, or other means of reducing the object code to human
+ *	readable form is prohibited by the license agreement under which
+ *	this code is provided to the user or company in possession of this
+ *	copy.
+ *	RESTRICTED RIGHTS LEGEND: Use, duplication, or disclosure by the
+ *	Government is subject to restrictions as set forth in subparagraph
+ *	(c)(1)(ii) of the Rights in Technical Data and Computer Software
+ *	clause at DFARS 52.227-7013 and in similar clauses in the FAR and
+ *	NASA FAR Supplement.
+ */
+
+#ifndef sb_sun_c_pp_ext_INCLUDED
+#define sb_sun_c_pp_ext_INCLUDED
+
+/*
+ * This file defines the browser environment for the Sun-C language.
+ */
+
+language sun_c_pp "/*" "*/" grep-able
+version 1
+
+/*
+ * These ref-focus-unit statements defines the tags that the focus
+ * facility uses. sb_focus.ext describe them in detail.
+ */
+#define REF_FOCUS_UNITS \
+ref-focus-unit File \
+ref-focus-unit Macro \
+ref-focus-unit Function \
+ref-focus-unit Block \
+ref-focus-unit Struct \
+ref-focus-unit Union \
+ref-focus-unit Enum \
+ref-focus-unit Language
+
+#include "sb_language_master.ext"
+
+#include "sb_c_baseline.ext"
+
+/*
+ * This macro defines the properties that should mark a declaration tag
+ */
+#define DEF ALL_HITS c.def
+
+/*
+ * This macro defines the properties that should mark a reference tag
+ */
+#define REF ALL_HITS c.ref
+
+
+/*
+ * This section of the file describes properties and tags that are required
+ * to support the Sun specific constructs in the C compiler.
+ */
+properties sun_c_pp {
+	arg			/* Marks #pragma arguments */
+	asm_statement		/* Marks strings from asm() statements */
+	name			/* Marks #pragma names */
+	pragma			/* Marks all #pragma names and arguments */
+}
+
+/*
+ * The short comments for the tags have the format
+ *	pattern => symbol
+ * where the "pattern" is the cpp construct that generates a symbol with
+ * the tag in question and the "symbol" is the symbol from the "pattern"
+ * that gets filed.
+ */
+tags sun_c_pp 10 {
+/*
+ * Tag for strings used with the asm() statement
+ */
+	asm_string =				/* asm("foo") => "foo" */
+		( ALL_HITS BASE.constant BASE.string asm_statement )
+		CPP_SECONDARY_STRING
+
+/*
+ * Tags used to mark #pragma words
+ */
+	ref_pragma_name =			/* #pragma p(a) => p */
+		( REF pragma name )
+
+	ref_pragma_arg =			/* #pragma p(a) => a */
+		( REF pragma arg )
+
+/*
+ * Tag used to mark semantic records that were generated but were later
+ * found to be redundant.
+ */
+	bogus_entry =
+		( HIDDEN )
+}
+
+/*
+ * Add all the Sun C++ specific menu items
+ */
+insert-menu-items gluemenu "Strings" "Regular Strings"
+menu {
+	"asm() Strings"
+}
+
+insert-menu-items gluemenu "Strings"
+menu {
+	"Pragmas" menu {
+		"All Pargma Identifiers"
+		"Pragma Identifiers"
+		"Pragma Arguments"
+	}
+}
+
+insert-menu-items sun_c_pp "Strings" "Regular Strings"
+menu {
+	"asm() Strings" equiv
+		= ( ALL_HITS BASE.constant BASE.string asm_statement )
+		help "All strings used from asm() statements"
+}
+
+insert-menu-items sun_c_pp "Strings"
+menu {
+	"Pragmas" equiv menu {
+		"All Pargma Identifiers" equiv
+			= ( REF pragma )
+			help "All words used in pragmas"
+		"Pragma Identifiers" equiv
+			= ( REF pragma name )
+			help "All words used to name pragmas"
+		"Pragma Arguments" equiv
+			= ( REF pragma arg )
+			help "All words used pragma arguments"
+	} help "All words used in pragmas"
+}
+
+/*
+ * This section describes the node specific menus for the different graphs
+ */
+properties c_pp_grapher {
+	class_graph_inheritance_arc
+	class_graph_class_node
+	class_graph_method_arc
+	class_graph_method_node
+	class_graph_method_property
+}
+#define PROP BASE.grapher BASE.CB_MENU_TOKEN_CBCHECKCB
+tags c_pp_grapher 10 {
+	/*
+	 * Class graph tags
+	 */
+	class_graph_class_node
+			= ( PROP c_pp_grapher.class_graph_class_node )
+	class_graph_method_node
+			= ( PROP c_pp_grapher.class_graph_method_node )
+
+	class_graph_inheritance_arc
+			= ( PROP c_pp_grapher.class_graph_inheritance_arc )
+	class_graph_method_arc
+			= ( PROP c_pp_grapher.class_graph_method_arc )
+
+
+	class_graph_method_property
+			= ( PROP c_pp_grapher.class_graph_method_property )
+}
+#undef PROP
+
+/*
+ * This section defines how to render arcs and nodes
+ */
+render c_pp_grapher_class_graph_inheritance_arc		solid
+render c_pp_grapher_class_graph_method_arc		dotted
+render c_pp_grapher_class_graph_class_node		oval
+render c_pp_grapher_class_graph_method_node		square
+
+graph "Class Tree" "C"
+menu {
+	"Classes and Methods"
+		= ( BASE.grapher c_pp_grapher.class_graph_inheritance_arc ) |
+		  ( BASE.grapher c_pp_grapher.class_graph_method_arc )
+	"Classes"
+		= ( BASE.grapher c_pp_grapher.class_graph_inheritance_arc )
+}
+
+GRAPHER_FUNCTION_NODE_MENU
+GRAPHER_FILE_NODE_MENU
+
+node c_pp_grapher_class_graph_class_node class_graph_class_node
+menu {
+	GRAPHER_NODE_MENU_GENERICS
+	"Show Definition"
+		= ( DEF c.function c.w_body ) |
+		  ( BASE.grapher BASE.show_property )
+	"Show Methods"
+		= ( BASE.grapher c_pp_grapher.class_graph_method_property ) |
+		  ( BASE.grapher BASE.show_property )
+}
+
+node c_pp_grapher_class_graph_method_node class_graph_method_node
+menu {
+	GRAPHER_NODE_MENU_GENERICS
+	"Show Definition"
+		= ( DEF c.function c.w_body ) |
+		  ( BASE.grapher BASE.show_property )
+}
+
+#undef DEF
+#undef REF
+
+#endif

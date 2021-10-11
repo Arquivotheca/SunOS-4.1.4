@@ -1,0 +1,80 @@
+|  "@(#)xflineinit.pp.u 1.1 94/10/31"   
+
+| Copyright 1986 by Sun Microsystems, Inc.
+| Written by Stuart Levy
+
+ 
+|   The options field is broken down as follows:
+|  	 bit 15 - startpt	bit 14 - endpt		bit 13 - balancing	bit 12 - givenpattern
+|  	 bit 11 - fat		bit 10 - poly		bit 9 - mvlist		bit 8 - righthalf
+|   	 bit 7 - close		bit 6 - cliprt		bit 5 - solid		bit 4 - pixrect
+|   	 bit 3 - nosetup	bit 2 - clipbit		bit 1 - firstvec	bit 0 - pick			(bit 0 used only in GP+)
+
+|   This routine does initialization necessary for xfline.  It transfers numsegs,patln and stoff from the
+|   attribute area of scrmem to the 'scratch' section of memory where it is accessed by the pixrect level
+|   code.  It also fills in the firstvec and solid (if applicable) fields of the options word, and puts 
+|   it in the appropriate register.  Picking is assumed to be off, as the picking routines explicitly set
+|   the picking bit.  The width is also placed in a register.  The addresses used for the
+|   vector attributes are defined in pp.h, while those in 'scratch' memory are defined here.
+
+#define pick		0	/* used only in GP+ */
+#define firstvec	1
+#define nosetup		3
+#define pixrect		4
+#define solid		5
+
+#define numsegs		r[0]
+#define patln		r[1]
+#define stoff		r[2]
+
+#define width		r[21]
+#define options		r[24]
+
+#define savtex		0x120
+#define savxflnwid	0x136
+
+
+#ifdef GPPLUS
+setzbline:
+	;			VecAtts->scrmemp; ;			
+	;			fifo1->am;	cjp,f1e .;			| pull hiddensurf attribute
+	movw d,y;		am->scrmem;	jmap start;			| 
+#endif GPPLUS	
+	
+
+xflineinit: ;			NumsegsAddr->scrmemp; ;				
+	movw d,numsegs;		scrmem->am;	;			scrmp+	| scrmem(att)->numsegs.
+	movw d,patln;		scrmem->am;	;			scrmp+	| scrmem(att)->patln.
+	movw d,stoff;		scrmem->am;	;			scrmp+	| scrmem(att)->stoff.
+	movw d,options;		scrmem->am;	;			scrmp+	| scrmem(att)->options.
+	bclrw pixrect,options; ;		;				| tex->options.pixrect = 0.
+	bclrw nosetup,options;	;		;				| must initially setup rop chips.
+	bclrw pick,options;	=xfinitsol->brreg; ;				| assume picking is off
+	movw d,width;		scrmem->am;	;				| scrmem(att)->width.
+	bsetw firstvec,options;	PatternAddr->scrmemp; ;				| tex->options.firstvec=1.
+	movw,s d,y;		scrmem->am;	;			scrmp+	| 
+	movw,s d,y;		scrmem->am;	cjp, zer;			| Check if pattern is one segment only (solid).
+	bclrw solid,options;	savtex->scrmemp; cjp, zer;			| Jump if pattern is one segment.
+	movw stoff,y;		am->scrmem;	;			scrmp+	| stoff->scrmem (for toctant).
+	movw patln,y;		am->scrmem;	;			scrmp+	| patln->scrmem.
+	movw numsegs,y;		am->scrmem;	jmap start;			| numsegs->scrmem & return.
+	
+xfinitsol: bsetw solid,options;	savxflnwid->scrmemp; ;				| If solid vector, want to save
+	movw width,y;		am->scrmem;	jmap start;			|  width at location in scrmem.
+
+
+#undef pick
+#undef firstvec
+#undef nosetup
+#undef pixrect
+#undef solid
+
+#undef numsegs	
+#undef patln	
+#undef stoff	
+
+#undef width	
+#undef options	
+
+#undef savtex	
+#undef savxflnwid

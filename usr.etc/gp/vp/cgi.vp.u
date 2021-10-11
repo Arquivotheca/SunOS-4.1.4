@@ -1,0 +1,52 @@
+| Copyright (c) 1985 by Sun Microsystems, Inc.
+| @(#)cgi.vp.u 1.1 94/10/31 SMI
+
+#define zbdcln r[25]
+#define outptr r[14]
+#define countr r[10]
+
+
+|	negw d,countr;		shmem->am;	jmap CGI_LINE;	;
+CGI_LINE: addw frameptr,TEX_FRMOFF,y; ;		;		;			| 
+	IMM;			am->shmemp;	cjs, go tvec_attr; ;			| Texture addr->scrmemp
+	addw frameptr,VWPXSCL_FRMOFF,y; ;	ldct 3;		;			| 
+	IMM;			am->shmemp;	cjp, go cgiv2;	;			| 
+
+
+|	negw d,countr;		shmem->am;	jmap CGIVEC;	;
+CGIVEC:	movw frameptr,y;	am->shmemp;	cjs,go vec_attr;;
+	;			VWPXSCL_FRMOFF->am;;		;
+	addw d,frameptr,y;	am->shmemp;	ldct 3;		;			  | shmemp <- addr of vwp params
+cgiv2:	mov2nw 5,y;		am->fpdp;	cjs,go shm_to_fpr; ;			  | move viewport parameters to fpr[32]
+	add2nw 1,cmdptr;	am->shmemp;	ldct 3;		;			  | shmemp <- (cmdptr += 2)
+#ifdef GPPLUS
+	movw PPSETZBLINE,acc;	;		;		;			| disable z buffered lines on pp
+	IMM;			am->fifo1;	cjs,f1f wrfifo;	;			| 
+	movw 0,zbdcln;		am->fifo1;	cjp,f1f .;	;			| set zbdcln = 0
+#endif GPPLUS	
+nxtcgivec: mov2nw 6,y;		am->fpdp;	cjs,go shm_to_fpr;;			  | move vector endpoints to fpr[64]
+	mov2nw 6,outptr;	am->fpap;	;		lmode rn,ai,pipe,fast;	  | fpap <- addr of endpoints; pipe mode
+	mov2nw 1,y;		am->brreg;	;		floata,la,hi;		  | convert x0 to float; brreg <- 2
+	add2nw 2,outptr;	;		push,go;	;		ap+	  | outptr <- 68, put vwpscld pts at fpr[68]
+	movw =vwpsv2,y;		;		;		floata,la,hi;		  | convert y0, x1, and y1
+	IMM;			am->brreg;	rfct;		;		ap+	  | brreg pts to routine to finish vwp scale
+	;			;		;		pa,a,hi;		  | pipeline advance
+	mov2nw 5,acc;		am->fpbp;	;		;			  | fpbp <- &VWPXSCL
+	;			;		;		mabr,lab,a,hi;		  | x0 * VWPXSCL
+	add2nw 1,acc;		am->fpbp;	;		;
+	;			;		;		mabr,lab,a,hi;		  | y0 * VWPYSCL
+	sub2nw 1,acc;		am->fpbp;	;		;
+	;			;		;		mabr,lab,a,hi;		  | x1 * VWPXSCL
+	add2nw 1,acc;		am->fpbp;	;		;
+	;			;		;		mabr,lab,hi;		  | y1 * VWPYSCL
+	sub2nw 0,acc;		am->fpbp;	cjs,go;		;			  | call vwpsv2 to finish vwp scale and send
+											  | vector to PP; outptr==68,fpbp<-&VWPXOFF
+	incw,s countr,countr;	;		ldct 3;		;			  | reload 2910 R reg,increment loop counter
+	add2nw 3,cmdptr;	am->shmemp;	cjp,~zer nxtcgivec;;			  | shmemp<-(cmdptr += 8),loop if more vecs
+	;			;		jmap getcmd;	;			  | jump to cmd loop
+
+
+
+#undef outptr
+#undef countr
+#undef zbdcln

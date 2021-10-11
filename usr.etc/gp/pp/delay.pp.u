@@ -1,0 +1,50 @@
+| @(#)delay.pp.u 1.1 94/10/31 SMI
+
+| Copyright (c) 1985 by Sun Microsystems, Inc.
+
+|   delay code.  Expects delay (in milliseconds) in accumulator.  Assumes 120 ns. cycle time.
+delay:	movw acc, r[0];		;		;				| 
+delay0:	movw,s d, acc;		8330->am;	;				| 
+	decws acc;		;		cjp, ~zer .;			| 
+	decws r[0];		;		;				| 
+	;			;		cjp, ~neg delay0;		| 
+	;			;		crtn, go;			| 
+
+dbglvl:	;			DebugLevel->scrmemp; ;				| 
+	movw d, acc;		fifo1->am;	cjp, f1e .;			| 
+	movw acc, y;		am->scrmem;	cjp, go start;			| 
+
+cndflash: ;			DebugLevel->scrmemp; ;				| Expects debuglevel in r[0], flash time in acc.
+	subw,s d, r[0], y;	scrmem->am;	;				| 
+	;			;		cjs, zer flash;			| 
+	;			;		crtn, go;			| 
+
+flash:	;			;		;			scrmp 0	| Expects delay to be in accumulator.
+	movw acc, y;		am->scrmem;	;			scrmp +	| 
+	movw r[0], y;		am->scrmem;	;			scrmp +	| 
+	movw r[2], y;		am->scrmem;	;			scrmp +	| 
+	;			;		cjs, go delay;			| 
+	;			;		cjs, go vidoff;		scrmp 0	| 
+	movw d, acc;		scrmem->am;	;				| 
+	;			;		cjs, go delay;			| 
+	;			;		cjs, go vidon;		scrmp 0	| 
+	;			;		;			scrmp +	| 
+	movw d, r[0];		scrmem->am;	;			scrmp +	| 
+	movw d, r[2];		scrmem->am;	crtn, go;		scrmp +	| 
+
+vidoff:	movw FBCont, y;		am->vhiareg;	cjp, ~vir vidoff;		| 
+	;			FBStatus->vloareg; ;				| 
+	;			GPVWord->vctlreg;	;				| 
+vidoff0: ;			;		cjp, ~vir vidoff0;	vmerd	| 
+vidoff1: movw d, r[2];		vrdreg->am;	cjp, ~vir vidoff1;		| 
+	andw d, r[2], r[2];	0xfffe->am;	;				| 
+	movw r[2], y;		am->vwdreg;	crtn, go;		vmewr	| 
+
+
+vidon:	movw FBCont, y;		am->vhiareg;	cjp, ~vir vidon;		| 
+	;			FBStatus->vloareg; ;				| 
+	;			GPVWord->vctlreg;	;				| 
+vidon0: ;			;		cjp, ~vir vidon0;	vmerd	| 
+vidon1: movw d, r[2];		vrdreg->am;	cjp, ~vir vidon1;		| 
+	orw d, r[2], r[2];	0x1->am;	;				| 
+	movw r[2], y;		am->vwdreg;	crtn, go;		vmewr	| 

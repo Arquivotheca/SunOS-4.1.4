@@ -1,0 +1,90 @@
+| "@(#)octant.pp.u 1.1 94/10/31 SMI"
+
+| Copyright 1985 by Sun Microsystems, Inc.
+
+|   Octant subroutine:  chooses octant (one of four) to draw in
+|   and generates the points.
+|   Expects the following registers to be loaded:
+|   vwrdreg:		color.
+|   vctlreg:		byte mode.
+|   acc:		initial error.
+|   r[0], vloareg:	low address.
+|   r[1], vhiareg:	high address.
+|   r[2]:		number of pixels to draw.
+|   r[3]:		incr0 (added to error if error is negative).
+|   r[4]:		incr1 (added to error if error is positive).
+|   r[5]:		reflect (determines which octant:  0 => 0, 1 => 1, 2 => 7, 3 => 6).
+#define err acc
+#define addrlo r[0]
+#define addrhi r[1]
+#define incr0 r[3]
+#define incr1 r[4]
+octant:	;			=oct0176->am;	;				| Choose octant based on reflect.
+	addw d, r[5], y;	am->brreg;	;				| 
+	;			;		cjp, go;			| 
+oct0176:movw r[2], y;		am->brreg;	cjp, go oct0;			| Get ready to ld cntr.
+	movw r[2], y;		am->brreg;	cjp, go oct1;			| Get ready to ld cntr. (dx swapped w/ dy).
+	movw r[2], y;		am->brreg;	cjp, go oct7;			| Get ready to ld cntr.
+	movw r[2], y;		am->brreg;	cjp, go oct6;			| Get ready to ld cntr. (dx swapped w/ dy).
+
+oct0:	testw (acc);		=negerr0->brreg;push, go;			| Set cond. code, ld cntr, push loop.
+|   testing (-acc) < 0 is equivalent to testing (acc) > 0.
+|   Main vector drawing loop.  Octant 0.
+vloop0:	;			;		cjp, ~neg.3 vloop0;	vmewr	| if err < 0 goto negerr0.
+	incw,s addrlo, addrlo;	;		;				| Increment x.
+	movw addrlo, y;		am->vloareg;	cjp, ~cry ncry0a;		| 
+	incw addrhi, addrhi;	am->vhiareg;	;				| 
+ncry0a:	addw,s incr0, acc, acc;	;		rfct;				| 
+	;			;		crtn, go;			| 
+negerr0:addw,s d, addrlo, addrlo;IncXY->am;	;				| Increment x and y. (SWidth + 1).
+	movw addrlo, y;		am->vloareg;	cjp, ~cry ncry0;		| No need to rewrite vhiareg if no change.
+	incw addrhi, addrhi;	am->vhiareg;	;				| addrhi += carry.
+ncry0:	addw,s incr1, acc, acc;	;		rfct;				| 
+	;			;		crtn, go;			| 
+
+oct1:	testw (acc);		=negerr1->brreg;push, go;			| Set cond. code, ld cntr, push loop.
+|   Main vector drawing loop.  Octant 1.
+vloop1:	;			;		cjp, ~neg.3 vloop1;	vmewr	| if err < 0 goto negerr1.
+	addw,s d, addrlo, addrlo;SWidth->am;	;				| Increment y.
+	movw addrlo, y;		am->vloareg;	cjp, ~cry ncry1a;		| 
+	incw addrhi, addrhi;	am->vhiareg;	;				| 
+ncry1a:	addw,s incr0, acc, acc;	;		rfct;				| 
+	;			;		crtn, go;			| 
+negerr1:addw,s d, addrlo, addrlo;IncXY->am;	;				| Increment x and y. (SWidth + 1).
+	movw addrlo, y;		am->vloareg;	cjp, ~cry ncry1;		| No need to rewrite vhiareg if no change.
+	incw addrhi, addrhi;	am->vhiareg;	;				| addrhi += carry.
+ncry1:	addw,s incr1, acc, acc;	;		rfct;				| 
+	;			;		crtn, go;			| 
+
+oct7:	testw (acc);		=negerr7->brreg;push, go;			| Set cond. code, ld cntr, push loop.
+|   Main vector drawing loop.  Octant 7.
+vloop7:	;			;		cjp, ~neg.3 vloop7;	vmewr	| if err < 0 goto negerr7.
+	incw,s addrlo,addrlo;	;		;				| increment x.
+	movw addrlo, y;		am->vloareg;	cjp, ~cry ncry7a;		| 
+	incw addrhi, addrhi;	am->vhiareg;	;				| 
+ncry7a:	addw,s incr0, acc, acc;	;		rfct;				| 
+	;			;		crtn, go;			| 
+negerr7:addw,s d, addrlo, addrlo;IncXDecY->am;	;				| Increment x, decrement y. (-SWidth + 1).
+	movw addrlo, y;		am->vloareg;	cjp, cry ncry7;			| No need to rewrite vhiareg if no change.
+	decw addrhi, addrhi;	am->vhiareg;	;				| addrhi -= borrow
+ncry7:	addw,s incr1, acc, acc;	;		rfct;				| 
+	;			;		crtn, go;			| 
+
+oct6:	testw (acc);		=negerr6->brreg;push, go;			| Set cond. code, ld cntr, push loop.
+|   Main vector drawing loop.  Octant 6.
+vloop6:	;			;		cjp, ~neg.3 vloop6;	vmewr	| if err < 0 goto negerr6.
+	subw,s d, addrlo, addrlo;SWidth->am;	;				| Decrement y.
+	movw addrlo, y;		am->vloareg;	cjp, cry ncry6a;		| Not rewrite vhiareg if no change. cry==no borrow
+	decw addrhi, addrhi;	am->vhiareg;	;				| addrhi -= borrow.
+ncry6a:	addw,s incr0, acc, acc;	;		rfct;				| 
+	;			;		crtn, go;			| 
+negerr6:addw,s d, addrlo, addrlo;IncXDecY->am;	;				| Increment x, decrement y. (-SWidth + 1).
+	movw addrlo, y;		am->vloareg;	cjp, cry ncry6;			| No need to rewrite vhiareg if no change.
+	decw addrhi, addrhi;	am->vhiareg;	;				| addrhi -= borrow
+ncry6:	addw,s incr1, acc, acc;	;		rfct;				| 
+	;			;		crtn, go;			| 
+#undef err
+#undef addrlo
+#undef addrhi
+#undef incr0
+#undef incr1

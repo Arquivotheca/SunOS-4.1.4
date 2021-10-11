@@ -1,0 +1,10 @@
+DIRS="demo etc stand suntool ucb usr.bin sys"
+#DIRS="lib usr.lib bin demo etc stand suntool sys ucb usr.bin"
+#for i in $DIRS
+#do
+#	(cd $i; make -k clean) >$i.cerrs 2>&1
+#done
+for i in $DIRS
+do
+	(cd $i; make -k) >$i.errs 2>&1
+done

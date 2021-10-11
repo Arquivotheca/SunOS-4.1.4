@@ -1,0 +1,27 @@
+
+	        @(#)cdpatch.README	1.1 94/10/31
+
+(1) running single user (or quiescent system) as root (superuser).
+	NOTE: you must be running a kernel with the "hsfs" filesytem
+	configured into it.  (all GENERIC kernels have it)
+
+(2) insert cdrom into drive
+
+(3) cd /; umount /dev/sr0 (If you have /dev/sr0 mounted.)
+
+(4) /usr/etc/extract_patch
+	Follow the instructions. 
+	NOTE: you must use "hsfs_name" below as the patch name,
+	      i.e. use ow3_414 instead of OW3_414.
+
+
+The patches available on the CD-ROM are
+
+	name            hsfs_name
+	====		=========
+	102107_01	patch_102107_01
+	ARM_1.0		patch_ARM_1.0
+	DBE		patch_dbe
+	OW3_414		patch_ow3_414
+	SNM		patch_snm
+	VIDEOPIX_1.0	patch_VIDEOPIX_1.0

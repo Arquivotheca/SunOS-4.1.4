@@ -1,0 +1,117 @@
+| "@(#)xfline.pp.u 1.1 94/10/31"   
+| Copyright 1986 by Sun Microsystems, Inc.
+
+| Written by Stuart Levy
+
+ 
+|   The options field is broken down as follows:
+|  	 bit 15 - startpt	bit 14 - endpt		bit 13 - balancing	bit 12 - givenpattern
+|  	 bit 11 - fat		bit 10 - poly		bit 9 - mvlist		bit 8 - righthalf
+|   	 bit 7 - close		bit 6 - cliprt		bit 5 - solid		bit 4 - pixrect
+|   	 bit 3 - nosetup	bit 2 - clipbit		bit 1 - firstvec	bit 0 - picking
+
+#define firstvec	1
+#define clipbit		2
+#define solid		5
+#define right		8
+#define poly		10
+
+#define zbuf 		1		/* tells whether zbuffering enabled or not in VecAtts */
+
+#define dy		r[10]
+#define dx		r[11]
+#define y1		r[12]
+#define x1		r[13]
+#define y0		r[14]
+#define x0		r[15]
+
+#define width		r[21]		/* must be saved for now, as is changed by fatvec.pp.u */
+#define clip		r[23]		
+#define options		r[24]
+
+#define savxfln		0x135
+#define savxflnwid	0x136
+
+|   This routine assumes that the options field has been initialized properly (solid,firstvec & nosetup bits),  
+|   and for the first vector, that the width and options registers are already loaded.
+
+
+xfline:	movw d,x0;		fifo1->am;	cjp, f1e .;			| fifo1->x0.
+	bsetw right,options;	SavePts->scrmemp; ;				| tex->options.right = 1.
+	movw x0,y;		am->scrmem;	;			scrmp+	| x0->scrmem.
+	movw d,y0;		fifo1->am;	cjp, f1e .;			| fifo1->y0.
+	movw y0,y;		am->scrmem;	;			scrmp+	| y0->scrmem.
+	bclrw poly,options;	;		;				| tex->options.poly = 0.
+	bclrw clipbit,options;	;		;				| tex->options.clip = 0.
+	movw d,x1;		fifo1->am;	cjp, f1e .;			| fifo1->x1.
+	movw x1,y;		am->scrmem;	;			scrmp+	| x1->scrmem.
+	rsubw d,x0,dx;		=xldraw->brreg;	;				| dx = x1-x0. Load branch reg.
+	movw d,y1;		fifo1->am;	cjp, f1e .;			| fifo1->y1.
+	movw y1,y;		am->scrmem;	;				| y1->scrmem.
+	btstw,s solid,options;	;		;				| Test if solid (fat) vector.
+	rsubw d,y0,dy;		;		cjp, ~zer xlsolid;		| dy = y1-y0, jump if solid. 
+	movw d,op;		fifo1->am;	cjp, f1e .;			| fifo1->op.
+	norw,s d,op,clip;	0xfffe->am;	;				| (PIX_DONTCLIP == 1) => (clip == 0).
+	rolw 11,op,acc;		;		cjp, zer .+2;			| Rotate op to get at color.
+	bsetw clipbit,options;	;		;				| tex->options.clip = 1.
+	movw d,color;		fifo1->am;	cjp, f1e .;			| fifo1->color.
+x1texa:	andw,s d,acc,acc;	0x7ff->am;	;				| Get color from op.
+	sr0w op,op;		;		cjp, zer xlfirst;		| Jump if color not in op.
+	movw acc,color;		;		;				| 
+	
+xlfirst: btstw,s firstvec,options; savxfln->scrmemp; ;				| 
+	bclrw firstvec,options;	;		cjp, ~zer;			| Draw if first vector.
+
+xlpoly:	xorw,s d,x0,y;		scrmem->am;	;			scrmp+	| Check if x0 = x1old.
+	movw d,width;		scrmem->am;	cjp, ~zer xlmvvec;	scrmp+	| Jump if not polyline.
+	xorw,s d,y0,y;		scrmem->am;	;			scrmp+	| Check if y0 = y1old.
+	bsetw poly,options;	savxfln->scrmemp; cjp, zer;			| Set poly bit, & draw if poly.
+	
+xlmvvec: bclrw poly,options;	savxfln->scrmemp; cjp,go;			| Clear poly bit, & draw.
+
+xlsolid: movw d,op;		fifo1->am;	cjp, f1e .;			| fifo1->op.
+	norw d,op,clip;		0xfffe->am;	;				| (PIX_DONTCLIP == 1) => (clip == 0).
+	rolw 11,op,acc;		savxflnwid->scrmemp; ;				| Rotate op to get at color.
+	movw d,color;		fifo1->am;	cjp, f1e .;			| fifo1->color.
+x1solida: andw,s d,acc,acc;	0x7ff->am;	;				| Get color from op.
+	sr0w op,op;		;		cjp, zer xlsol1;		| Jump if color not in op.
+	movw acc,color;		;		;				| 
+xlsol1:	movw d,width;		scrmem->am;	;				| Restore width.
+	;			savxfln->scrmemp; cjp, go;			| Draw vector.
+	
+xldraw:	movw x1,y;		am->scrmem;	;			scrmp+	| Store x1.
+	movw width,y;		am->scrmem;	;			scrmp+	| Store width.
+#ifndef GPPLUS
+	movw y1,y;		am->scrmem;	cjs, go fatcheck;		| Store y1 & draw.
+#else GPPLUS
+	movw y1,y;		am->scrmem;	;				| 
+|   If z-buffering or depth cueing enabled, must fetch values from fifo.
+	;			VecAtts->scrmemp; ;				| addr where hiddensurf info stored
+	testw (d);		scrmem->am;	;				| 
+	;			;		cjs,~zer vec3fetch;		| fetch z values
+	;			;		cjs,go fatcheck;		| 
+#endif GPPLUS	
+	;			;		jmap start;			| Fatcheck needed something on the stack.
+
+#undef firstvec
+#undef solid
+#undef clipbit
+#undef right
+#undef poly
+
+#undef savxfln
+#undef savxflnwid
+
+#undef dy	
+#undef dx	
+#undef y1	
+#undef x1	
+#undef y0	
+#undef x0
+
+#undef width
+#undef clip	
+#undef options	
+	
+
+

@@ -1,0 +1,626 @@
+| "@(#)shade.pp.u 1.1 94/10/31 SMI"
+| Copyright (c) 1985 by Sun Microsystems, Inc.
+
+|   GShade Module:	Solid fill with no hidden surface elimination (HSE),
+|   Gouraud with and without HSE.
+|   
+|   			No HSE (2D)			HSE (3D)
+|   
+|   Solid fill		Polygon fill		Polyhedra fill
+|   			FB Limited		GP Limited
+|   			3 cycles		6 cycles
+|   			40 nsec/pixel		720 nsec/pixel
+|   			25 M pixels/sec		1.4 M pixels/sec
+|   			25 frames/sec		1.4 Frames/sec
+|   			video off: 33% faster
+|   
+|   Gouraud shading	Shaded Polygons		Shaded Polyhedra
+|   			FB Limited		GP Limited
+|   			4 cycles		8 cycles
+|   			640 nsec/pixel		960 nsec/pixel
+|   			1.5 M pixels/sec	1 M pixels/sec
+|   			1.5 Frame/sec		1 Frame/sec
+|   
+|   Note:  Frames are 1152 x 900.  Rates are maximum rates.
+|   	Rates are for drawing with video on.
+
+|   #22:  2D Solid:   22, y0, x0, x1, color, op.
+|   #24:  2D Shaded:  24, y0, x0, x1, op, chi, dchi, dclo.
+|   #25:  3D Shaded:  25, y0, x0, x1, op, zhi, dzhi, dzlo, chi, dchi, dclo.
+|   #25:  3D Solid:   25, y0, x0, x1, op, zhi, dzhi, dzlo, chi, 0, 0.
+
+
+|   Polygon fill
+#define addrlo	r[0]
+#define addrhi	r[1]
+#define temp	r[2]
+
+#define zlo	r[6]	/* starting z value. lo set to zero. Used by shaded routines. */
+#define zhi	r[7]
+#define dzlo	r[8]	/* z increment. Implied decimal point between hi and lo. */
+#define dzhi	r[9]
+#define clo	r[10]	/* starting color.  lo set to zero. */
+#define chi	r[11]
+#define dclo	r[12]	/* color increment. Implied decimal point between hi and lo. */
+#define dchi	r[13]
+#define glo	r[14]	/* Used by shaded routines. */
+#define ghi	r[15]	/* Used by shaded routines. */
+
+#define count	r[14]	/* Used by solid fill flatseg routine. */
+#define ropmode	r[15]	/* Used by solid fill flatseg routine. */
+
+#define y0	r[16]	/* y of scan-line */
+#define x0	r[17]	/* starting x point, positive x incr. */
+#define x1	r[18]	/* number of points in line. */
+#define dx	r[25]
+#define sizex	r[19]
+#define sizey	r[20]
+#define offsetx	r[21]
+#define offsety	r[22]
+#define clip	r[23]
+#define clipptr	r[24]
+
+plgfill: movw d, y0;		fifo1->am;	cjp, f1e .;			| Solid fill, No HSE (2D).  (#22)
+	movw d, x0;		fifo1->am;	cjp, f1e .;			| 
+	movw d, x1;		fifo1->am;	cjp, f1e .;			| 
+	rsubw,s d, x0, dx;	;		;				| 
+	movw x0, acc;		;		cjp, ~neg plgxok;		| 
+	movw x1, x0;		;		;				| Swap endpoints.
+	movw acc, x1;		;		;				| 
+	negw dx, dx;		;		;				| 
+plgxok:	movw d, color;		fifo1->am;	cjp, f1e .;			| 
+	movw d, op;		fifo1->am;	cjp, f1e .;			| 
+	decw dx;		;		cjp, zer start;			| dx zero
+	decw x1;		;		;				| Dont draw pixel of last point (for fitting).
+	norw d, op, clip;	0xfffe->am;	;				| (PIX_DONTCLIP == 1) => (clip == 0)
+	sr0w op, op;		;		;				| op >> 1
+	andw d, op, op;		0xf->am;	;				| 
+| PIXOP_NEEDS_DST (op << 1)= (op^(op << 1)) & 0xa
+	movw op, acc;		;		;				| 
+	sl0w acc, acc;		;		;				| 
+	xorw op, acc, acc;	;		;				| 
+	andw,s d, acc, acc;	0xa->am;	;				| 
+	movw 0, nodst;		;		cjp, ~zer plgrej;		| 
+	incw 0, nodst;		;		;				| 
+plgrej:	movw,s y0, y;		=start->brreg;	;				| 
+	subw,s d, y0, y;	SHeight->am;	cjp, neg;			| if (y0 < 0) trivial rejection.
+	movw,s x1, y;		;		cjp, ~neg;			| if (y0 > SHeight) trivial rejection.
+	subw,s d, x0, y;	SWidth->am;	cjp, neg;			| if (x1 < 0) trivial rejection.
+	movw,s x0, y;		=plgx0ok->brreg; cjp, ~neg;			| if (x0 > SWidth) trivial rejection.
+	subw,s d, x1, y;	SWidth->am;	cjp, ~neg;			| 
+	movw 0, x0;		;		;				| 
+plgx0ok: ;			;		cjp, neg plgx1ok;		| 
+	movw d, x1;		XMax->am;	;				| 
+plgx1ok: ;			SavePts->scrmemp; ;				| 
+	movw y0, y;		am->scrmem;	;			scrmp +	| 
+	movw x0, y;		am->scrmem;	;			scrmp +	| 
+	movw x1, y;		am->scrmem;	;			scrmp +	| 
+	movw d, clipptr;	ClipList->am;	;				| 
+#ifndef GPPLUS
+	;			ClipList->scrmemp; ;				| 
+plgoff:	movw,s d, offsetx;	scrmem->am;	;			scrmp +	| Return here for next clip.  Offset x.
+#else GPPLUS
+
+plgoff:	;			Pickmode->scrmemp; ;				| 
+	sub2nw,s 0,d,y;		scrmem->am;	;				| (check if picking is on)
+	movw clipptr,y;		am->scrmemp;	cjp,neg plpkdn;			| Get clip list
+	;			;		cjs,go plypk;			| 
+
+plpkdn:	movw,s d, offsetx;	scrmem->am;	;			scrmp +	| Return here for next clip.  Offset x.
+#endif GPPLUS
+	subw d, x0, x0;		;		cjp, neg start;			| neg == end of clip list.
+	subw d, x1, x1;		;		;				| 
+	movw d, offsety;	scrmem->am;	;			scrmp +	| 
+	subw d, y0, y0;		;		;				| 
+	movw d, sizex;		scrmem->am;	;			scrmp +	| 
+	movw d, sizey;		scrmem->am;	;			scrmp +	| 
+	add2nw 2, clipptr, clipptr; ;		;
+	movw x1, acc;		;		;				| 
+	subw,s x0, acc, dx;	;		;				| 
+	testw (clip);		;		;				| 
+	movw d, y;		vstreg->am;	cjp, zer plgseg;		| 
+	testw (y0);		;		;				| if (y0 < 0) skip
+	testw (x1);		;		cjp, neg plgreset;		| if (x1 < 0) skip
+	movw x0, acc;		;		cjp, neg plgreset;		| if (x0 >= sizex) skip
+	subw,s sizex, acc, y;	;		;				| 
+	movw y0, acc;		;		cjp, ~neg plgreset;		| if (y0 >= sizey) skip
+	subw,s sizey, acc, y;	;		;				| 
+	;			;		cjp, ~neg plgreset;		| 
+#ifdef GPPLUS
+plgseg:	;			Pickmode->scrmemp; ;				| 
+	sub2nw,s 1,d,y;		scrmem->am;	;				| if (NODRAW)
+	;			;		cjp,zer plgreset;		| 	don't draw
+	;			;		cjs, go flatseg;		| 
+#else GPPLUS
+plgseg:	;			;		cjs, go flatseg;		| 
+#endif GPPLUS
+
+plgreset: testw (clip);		SavePts->scrmemp; ;				| 
+	movw d, y0;		scrmem->am;	cjp, zer start;		scrmp +	| 
+	movw d, x0;		scrmem->am;	;			scrmp +	| 
+#ifndef GPPLUS
+	movw d, x1;		scrmem->am;	;			scrmp +	| 
+	movw clipptr, y;	am->scrmemp;	cjp, go plgoff;			| 
+#else GPPLUS
+	movw d, x1;		scrmem->am;	cjp, go plgoff;		scrmp +	| 
+#endif GPPLUS
+
+
+|   PPFill2DSeg
+
+flatseg: ;			FBPPMask->vloareg; ;				| 
+	movw FBCont, y;		am->vhiareg;	;				| 
+	;			;		cjp, ~vir .;			| Wait till vctlreg ready.
+	;			GPVWord->vctlreg; ;				| 
+	movw planes, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| write ppmask.reg.
+	;			RRValues->scrmemp; ;				| 
+	subw,s d, op, y;	scrmem->am;	;				| 
+	movw op, y;		am->scrmem;	cjp, zer fsfpatt0;	scrmp +	| 
+	;			FBAllRopRegOp->vloareg; ;			| vhiareg unchanged.
+	movw op, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| cg2_setfunction (..., op).
+fsfpatt0: ;			FBAllRopRegPatt->vloareg; ;			| vhiareg unch.
+	testw (d);		scrmem->am;	;				| 
+	movw 0, y;		am->scrmem;	cjp, zer fsfpatt1;	scrmp +	| 
+	movw 0, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+fsfpatt1: testw (clip);		;		;				| if (clip) ...
+	testw (x0);		;		cjp, zer fsfnclip;		| if (pos0.x > 0)
+	movw x1, acc;		;		cjp, ~neg fsfx1;		| 
+	movw 0, x0;		;		;				| pos0.x= 0
+fsfx1:	subw,s sizex, acc, acc;	;		;				| if (pos1.x >= size.x)
+	decw sizex;		am->am;		cjp, neg fsfdx;			| pos1.x= size.x - 1
+	movw d, x1;		;		;				| 
+fsfdx:	movw x1, acc;		;		;				| 
+	subw x0, acc, dx;	;		;				| dx= pos1.x - pos0.x
+fsfnclip: movw x0, acc;		;		;				| 
+	addw dx, acc, acc;	;		;				| 
+	movw d, r[0];		scrmem->am;	;				| 
+	addw offsetx, acc, acc;	FBAllRopRegMask2->vloareg; ;			| cg2_prd_skew (dmd, pos1.x). vhiareg unchanged.
+	andw d, acc, count;	0xf->am;	;				| count= cg2_prd_skew
+	addw d, count, acc;	RMaskTable->am;	;				| rmasktable [count]
+	movw acc, y;		am->scrmemp;	;				| 
+	subw,s d, r[0], y ;	scrmem->am;	;				| 
+	movw x0, acc;		;		cjp, zer fsfm1;			| 
+	movw d, r[0];		scrmem->am;	;				| 
+	;			RRValm2->scrmemp; ;				| 
+	movw r[0], y;		am->scrmem;	;				| 
+	movw r[0], y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+fsfm1:	addw offsetx, acc, acc;	FBAllRopRegMask1->vloareg; ;			| cg2_prd_skew (dmd, pos0.x) vhiareg unchanged.
+	andw d, acc, count;	0xf->am;	;				| count= cg2_prd_skew
+	addw d, count, acc;	LMaskTable->am;	;				| 
+	movw acc, y;		am->scrmemp;	;				| 
+	movw d, r[0];		scrmem->am;	;				| 
+	;			RRValm1->scrmemp; ;				| 
+	subw,s d, r[0], y;	scrmem->am;	;				| 
+	movw r[0], y;		am->scrmem;	cjp, zer fsfrm;		scrmp +	| 
+	movw r[0], y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+fsfrm:	testw (nodst);		PRRWRD->am;	;				| PRRWRD
+	movw d, ropmode;	;		cjp, ~zer fsfropmode;		| if (nodst) ropmode= PRRWRD
+	movw d, ropmode;	PWRWRD->am;	;				| else ropmode= PWRWRD
+fsfropmode: movw d, acc;	PWRWRD->am;	;				| 
+	;			;		cjs, go vropmode;		| 
+	movw dx, acc;		;		;				| count= (dx+count)>>4.  (>>4 == <<12).
+	addw count, acc, count;	0xfff->am;	;				| 
+	rolw 12, count, count;	FBAllRopRegWidth->vloareg; ;			| vhiareg unchanged.  mask off high bits of rotate.
+	andw d, count, count;	;		;				| 
+	subw,s d, count, y;	scrmem->am;	;				| 
+	movw count, y;		am->scrmem;	cjp, zer fsfcnt;	scrmp +	| 
+	movw count, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 1st 1/2 cg2_setwidth (..., count, count).
+fsfcnt:	;			FBAllRopRegOpCnt->vloareg; ;			| vhiareg unchanged.
+	subw,s d, count, y;	scrmem->am;	;				| 
+	movw count, y;		am->scrmem;	cjp, zer fsfsh;		scrmp +	| 
+	movw count, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 2nd 1/2 cg2_setwidth (..., count, count).
+fsfsh:	;			FBAllRopRegShift->vloareg; ;			| vhiareg unchanged.
+	sub2nw,s 8, d, y;	scrmem->am;	;				| 
+	mov2nw 8, y;		am->scrmem;	cjp, zer fsfsrc2a;	scrmp +	| 
+	mov2nw 8, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| cg2_setshift (..., 0, 1).
+fsfsrc2a: movw color, acc;	;		;				| 
+	romw 8, color, acc, 0xff00; ;		;				| instruction completes on next cycle.
+	IMM;			FBAllRopPrimeSrc2->vloareg; ;			| vhiareg unchanged.
+	subw,s d, acc, y;	scrmem->am;	;				| 
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+fsfrwrd: movw offsety, acc;	;		;				| 
+	addw y0, acc, acc;	;		;				| 
+	movw acc, Multiplier;	;		cjs, go MulSWWid;		| cg2_ropword (dmd, 0, pos0.x, pos0.x)
+	movw offsetx, acc;	;		;				| 
+	addw x0, acc, x0;	;		;				| 
+	rolw 13, x0, acc;	;		;				| cg2_ropword: (x>>4)*(sizeof(short))
+	andw d, acc, acc;	0x1fff->am;	;				| a5_adr= cg2_ropword	
+	addw addrlo, acc, addrlo; am->vloareg;	;				| 
+	addcw d, FBHi, acc;	RopFB->am;	;				| 
+	addw addrhi, acc, addrhi; am->vhiareg;	;				| 
+| switch (d5_count) unwrapped.  nodst part separated out.
+fsfcolor: testw (nodst);	;		;				| 
+	movw count, y;		am->brreg;	cjp, ~zer fsfnodst;		| 
+	;			;		push, go;			| 
+	movw color, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| value written is immaterial.
+	;			;		;			varegs +| 
+	;			;		rfct;			varegs +| 
+	;			;		crtn, go;			| 
+fsfnodst: subw,s d, count, y;	2->am;		;				| 
+	testw (count);		;		cjp, ~neg fsf2;			| 
+	movw color, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+	;			;		crtn, zer;		varegs +| 
+	;			;		;			varegs +| 
+	;			;		cjp, ~vir .;		vmewr	| 
+	;			;		crtn, go;			| 
+fsf2:	movw FBCont, y;		am->vhiareg;	;				| 
+	mov2nw 1, acc;		FBAllRopRegWidth->vloareg; ;			| 
+	;			RRValWid->scrmemp; ;				| 
+	sub2nw,s 1, d, y;	scrmem->am;	;				| 
+	mov2nw 1, y;		am->scrmem;	cjp, zer fsfcnt1;	scrmp +	| 
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 1st 1/2 cg2_setwidth (..., 2, 2).
+fsfcnt1: ;			FBAllRopRegOpCnt->vloareg; ;			| vhiareg unchanged.
+	sub2nw,s 1, d, y;	scrmem->am;	;				| 
+	mov2nw 1, y;		am->scrmem;	cjp, zer fsfcol0;	scrmp +	| 
+fsfcount1: movw acc, y;		am->vwdreg;	cjp, ~vir fsfcount1;	vmewr	| 2nd 1/2 cg2_setwidth (..., 2, 2).
+fsfcol0: movw addrlo, y;	am->vloareg;	;				| 
+	movw addrhi, y;		am->vhiareg;	;				| 
+	movw color, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| *(a5_adr)++= d3_color (value is immaterial)
+	;			;		;			varegs +| 
+	;			;		;			varegs +| 
+	;			;		cjp, ~vir .;		vmewr	| *(a5_adr)++= d3_color (value is immaterial)
+	subw,s d, count, count;	3->am;		;			varegs +| count less 3 so "fastloop" right num
+	;			;		cjp, neg fsfvmewr3;	varegs +| 
+	movw ropmode, acc;	;		cjs, go vropmode;		| 
+	addw,s d, addrlo, addrlo;4->am;		;				| Sync addrlo with vme addr counter.
+	movw addrlo, y;		am->vloareg;	cjp, ~cry fsfncry1;		| 
+	incw addrhi, addrhi;	;		;				| Sync addrhi with vme addr counter.
+fsfncry1: movw count, y;	am->brreg;	;				| Get ready to load counter.
+	movw addrhi, y;		am->vhiareg;	push, go;			| 
+	movw color, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| (value is immaterial)
+	;			;		;			varegs +| 
+	;			PWRWRD->am;	rfct;			varegs +| 
+	movw d, acc;		;		cjs, go vropmode;		| 
+	sl0w count, temp;	;		;				| 
+	addw d, temp, acc;	2->am;		;				| 
+	addw,s addrlo, acc, addrlo; am->vloareg; ;				| 
+fsfvmewr2: movw addrhi, y;	am->vhiareg;	cjp, ~cry fsfvmewr3;		| 
+	incw addrhi, y;		am->vhiareg;	;				| 
+fsfvmewr3: movw 0, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| (value is immaterial) 
+	;			;		crtn, go;			| 
+
+
+|   Gouraud shading.
+
+|   Shading routine (#24).  Shaded 2D.  Assume color FBHi has been initialized by shinit.
+plgsh:	movw d, y0;		fifo1->am;	cjp, f1e .;			| 
+	movw d, x0;		fifo1->am;	cjp, f1e .;			| 
+	movw d, x1;		fifo1->am;	cjp, f1e .;			| 
+	rsubw,s d, x0, dx;	;		;				
+	decw dx;		;		;				| Dont draw pixel of last point (for fitting).
+	movw d, op;		fifo1->am;	cjp, f1e .;			| 
+	movw d, chi;		fifo1->am;	cjp, f1e .;			| 
+	movw d, clo;		fifo1->am;	cjp, f1e .;			| 
+	movw d, dchi;		fifo1->am;	cjp, f1e .;			| 
+	movw d, dclo;		fifo1->am;	cjp, f1e .;		scrmp 0	| 
+	movw dclo, y;		am->scrmem;	cjp, zer start;		scrmp +	| store dclo in scratch memory location 0.
+	movw dchi, y;		am->scrmem;	;				| store dchi in scratch memory location 1.
+	norw d, op, clip;	0xfffe->am;	;				| 
+	sr0w op, op;		;		;				| op >> 1
+	andw d, op, op;		0xf->am;	;				| 
+	movw FBCont, y;		am->vhiareg;	;				| 
+	;			;		cjp, ~vir .;			| Wait till vctlreg ready.
+	;			GPVWord->vctlreg; ;				| 
+plg2rej: movw,s y0, y;		=start->brreg;	;				| 
+	subw,s d, y0, y;	SHeight->am;	cjp, neg;			| if (y0 < 0) trivial rejection.
+	movw,s x1, y;		;		cjp, ~neg;			| if (y0 > SHeight) trivial rejection.
+	subw,s d, x0, y;	SWidth->am;	cjp, neg;			| if (x1 < 0) trivial rejection.
+	movw,s x0, y;		=plg2x0ok->brreg; cjp, ~neg;			| if (x0 > SWidth) trivial rejection.
+	subw,s d, x1, y;	SWidth->am;	cjp, ~neg;			| 
+	negw x0, acc;		;		;				| 
+	movw dchi, r[5];	;		;				| Change initial color
+	movw dclo, r[2];	;		cjs, go muldbl;			|
+	movw chi, acc;		;		;				|
+	movw clo, y;		am->am;		;				|
+	addw d, r[1], clo;	;		;				|
+	addcw r[0], acc, chi;	;		;				|
+	movw x1, dx;		;		;				|
+	movw 0, x0;		;		;				| 
+	subw,s d, x1, y;	SWidth->am;	;				|
+plg2x0ok: ;			;		cjp, neg plg2x1ok;		| 
+	movw d, x1;		XMax->am;	;				| 
+plg2x1ok: testw (clip);		SavePts->scrmemp; ;				| 
+	movw y0, y;		am->scrmem;	cjp, zer plg2draw;	scrmp +	| 
+	movw x0, y;		am->scrmem;	;			scrmp +	| 
+	movw x1, y;		am->scrmem;	;			scrmp +	| 
+	movw chi, y;		am->scrmem;	;			scrmp +	| 
+	movw clo, y;		am->scrmem;	;			scrmp +	| 
+	movw d, clipptr;	ClipList->am;	;				| 
+#ifndef GPPLUS
+	;			ClipList->scrmemp; ;				| 
+plg2clip: movw,s d, offsetx;	scrmem->am;	;			scrmp +	| 4 tests for rejection follow.
+#else GPPLUS
+
+plg2clip: ;			Pickmode->scrmemp; ;				| 
+	sub2nw,s 0,d,y;		scrmem->am;	;				| check if picking is on
+	movw clipptr,y;		am->scrmemp;	cjp,neg plgpkdn;		| Get clip list
+	;			;		cjs,go plypk;			| 
+
+plgpkdn: movw,s d, offsetx;	scrmem->am;	;			scrmp +	| 4 tests for rejection follow.
+#endif GPPLUS
+	subw,s d, x1, y;	;		cjp, neg start;			|)
+	movw d, offsety;	scrmem->am;	cjp, neg plg2reset;	scrmp +	| 
+	subw,s d, y0, y;	;		;				| 
+	addw d, offsetx, acc;	scrmem->am;	cjp, neg plg2reset;	scrmp +	| sizex + offsetx
+	movw acc, sizex;	;		;				| save in sizex
+	rsubw,s x0, acc, y;	;		;				| 
+	addw d, offsety, acc;	scrmem->am;	cjp, ~neg plg2reset;		| sizey + offsety
+	rsubw,s y0, acc, y;	;		;				| 
+	;			;		cjp, ~neg plg2reset;		| Last rejection test.
+	movw offsetx, acc;	;		;				| 
+	subw,s x0, acc, acc;	;		;				| 
+	;			;		cjp, neg plg2right;		| 
+	movw dchi, r[5];	;		;				| Change initial color
+	movw dclo, r[2];	;		cjs, go muldbl;			| 
+	movw chi, acc;		;		;				| 
+	movw clo, y;		am->am;		;				| 
+	addw d, r[1], clo;	;		;				| 
+	addcw r[0], acc, chi;	;		;				| 
+	movw offsetx, acc;	;		;				| 
+	movw acc, x0;		;		;				| 
+	
+plg2right: movw sizex, acc;	;		;				| 
+	subw,s x1, acc, acc;	;		;				| 
+	;			;		cjp, ~neg plg2drawdx;		| 
+	addw x1, acc, x1;	;		;				| 
+plg2drawdx: incw x0, y;		am->am;		;				| Restore dx.
+	subw d, x1, dx;		;		;				| 
+#ifdef GPPLUS
+plg2draw:;			Pickmode->scrmemp; ;				| 
+	sub2nw,s 1,d,y;		scrmem->am;	;				| if (NODRAW)
+	;			;		cjp,zer plg2reset;		| 	don't draw
+	;			;		cjs, go gs0draw;		| 
+#else GPPLUS
+plg2draw: ;			;		cjs,go gs0draw;			| 
+#endif GPPLUS
+plg2reset: testw (clip);	SavePts->scrmemp; ;				| 
+	movw d, y0;		scrmem->am;	cjp, zer start;		scrmp +	| 
+	movw d, x0;		scrmem->am;	;			scrmp +	| 
+	movw d, x1;		scrmem->am;	;			scrmp +	| 
+	movw d, chi;		scrmem->am;	;			scrmp +	| 
+	movw d, clo;		scrmem->am;	;			scrmp +	| 
+	add2nw 2, clipptr;	am->scrmemp;	cjp, go plg2clip;		| 
+
+
+|   gs0draw:  shaded 2d segments.
+
+gs0draw: ;			;		cjs, go gsprime;		| 
+gs0rmw:	movw y0, acc;		;		;				| Set read-modify-write mode.
+	movw acc, r[2];		;		cjs, go MulSWid;		| Calculate address.
+	movw x0, acc;		=gs0loop->brreg; ;				| 
+	addw r[0], acc, y;	am->vloareg;	;				| 
+	addcw d, r[1], acc;	RopFB->am;	;				| Pixel mode memory.
+	addw FBHi, acc, y;	am->vhiareg;	;				| 
+	movw dx, acc;		;		cjp, ~vir .;			| 
+	;			VByte->vctlreg;	;			scrmp 0	| 
+	;			;		cjp, go gs0dec;			| Shaded segment.
+
+gs0loop: addw d, clo, clo;	;		;			varegs+	| increment c.
+	addcw d, chi, chi;	scrmem->am;	;			scrmp 0	| 
+gs0dec:	decws acc;		scrmem->am;	;			scrmp +	| dec loop counter.
+	movw chi, y;		am->vwdreg;	cjp, ~neg.3 .;		vmewr	| write color
+
+gs0quit: ;			;		crtn, go;			| OLD
+
+
+
+#ifndef GPPLUS									| GP+ 3D routines are now in statshade.pp.u
+										| changes to this code must be propogated to "statshade"
+										| drawback:  changes to this code must be propogated to "statshade"
+|   3D Segments, shaded and solid.  (#25).
+plhsh:	movw d, y0;		fifo1->am;	cjp, f1e .;			| 
+	movw d, x0;		fifo1->am;	cjp, f1e .;			| 
+	movw d, x1;		fifo1->am;	cjp, f1e .;			| 
+	rsubw,s d, x0, dx;	;		;				| 
+	decw dx;		;		;				| Dont draw pixel of last point (for fitting).
+	movw d, op;		fifo1->am;	cjp, f1e .;			| 
+	movw d, zhi;		fifo1->am;	cjp, f1e .;			| 
+	movw d, zlo;		fifo1->am;	cjp, f1e .;			| NEW (zlo computed on vp)
+	movw d, dzhi;		fifo1->am;	cjp, f1e .;			| 
+	movw d, dzlo;		fifo1->am;	cjp, f1e .;			| 
+	movw d, chi;		fifo1->am;	cjp, f1e .;			| 
+	movw d, clo;		fifo1->am;	cjp, f1e .;			| 
+	movw d, dchi;		fifo1->am;	cjp, f1e .;			| 
+	movw d, dclo;		fifo1->am;	cjp, f1e .;		scrmp 0	| 
+	movw dzlo, y;		am->scrmem;	cjp, zer start;		scrmp +	| store dzlo in scratch memory location 0.
+	movw dzhi, y;		am->scrmem;	;			scrmp +	| store dzhi in scratch memory location 1.
+	movw dclo, y;		am->scrmem;	;			scrmp +	| store dclo in scratch memory location 2.
+	movw dchi, y;		am->scrmem;	;				| store dchi in scratch memory location 3.
+	norw d, op, clip;	0xfffe->am;	;				| 
+	sr0w op, op;		;		;				| op >> 1
+	andw d, op, op;		0xf->am;	;				| 
+plhrej:	movw,s y0, y;		=start->brreg;	;				| 
+	subw,s d, y0, y;	SHeight->am;	cjp, neg;			| if (y0 < 0) trivial rejection.
+	movw,s x1, y;		;		cjp, ~neg;			| if (y0 > SHeight) trivial rejection.
+	subw,s d, x0, y;	SWidth->am;	cjp, neg;			| if (x1 < 0) trivial rejection.
+	movw,s x0, y;		=plhx0ok->brreg; cjp, ~neg;			| if (x0 > SWidth) trivial rejection.
+	subw,s d, x1, y;	SWidth->am;	cjp, ~neg;			| 
+	negw x0,acc;		;		;				|
+	movw dchi, r[5];	;		;				| 
+	movw dclo, r[2];	;		cjs, go muldbl;			|
+	movw chi, acc;		;		;				|
+	movw clo, y;		am->am;		;				|
+	addw d, r[1], clo;	;		;				| 
+	addcw r[0], acc, chi;	;		;				|
+	negw x0, acc;		;		;				|
+	movw dzhi, r[5];	;		;				| Change initial z
+	movw dzlo, r[2];	;		cjs, go muldbl;			| 
+	movw zhi, acc;		;		;				| 
+	movw zlo, y;		am->am;		;				|
+	addw d, r[1], zlo;	;		;				|
+	addcw r[0], acc, zhi;	;		;				|
+	movw 0, x0;		;		;				|  
+	subw,s d, x1, y;	SWidth->am;	;				|
+plhx0ok: ;			;		cjp, neg plhx1ok;		| 
+	movw d, x1;		XMax->am;	;				| 
+plhx1ok: testw (clip);		SavePts->scrmemp; ;				| 
+	movw y0, y;		am->scrmem;	cjp, zer plhdraw;	scrmp +	| 
+	movw x0, y;		am->scrmem;	;			scrmp +	| 
+	movw x1, y;		am->scrmem;	;			scrmp +	| 
+	movw chi, y;		am->scrmem;	;			scrmp +	| 
+	movw clo, y;		am->scrmem;	;			scrmp +	| 
+	movw zhi, y;		am->scrmem;	;			scrmp +	| 
+	movw zlo, y;		am->scrmem;	;			scrmp +	| 
+	movw d, clipptr;	ClipList->am;	;				| 
+	;			ClipList->scrmemp; ;				| 
+plhclip: movw,s d, offsetx;	scrmem->am;	;			scrmp +	| Rtrn here for next clip.  4 tests for rejection.
+	incw x0, acc;		;		cjp, neg start;			| Recreate x1
+	rsubw x1, acc, dx;	;		;				|
+	subw,s d, x1, y;	;		;				| 
+	movw d, offsety;	scrmem->am;	cjp, neg plhreset;	scrmp +	| 
+	subw,s d, y0, y;	;		;				| 
+	addw d, offsetx, acc;	scrmem->am;	cjp, neg plhreset;	scrmp +	| sizex + offsetx
+	movw acc, sizex;	;		;				| save in sizex
+	rsubw,s x0, acc, y;	;		;				| 
+	addw d, offsety, acc;	scrmem->am;	cjp, ~neg plhreset;		| sizey + offsety
+	rsubw,s y0, acc, y;	;		;				| 
+	;			;		cjp, ~neg plhreset;		| Last rejection test.
+	movw offsetx, acc;	;		;				|  pick has occurred, don't test for pick
+	subw,s x0, acc, acc;	;		;				| 
+	;			;		cjp, neg plhright;		| 
+	movw dchi, r[5];	;		;				| Change initial color
+	movw dclo, r[2];	;		cjs, go muldbl;			| 
+	movw chi, acc;		;		;				| 
+	movw clo, y;		am->am;		;				|
+	addw d, r[1], clo;	;		;				|
+	addcw r[0], acc, chi;	;		;				|
+	movw offsetx, acc;	;		;				| 
+	subw x0, acc, acc;	;		;				| 
+	movw dzhi, r[5];	;		;				| Change initial z
+	movw dzlo, r[2];	;		cjs, go muldbl;			| 
+	movw zhi, acc;		;		;				| 
+	movw zlo, y;		am->am;		;				|
+	addw d, r[1], zlo;	;		;				|
+	addcw r[0], acc, zhi;	;		;				|
+	movw offsetx, acc;	;		;				| 
+	movw acc, x0;		;		;				| 
+	
+plhright: movw sizex, acc;	;		;				| 
+	subw,s x1, acc, acc;	;		;				| 
+	;			;		cjp, ~neg plhdrawdx;		| 
+	addw x1, acc, x1;	;		;				| 
+plhdrawdx: incw x0, y;		am->am;		;				| Restore dx.
+	subw d, x1, dx;		;		;				| 
+plhdraw: ;			;		cjs, go gsdraw;			| 
+plhreset: testw (clip);		SavePts->scrmemp; ;				| 
+	movw d, y0;		scrmem->am;	cjp, zer start;		scrmp +	| 
+	movw d, x0;		scrmem->am;	;			scrmp +	| 
+	movw d, x1;		scrmem->am;	;			scrmp +	| 
+	movw d, chi;		scrmem->am;	;			scrmp +	| 
+	movw d, clo;		scrmem->am;	;			scrmp +	| 
+	movw d, zhi;		scrmem->am;	;			scrmp +	| 
+	movw d, zlo;		scrmem->am;	;			scrmp +	| 
+	add2nw 2, clipptr;	am->scrmemp;	cjp, go plhclip;		| 
+
+
+|   gsdraw:  shaded and solid 3d segments with HSE.
+
+gsdraw:	testw (dchi);		;		;				| 
+	testw (dclo);		;		cjp, ~zer gsvctl;		| Shaded segment.
+	;			;		cjp, zer constsh;		| 
+gsvctl:	;			;		cjp, ~vir .;			| 
+	;			VByte->vctlreg;	push, go;			| 
+gsrmw:	movw y0, acc;		0xa000->gbhiptr; loop, gbr;			| Set read-modify-write mode.
+	movw acc, r[2];		;		cjs, go MulSWid;		| Calculate address.
+	movw x0, acc;		=gsloop->brreg;	;				| 
+	addw r[0], acc, glo;	am->vloareg;	ldct;				| 
+	addcw d, r[1], ghi;	0->am;		;				| 
+	addw d, ghi, acc;	0x10->am;	;				| Pixel mode memory
+	addw FBHi, acc, y;	am->vhiareg;	;				| 
+	movw ghi, y;		am->gbhiptr;	cjp, ~gbr .;			| Not altering read-modify-write mode.
+	movw glo, y;		am->gbloptr;	cjp, ~gbr .;		gbrd	| At least 8 cycles after setting rmw.
+	movw dx, acc;		;		cjp, go gsztst;			| 
+
+gsloop:	addw d, zlo, zlo;	;		;				| increment z 
+gsloop1: addcw d, zhi, zhi;	scrmem->am;	cjp, neg gsquit;	scrmp+	| 
+	addw d, clo, clo;	scrmem->am;	;			scrmp+	| increment color 
+	addcw d, chi, chi;	scrmem->am;	;			varegs+	| 
+gsztst:	subw,s d, zhi, y;	gbrdreg->am;	cjp, ~gbr .;		scrmp 0	| compare z with z-buffer value 
+	;			scrmem->am;	cjp, ~cry .+2;		scrmp+	| dec loop counter
+	;			;		cjp, ~zer gsabrmw;		| 
+	decws acc;		;		;				| 
+	movw zhi, y;		am->gbwdreg;	cjp, ~gbr .;			| write new z 
+	movw chi, y;		am->vwdreg;	cjp, ~neg.3 .;		vmewr	| write color
+	;			;		cjp, go gsquit;			| 
+gsabrmw: decws acc;		;		;				| 
+	addw d, zlo, zlo;	;		cjp, go gsloop1;	gbrd	| abort read-mod-write wr phase.  do 1st loop instr 
+
+
+gsquit:	;			=gsquit1->brreg; ;				| End read-mod-write so g-buffer released.
+gsquit1: ;			0x6000->gbhiptr; cjp, ~gbr;			| 
+	;			;		crtn, go;			| 
+
+
+constsh: ;			;		cjs, go gsprime;		| 
+	;			;		cjp, ~vir .;			| 
+	;			VByte->vctlreg;	;				| NEW (ldct)
+	;			;		cjp, ~gbr .;			| 
+	movw y0, acc;		0xa000->gbhiptr; ;				| Set read-modify-write mode.
+	movw acc, r[2];		;		cjs, go MulSWid;		| 
+	movw x0, acc;		=segloop->brreg; ;				| 
+	addw r[0], acc, glo;	am->vloareg;	ldct;				| 
+	addcw d, r[1], ghi;	0->am;		;				| 
+	addw d, ghi, acc;	RopFB->am;	;				| 
+	addw FBHi, acc, y;	am->vhiareg;	;				| 
+	movw ghi, y;		am->gbhiptr;	cjp, ~gbr .;			| 
+	movw glo, y;		am->gbloptr;	cjp, ~gbr .;		gbrd	| at least 8 cycles after setting rmw.
+	movw dx, acc;		;		cjp, go segztst;		| 
+
+segloop: addw d, zlo, zlo;	;		;				| increment z
+segloop1: addcw d, zhi, zhi;	scrmem->am;	cjp, neg gsquit;	varegs+	| 
+segztst: subw,s d, zhi, y;	gbrdreg->am;	cjp, ~gbr .;		scrmp 0	| compare z with z-buffer value
+	;			scrmem->am;	cjp, ~cry .+2;		scrmp+	| dec loop counter
+	;			;		cjp, ~zer segabrmw;		| 
+	decws acc;		;		;				| 
+	movw zhi, y;		am->gbwdreg;	cjp, ~gbr .;			| write new z
+	movw chi, y;		am->vwdreg;	cjp, ~neg.3 .;		vmewr	| write color
+	;			;		cjp, go gsquit;			| 
+segabrmw: decws acc;		;		;				| 
+	addw d, zlo, zlo;	;		cjp, go segloop1;	gbrd	| abort read-mod-write wr phase. do 1st loop inst
+
+#endif GPPLUS
+	
+
+gsprime: movw acc, r[0];	;		;				| 
+	movw chi, acc;		;		cjp, ~vir .;			| 
+	romw 8, chi, acc, 0xff00; VWord->vctlreg; ;				| 
+	IMM;			FBAllRopPrimeSrc2->vloareg; ;			| 
+	movw FBCont, y;		am->vhiareg;	;				| 
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+	movw r[0], acc;		;		crtn, go;			| 
+
+|   Init color frame buffer for gouraud shading.
+shinit: ;			;		;				| #19
+fillinit: ;			;		;				| 
+plhinit: ;			;		cjs, go ropreg;			| 
+	;			;		cjp, go start;			| 
+
+
+#undef temp
+#undef addrlo
+#undef addrhi
+
+#undef zlo
+#undef zhi
+#undef dzlo
+#undef dzhi
+#undef clo
+#undef chi
+#undef dclo
+#undef dchi
+#undef glo
+#undef ghi
+
+#undef count
+#undef ropmode
+
+#undef y0
+#undef x0
+#undef x1
+#undef dx
+#undef sizex
+#undef sizey
+#undef offsetx
+#undef offsety
+#undef clip
+#undef clipptr

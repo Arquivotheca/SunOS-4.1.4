@@ -1,0 +1,169 @@
+| "@(#)statpick.pp.u 1.1 94/10/31 SMI"
+| Copyright 1987 by Sun Microsystems, Inc.
+
+
+org 0x3000
+
+
+#define options	r[24]
+#define clip	r[23]
+#define x0	r[15]
+#define y0	r[14]
+#define x1	r[13]
+#define y1	r[12]
+#define dx	r[11]
+#define dy	r[10]
+#define tmp0	r[0]
+
+#define pick 0
+#define savxflnwid 0x136
+
+
+
+|   Clear_pick resets the hit latch, hit count, and hit id, and hit count for a frame (5 locations).  
+clear_pick:
+	;			Frame->scrmemp;	;			
+	rolw 4,d,acc;		scrmem->am;	
+	addw d,acc,acc;		PickOffset->am;	;	
+	addw acc,PickHit,y;	;		;				| Clear pick hit info, 32 bit count & 2 32 bit hit IDs
+	IMM;			am->scrmemp;	ldct 2;			
+	movw 0,y;		am->scrmem;	rpct .;			scrmp+	| loop till clear 3 locations
+	;			;		jmap start;			
+
+
+
+|   Get_pick sends the latch, count and hit ID to the painting processor, and then does a clear_pick (clears hit info).
+get_pick: 
+	mov2nw 0,y;		am->fl2reg;	;				| ppack: 1->fl2reg
+ppgk:	nop;			fl1reg->am;	;				| test fifo direction
+	btstw,s 9,d;		;		;				| timing
+	;			;		cjp,zer ppgk;			| for PP->VP
+	;			Frame->scrmemp;	;				| read context number from Frame
+	rolw 4,d,acc;		scrmem->am;	;				| Frame is offset into PickContext array
+	addw d,acc,acc;		PickOffset->am;	;
+	addw d,acc,acc;		PickHit->am;	;				
+	movw acc,y;		am->scrmemp;	ldct 6;				| get latch, 32 bit count and 2 32 bit pick IDs
+	;			scrmem->fifo2;	cjp,f2f .;			 
+	;			;		rpct .-1;		scrmp+	| send back to vp, load 79->brreg
+ppgk1:	;			fl1reg->am;	;				| test fifo direction
+	btstw,s 9,d;		;		;				| timing
+	;			;		cjp,~zer ppgk1;			| for VP->PP
+	movw 0,y;		am->fl2reg;	;				| reset interprocessor flags: 0->fl2reg
+	movw acc,y;		am->scrmemp;	;				| reset pick_latch
+	movw 0,y;		am->scrmem;	jmap start;			| 
+
+
+
+set_pick_id: ;			Frame->scrmemp;	;				| read context number from Frame
+	rolw 4,d,acc;		scrmem->am;	;				| Frame is offset into PickContext array
+	addw d,acc,acc;		PickOffset->am;	;
+    	addw d,acc,acc;		PickID->am;	;				| PickID stores last pick
+	movw acc,y;		am->scrmemp;	ldct 3;				| 2 32 bit IDs
+	;			fifo1->am;	cjp,f1e .;			| update current PickIDs
+	movw d,y;		am->scrmem;	rpct .-1;		scrmp+	 
+	;			;		jmap start;		
+	
+	
+
+|   Set_pick_poly turns picking on or off for polygons by writing to a location in scrmem. 
+set_pick_mode:
+	;			fifo1->am;	cjp,f1e .;			| fifo1->pick status
+	;			Pickmode->scrmemp; ;			
+	movw d,y;		am->scrmem;	jmap start;		
+
+
+
+set_pick_cnt:
+	;			fifo1->am;	cjp,f1e .;			| fifo1->pkcnthi
+	;			SavPkcnt->scrmemp; ;			
+	movw d,y;		am->scrmem;	;			scrmp+	| pkcnthi->scrmem 
+	;			fifo1->am;	cjp,f1e .;			| fifo1->pkcntlo
+	movw d,y;		am->scrmem;	jmap start;			| pkcntlo->scrmem
+	
+	
+	
+pickline: movw d,x0;		fifo1->am;	cjp,f1e .;			| fifo1->x0.
+	bsetw right,options;	SavePts->scrmemp; ;				| tex->options.right = 1.
+	movw x0,y;		am->scrmem;	;			scrmp+	| x0->scrmem.
+	bclrw poly,options;	fifo1->am;	cjp,f1e .;			| fifo1->y0. tex->options.poly = 0.
+	movw d,y0;		am->scrmem;	;			scrmp+	| y0->scrmem.
+	bclrw clipbit,options;	fifo1->am;	cjp,f1e .;			| fifo1->x1. tex->options.clip = 0.
+	movw d,x1;		am->scrmem;	;			scrmp+	| x1->scrmem.
+	rsubw d,x0,dx;		=xldraw->brreg;	;				| dx = x1-x0. Load branch reg.
+	bsetw pick,options;	fifo1->am;	cjp,f1e .;			| fifo1->y1. turn picking on
+	movw d,y1;		am->scrmem;	;				| y1->scrmem.
+	rsubw d,y0,dy;		SavPkcnt->scrmemp; ;				| dy = y1 - y0
+	movw d,op;		fifo1->am;	cjp,f1e .;			 
+	btstw,s solid,options;	0xfffe->am;	;				 
+	norw,s d,op,clip;	;		cjp,~zer p1solid;		| (PIX_DONTCLIP == 1) => (clip == 0).
+	movw d,color;		fifo1->am;	cjp,f1e .;			 
+	rolw 11,op,acc;		;		cjp,zer .+2;			| jump if clipping is off
+	bsetw clipbit,options;	;		;				|	
+	;			fifo1->am;	cjp,f1e .;			| tex->options.clip = 1
+	movw d,y;		am->scrmem;	;			scrmp+	| store new pkcnt in scrmem & jump to when done
+	;			fifo1->am;	cjp,f1e .;			| 
+	movw d,y;		am->scrmem;	jmap x1texa;			 
+
+p1solid: movw d,color;		fifo1->am;	cjp,f1e .;			 
+	;			fifo1->am;	cjp,f1e .;			| fifo1->pick count high
+	movw d,y;		am->scrmem;	;			scrmp+	| store 32 bit pick count in scrmem
+	;			fifo1->am;	cjp,f1e .;			| fifo1->pick count low
+	movw d,y;		am->scrmem;	;				| 
+	;			savxflnwid->scrmemp; ;				| update PickCnt lo in scrmem
+	rolw 11,op,acc;		;		jmap x1solida;			| continue with xfline code
+	
+			
+
+pickvector:
+	;			fifo1->am;	cjp,f1e .;			| (removed cjp pickvector, changed to .)
+	;			SavePts->scrmemp; ;				
+	movw d,x0;		am->scrmem;	;			scrmp +	 
+	;			fifo1->am;	cjp,f1e .;			 
+	movw d,y0;		am->scrmem;	;			scrmp +	 
+	movw d,acc;		fifo1->am;	cjp,f1e .;		
+	movw acc,x1;		am->scrmem;	;			scrmp +	 
+	subw x0,acc,dx;		fifo1->am;	cjp,f1e .;			| dx = x1 - x0
+	movw d,y1;		am->scrmem;	;				| read context number from Frame
+	rsubw d,y0,dy;		SavPkcnt->scrmemp; ;				| dy.
+	movw d,op;		fifo1->am;	cjp,f1e .;			
+	norw,s d,op,clip;	0xfffe->am;	;				| (PIX_DONTCLIP == 1) => (clip == 0).
+	movw d,color;		fifo1->am;	cjp,f1e .;			 
+	bsetw pick,options;	fifo1->am;	cjp,f1e .;			 
+	movw d,y;		am->scrmem;	;			scrmp+	| pkcnthi->scrmem
+	bsetw solid,options;	fifo1->am;	cjp,f1e .;		
+	movw d,y;		am->scrmem;	;			
+	;			VecAtts->scrmemp; ;			
+	testw (d);		scrmem->am;	jmap vec6;		
+
+
+
+set_context_no:
+	;			Frame->scrmemp;	;
+	;			fifo1->am;	cjp,f1e .;			| store active context in scrmem
+	movw d,y;		am->scrmem;	jmap start;			
+
+
+
+set_pick_window:
+	;			Frame->scrmemp;	;				| read context number from Frame
+	rolw 4,d,acc;		scrmem->am;	;				| Frame is offset into PickContext array
+	addw acc,PickOffset,y;	;		;				| PickWindow starts at PickOffset
+	IMM;			am->scrmemp;	ldct 3;				| only 1 active pick window at a time
+	;			fifo1->am;	cjp,f1e .;			| get pwx0,pwy0,pwwidth,pwhght
+	movw d,y;		am->scrmem;	rpct .-1;		scrmp+	
+	;			;		jmap start;
+
+
+
+#undef pick 
+#undef savxflinewid
+
+#undef options	
+#undef clip	
+#undef x0	
+#undef y0	
+#undef x1	
+#undef y1	
+#undef dx	
+#undef dy	
+#undef tmp0

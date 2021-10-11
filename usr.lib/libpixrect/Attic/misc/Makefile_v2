@@ -1,0 +1,193 @@
+#
+# @(#)Makefile_v2 1.1 94/10/31 SMI
+#
+
+CFILES=	pf.c pf_default.c pf_defdata.c pf_text.c pf_ttext.c		\
+	pr_clip.c pr_curve.c pr_replrop.c pr_reverse.c pr_polygon2.c 	\
+	pr_polyline.c pr_traprop.c	\
+	bw1_stencil.c bw1_vec.c bw1_vecbres.s bw1_colormap.c		\
+	bw1.c bw1_batch.c bw1_curve.c 					\
+	bw1_getput.c bw1_polyline.c bw1_region.c bw1_rop.c		\
+	pr_open.c pr_makefun.c pr_make.c				\
+	bw2.c								\
+	pr_io.c								\
+	mem.c mem_batch.c mem_curve.c					\
+	mem_getput.c mem_polyline.c					\
+	mem_prs.c mem_region.c mem_rop.c				\
+	mem_stencil.c  mem_vec.c 					\
+	mem_colormap.c 							\
+	cg1.c cg1_batch.c cg1_colormap.c cg1_curve.c 			\
+	cg1_getput.c cg1_polyline.c cg1_region.c			\
+	cg1_stencil.c cg1_rop.c cg1_vec.c cg1_vecbres.s			\
+	cg2.c cg2_batch.c cg2_colormap.c cg2_curve.c			\
+	cg2_getput.c cg2_polyline.c cg2_region.c			\
+	cg2_stencil.c cg2_rop.c cg2_vec.c cg2_bres.s			\
+	gp1.c gp1_batch.c gp1_colormap.c gp1_curve.c			\
+	gp1_getput.c gp1_region.c gp1_sync.s gp1_alloc.s gp1_post.s	\
+	gp1_stencil.c gp1_rop.c gp1_vec.c gp1_kern_sync.s		\
+	gp1_polygon2.c bw1_standalone.c bw2_standalone.c		\
+	gp1_kern_gp_restart.c
+
+OBJS=	pf.o pf_default.o pf_defdata.o pf_text.o pf_ttext.o		\
+	pr_clip.o pr_curve.o pr_replrop.o pr_reverse.o pr_polygon2.o    \
+	pr_polyline.o pr_traprop.o					\
+	bw1.o bw1_batch.o bw1_curve.o 					\
+	bw1_getput.o bw1_polyline.o bw1_region.o bw1_rop.o		\
+	bw1_stencil.o bw1_vec.o bw1_vecbres.o bw1_colormap.o		\
+	pr_open.o pr_makefun.o pr_make.o				\
+	bw2.o								\
+	pr_io.o								\
+	mem.o mem_batch.o mem_curve.o					\
+	mem_getput.o mem_polyline.o mem_region.o mem_prs.o mem_rop.o	\
+	mem_stencil.o mem_vec.o 					\
+	mem_colormap.o							\
+	prom_batch.o							\
+	cg1.o cg1_batch.o cg1_colormap.o cg1_curve.o			\
+	cg1_getput.o cg1_polyline.o cg1_region.o			\
+	cg1_stencil.o cg1_rop.o cg1_vec.o cg1_vecbres.o			\
+	bw1_standalone.o bw2_standalone.o				\
+	cg2.o cg2_batch.o cg2_colormap.o cg2_curve.o			\
+	cg2_getput.o cg2_polyline.o cg2_region.o			\
+	cg2_stencil.o cg2_rop.o cg2_vec.o cg2_bres.o			\
+	gp1.o gp1_batch.o gp1_colormap.o gp1_curve.o			\
+	gp1_getput.o gp1_region.o gp1_sync.o gp1_alloc.o gp1_post.o	\
+	gp1_stencil.o gp1_rop.o gp1_vec.o gp1_polygon2.o		\
+	gp1_kern_sync.o gp1_kern_gp_restart.o
+
+INCLS=	bw1reg.h bw1var.h bw2var.h cg1reg.h cg1var.h cg2reg.h cg2var.h	\
+	gp1reg.h gp1var.h gp1cmds.h chain.h					\
+	demoglobals.h memreg.h memvar.h pr_io.h pr_util.h pixfont.h	\
+	pixrect.h pixrect_hs.h report.h traprop.h
+
+DEMOS=	demotest demo demo_time demo_page demo_sample demo_spin demo_mem demo2
+
+MACHFLAG= -D`/bin/mach`
+CFLAGS=	-O $(MACHFLAG)
+FONTLIST= pf_fontlist
+
+.s.o:
+	/lib/cpp -E $(MACHFLAG) $*.s >$*.pp
+	${AS} -o $*.o $*.pp
+	rm -f $*.pp
+
+all: libpixrect.a
+
+libpixrect.a:	${OBJS}
+	ar uv libpixrect.a $?
+	ranlib libpixrect.a
+
+pf_makedef: pf_makedef.o
+	cc -O -o pf_makedef pf_makedef.o
+
+pf_defdata.c: pf_makedef $(FONTLIST)
+	pf_makedef <$(FONTLIST) > pf_defdata.c
+
+pf_defdata.o: pf_defdata.c
+	cc -c -A-R ${CFLAGS} pf_defdata.c
+
+groupwrite:
+	chmod g+w ${OBJS} *.s libpixrect.a errs ${DEMOS}
+
+devinstall: libpixrect.a
+	install -c -m 644 libpixrect.a /usr/lib
+	ranlib /usr/lib/libpixrect.a
+
+install: libpixrect.a
+	-mkdir ${DESTDIR}/usr/include/pixrect && \
+		chown bin ${DESTDIR}/usr/include/pixrect && \
+		chmod 755 ${DESTDIR}/usr/include/pixrect
+	install -c -m 644 libpixrect.a ${DESTDIR}/usr/lib
+	ranlib ${DESTDIR}/usr/lib/libpixrect.a
+	-for i in *.h; do \
+		(install -c -m 644 $$i ${DESTDIR}/usr/include/pixrect) done
+
+test: demotest demo
+
+demotest: demotest.o demosubs.o libpixrect.a
+	cc -o demotest demotest.o demosubs.o libpixrect.a
+
+demo: demo.o libpixrect.a
+	cc -o demo demo.o libpixrect.a
+
+testpolytrap: testpolytrap.o
+	cc -o testpolytrap testpolytrap.o -lsuntool -lsunwindow libpixrect.a
+
+demo2: demo2.o libpixrect.a
+	cc -o demo2 demo2.o libpixrect.a
+
+demo_cg: demo_cg.o libpixrect.a
+	cc -o demo_cg demo_cg.o libpixrect.a
+
+demo_sample: demo_sample.o libpixrect.a
+	cc -o demo_sample demo_sample.o libpixrect.a
+
+demo_page: demo_page.o libpixrect.a
+	cc -o demo_page demo_page.o libpixrect.a
+
+demo_time: demo_time.o libpixrect.a
+	cc -o demo_time demo_time.o libpixrect.a
+
+demo_spin: demo_spin.o libpixrect.a
+	cc -o demo_spin demo_spin.o libpixrect.a
+
+demo_mem: demo_mem.o libpixrect.a
+	cc -o demo_mem demo_mem.o libpixrect.a
+
+demo_ker:kerdemo.o Makefile kerbw1rop.o bw1_kern.o mem_kern.o libpixrect.a
+	cc -o demo_ker kerdemo.o kerbw1rop.o bw1_kern.o mem_kern.o libpixrect.a
+
+mem_rop.o: mem_rop.c
+	cc -c $(CFLAGS) mem_rop.c
+
+# don't use -O on vector code which passes arguments in registers
+bw1_vec.o: bw1_vec.c
+	cc -c $(MACHFLAG) bw1_vec.c
+
+cg1_vec.o: cg1_vec.c
+	cc -c $(MACHFLAG) cg1_vec.c
+
+cg2_vec.o: cg2_vec.c
+	cc -c $(MACHFLAG) cg2_vec.c
+
+bw1_polyline.o: bw1_polyline.c
+	cc -c $(MACHFLAG) bw1_polyline.c
+
+cg1_polyline.o: cg1_polyline.c
+	cc -c $(MACHFLAG) cg1_polyline.c
+
+cg2_polyline.o: cg2_polyline.c
+	cc -c $(MACHFLAG) cg2_polyline.c
+
+prom_batch.o: mem_batch.c
+	rm -f prom_batch.c prom_batch.o
+	cp mem_batch.c prom_batch.c
+	cc -R -c $(CFLAGS) -DPROM prom_batch.c
+	rm -f prom_batch.c
+
+kerbw1rop.o:	bw1_rop.c
+	mv bw1_rop.o bw1_rop.o-
+	cc -c $(CFLAGS) -DKERNEL bw1_rop.c
+	mv bw1_rop.o kerbw1rop.o
+	mv bw1_rop.o- bw1_rop.o
+
+rcp:
+	rcp [a-z]* ${DESTMACH}:/usr/src/sun/usr.lib/libpixrect/
+	rcp SCCS/[a-z]* ${DESTMACH}:/usr/src/sun/usr.lib/libpixrect/SCCS/
+
+tar:
+	tar cf - * | rsh ${DESTMACH} \
+	    "cd /usr/src/sun/usr.lib/libpixrect;tar xBpf -"
+	cd /usr/include/pixrect;tar cf - * | rsh ${DESTMACH} \
+	    "cd /usr/include/pixrect;tar xBf -"
+
+clean:
+	rm -f *.o *.pp libpixrect.a $(DEMOS) core
+
+tags:	*.h *.c
+	ctags -w *.h *.c
+
+print:
+	(ls -l | pr -f; pr -f *.h *.c) | lpr -Pimagen
+
+lint:
+	lint ${CFLAGS} *.c

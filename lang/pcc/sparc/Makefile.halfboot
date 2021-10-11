@@ -1,0 +1,255 @@
+#
+# @(#)Makefile.halfboot	1.1 (Sun) 10/31/94
+# Makefile for half-bootstrap (new yacc, cpp, compile, ccom, c2, as, iropt)
+#
+REL =	4.1
+ARCH =	`arch`
+CPP=	../../${ARCH}/cpp
+COMPILE= ../../${ARCH}/compile
+YACCDIR= ../../${ARCH}/yacc
+NEW =	../../bin/${CPU}
+PCC=	../../pcc/${CPU}
+CGRDR=	../../cgrdr/${CPU}
+IROPT=	../../iropt/${CPU}
+ASDIR=	../../as/${CPU}
+C2DIR=	../../c2/${CPU}
+F77PASS1= ../../f77/f77pass1/${CPU}
+PC0=	../../pascal/pc0/${ARCH}
+SYS=	/usr/src/sys/$(ARCH)/GUINEA_PIG.`whoami`
+LANG=	/lang/$(REL)/$(ARCH)/usr/src/lang
+VALID=	/usr/tmp/valid/`whoami`
+SRC=	/usr/src
+MAKE=	make
+NEWCC=	cc -Qpath $(NEW)
+NEWYACC= $(NEW)/yacc -P$(NEW)/yaccpar
+LD=	/bin/ld
+AS=	/bin/as
+COPTS=	-O2
+
+all:	step4valid
+
+#
+# compile unoptimized CC with old compiler.
+# This may be a cross compilation step.
+#
+
+step1clean:
+	cd $(YACCDIR); $(MAKE) clean
+	cd $(CPP); $(MAKE) clean
+	cd $(COMPILE); $(MAKE) clean
+	cd $(PCC); $(MAKE) clean
+	cd $(IROPT); $(MAKE) clean
+	cd $(ASDIR); $(MAKE) clean
+	case $(CPU) in \
+	m68k) cd $(C2DIR); $(MAKE) clean ;;\
+	esac
+	cd $(NEW); rm -f yacc cpp compile ccom cg iropt as c2
+	rm -rf step* sanity
+	touch $@
+
+step1yacc: step1clean
+	cd $(YACCDIR); $(MAKE) CC="$(CC)" COPTS="$(COPTS)"
+	touch $@
+
+step1cpp: step1clean
+	cd $(CPP); $(MAKE) CC="$(CC)" COPTS="$(COPTS)"
+	touch $@
+
+step1compile: step1clean
+	cd $(COMPILE); $(MAKE) bootstrap CC="$(CC)" COPTS="$(COPTS)"
+	touch $@
+
+step1pcc: step1clean
+	cd $(PCC); $(MAKE) CC="$(CC)" COPTS="$(COPTS)"
+	touch $@
+
+step1iropt: step1clean
+	cd $(IROPT); $(MAKE) CC="$(CC)" COPTS="$(COPTS)"
+	touch $@
+
+step1as: step1clean
+	cd $(ASDIR); $(MAKE) CC="$(CC)" COPTS="$(COPTS)"
+	touch $@
+
+step1c2: step1clean
+	case $(CPU) in \
+	m68k) cd $(C2DIR); $(MAKE) CC="$(CC)" COPTS="$(COPTS)" ;;\
+	esac
+	touch $@
+
+step1: step1yacc step1cpp step1compile step1pcc step1iropt step1as step1c2
+	cd $(YACCDIR); install yacc yaccpar $(NEW)
+	cd $(CPP); install cpp $(NEW)
+	cd $(COMPILE); install compile $(NEW)
+	cd $(PCC); install ccom $(NEW)
+	cd $(PCC); install cg $(NEW)
+	cd $(IROPT); install iropt $(NEW)
+	cd $(ASDIR); install as $(NEW)
+	case $(CPU) in \
+	m68k) cd $(C2DIR) ; install c2 $(NEW) ;;\
+	esac
+	-mkdir step1objs step1objs/cgrdr step1objs/iropt
+	mv *.o step1objs
+	mv $(CGRDR)/*.o step1objs/cgrdr
+	mv $(IROPT)/*.o step1objs/iropt
+	touch $@
+
+#
+# compile optimized CC with new (but unoptimized) compiler.
+# This MUST be done on the target machine.
+#
+step2clean: step1
+	cd $(CPP); $(MAKE) clean
+	cd $(YACCDIR); $(MAKE) clean
+	cd $(COMPILE); $(MAKE) clean
+	cd $(PCC); $(MAKE) clean
+	cd $(IROPT); $(MAKE) clean
+	cd $(ASDIR); $(MAKE) clean
+	case $(CPU) in \
+	m68k) cd $(C2DIR); $(MAKE) clean ;;\
+	esac
+	touch $@
+
+step2yacc: step2clean
+	cd $(YACCDIR); $(MAKE) YACC="$(NEWYACC)" CC="$(NEWCC)" COPTS="$(COPTS)"
+	touch $@
+
+step2cpp: step2clean
+	cd $(CPP); $(MAKE) YACC="$(NEWYACC)" CC="$(NEWCC)" COPTS="$(COPTS)"
+	touch $@
+
+step2compile: step2clean
+	cd $(COMPILE); $(MAKE) bootstrap YACC="$(NEWYACC)" CC="$(NEWCC)" COPTS="$(COPTS)"
+	touch $@
+
+step2pcc: step2clean
+	cd $(PCC); $(MAKE) YACC="$(NEWYACC)" CC="$(NEWCC)" COPTS="$(COPTS)"
+	touch $@
+
+step2iropt: step2clean
+	cd $(IROPT); $(MAKE) YACC="$(NEWYACC)" CC="$(NEWCC)" COPTS="$(COPTS)"
+	touch $@
+
+step2as: step2clean
+	cd $(ASDIR); $(MAKE) YACC="$(NEWYACC)" CC="$(NEWCC)" COPTS="$(COPTS)"
+	touch $@
+
+step2c2: step2clean
+	case $(CPU) in \
+	m68k) cd $(C2DIR); $(MAKE) YACC="$(NEWYACC)" CC="$(NEWCC)" COPTS="$(COPTS)" ;;\
+	esac
+	touch $@
+
+step2: step2yacc step2cpp step2compile step2pcc step2iropt step2as step2c2
+	cd $(YACCDIR); install yacc yaccpar $(NEW)
+	cd $(CPP); install cpp $(NEW)
+	cd $(COMPILE); install compile $(NEW)
+	cd $(PCC); install ccom $(NEW)
+	cd $(PCC); install cg $(NEW)
+	cd $(IROPT); install iropt $(NEW)
+	cd $(ASDIR); install as $(NEW)
+	case $(CPU) in \
+	m68k) cd $(C2DIR); install c2 $(NEW) ;;\
+	esac
+	-mkdir step2objs step2objs/cgrdr step2objs/iropt
+	mv *.o step2objs
+	mv $(CGRDR)/*.o step2objs/cgrdr
+	mv $(IROPT)/*.o step2objs/iropt
+	touch $@
+
+#
+# compile optimized CC with new (and optimized) compiler.
+# This MUST be done on the target machine, and should
+# produce the same result as the previous step.
+#
+step3clean: step2
+	cd $(YACCDIR); $(MAKE) clean
+	cd $(CPP); $(MAKE) clean
+	cd $(COMPILE); $(MAKE) clean
+	cd $(PCC); $(MAKE) clean
+	cd $(IROPT); $(MAKE) clean
+	cd $(ASDIR); $(MAKE) clean
+	case $(CPU) in \
+	m68k) cd $(C2DIR); $(MAKE) clean ;;\
+	esac
+	touch $@
+
+step3yacc: step3clean
+	cd $(YACCDIR); $(MAKE) YACC="$(NEWYACC)" CC="$(NEWCC)" COPTS="$(COPTS)"
+	touch $@
+
+step3cpp: step3clean
+	cd $(CPP); $(MAKE) YACC="$(NEWYACC)" CC="$(NEWCC)" COPTS="$(COPTS)"
+	touch $@
+
+step3compile: step3clean
+	cd $(COMPILE); $(MAKE) bootstrap YACC="$(NEWYACC)" CC="$(NEWCC)" COPTS="$(COPTS)"
+	touch $@
+
+step3pcc: step3clean
+	cd $(PCC); $(MAKE) YACC="$(NEWYACC)" CC="$(NEWCC)" COPTS="$(COPTS)"
+	touch $@
+
+step3iropt: step3clean
+	cd $(IROPT); $(MAKE) YACC="$(NEWYACC)" CC="$(NEWCC)" COPTS="$(COPTS)"
+	touch $@
+
+step3as: step3clean
+	cd $(ASDIR); $(MAKE) YACC="$(NEWYACC)" CC="$(NEWCC)" COPTS="$(COPTS)"
+	touch $@
+
+step3c2: step3clean
+	case $(CPU) in \
+	m68k) cd $(C2DIR); $(MAKE) YACC="$(NEWYACC)" CC="$(NEWCC)" COPTS="$(COPTS)" ;;\
+	esac
+	touch $@
+
+sanity: step3yacc step3cpp step3compile step3pcc step3iropt step3as step3c2
+	cd $(YACCDIR); cmp yacc $(NEW)/yacc
+	cd $(CPP); cmp cpp $(NEW)/cpp
+	cd $(COMPILE); cmp compile $(NEW)/compile
+	cd $(PCC); cmp ccom $(NEW)/ccom
+	cd $(PCC); cmp cg $(NEW)/cg
+	cd $(IROPT); cmp iropt $(NEW)/iropt
+	cd $(ASDIR); cmp as $(NEW)/as
+	case $(CPU) in \
+	m68k) cd $(C2DIR) ; cmp c2 $(NEW)/c2 ;;\
+	esac
+	touch $@
+
+step4kernel: sanity
+	-cd $(NEW); BIN=`pwd` ; cd $(SYS); make clean ; \
+		make CC="$$BIN/cc -Qpath $$BIN -O2" \
+			AS="$$BIN/as" > Make.out 2>&1
+	touch $@
+
+step4fortran: sanity
+	-cd $(NEW); BIN=`pwd` ; cd $(F77PASS1); make clean;\
+		make	YACC="$$BIN/yacc -P$$BIN/yaccpar" \
+			CC="$$BIN/cc -Qpath $$BIN -O2" \
+			VROOT=../../../$(ARCH)/vroot \
+			AS="$$BIN/as" > Make.out 2>&1 ;\
+		install -m 555 f77pass1 $$BIN
+	touch $@
+
+step4pascal: sanity
+	-cd $(NEW); BIN=`pwd` ; cd $(PC0); make clean;\
+		make CC="$$BIN/cc -Qpath $$BIN -O2" \
+			VROOT=../../../$(ARCH)/vroot \
+			AS="$$BIN/as" > Make.out 2>&1 ;\
+		install -m 555 pc0 $$BIN
+	touch $@
+
+step4langs: sanity
+	-cd $(NEW); BIN=`pwd` ; cd $(LANG) ; \
+		make -k clean > Make.out 2>& 1;\
+		make -k YACC="$$BIN/yacc -P$$BIN/yaccpar" \
+			CC="$$BIN/cc -Qpath $$BIN -O2" \
+			F77="$$BIN/f77 -Qpath $$BIN" \
+			PC="$$BIN/pc -Qpath $$BIN" \
+			AS="$$BIN/as" > Make.out 2>&1
+	touch $@
+
+step4valid: step4kernel step4fortran step4pascal step4langs
+	-cd $(SRC) ; crank.csh
+	-cd $(VALID) ; crank.csh

@@ -1,0 +1,4 @@
+/* @(#)pf_fontlist 1.1 94/10/31 */
+#define FILE_DIR "../fixedwidthfonts/"
+"screen.r.14"
+"screen.b.12"

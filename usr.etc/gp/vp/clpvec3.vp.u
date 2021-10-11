@@ -1,0 +1,295 @@
+| Copyright (c) 1985 by Sun Microsystems, Inc.
+|	@(#)clpvec3.vp.u 1.1 94/10/31 SMI
+
+|	clpvec3 -- clip a 3-D vector to a normalized window (-1.0 <= x/w,y/w <= 1.0, 0.0 <= z/w <= 1.0)
+|		   operates in homogeneous coordinates and clips to the region of positive w only
+|
+|	Input Parameters:	inptr,fpap -- Address of vector to be clipped (N.B.: fpap must be set to inptr prior to call)
+|
+|
+|	Output:		clipped vector endpoints are written over input points
+|			return with inptr==fpap if vector is visible
+|			Am29116 Z condition flag Z: 0 (2910 branch condition ~zer) => all or part of input vector is visible
+|						    1 (2910 branch condition  zer) => input vector is not visible
+|
+#define inptr r[15]
+#define clipplanes r[11]
+#define savoutcode1 r[8]
+#define savoutcode0 r[7]
+#define outcode0 r[6]
+#define outcode1 acc
+#define outcodes r[5]
+#define t0_hi r[4]
+#define t0_lo r[3]
+#define recaddr r[2]
+#define t1_hi r[2]
+#define t1_lo r[1]
+#define hi_1 r[0]
+#define tmp0 r[0]
+#define tmp1 r[1]
+#define tmp2 r[2]
+
+
+clpvec3: add2nw 1,inptr,tmp0;	;		;		lmode rn,ai,pipe,fast;    | fpreg's 0-15 are scratch memory
+	incw tmp0,tmp0;		am->fpbp;	;		;			  | fpbp <- &w0
+	mov2nw 3,acc;		am->fpdp;	;		adda,lab,hi;		  | wec0_left = w0 + x0; fpdp <- 8
+	movw 0,y;		am->fpregl;	;		;			  | fpr[8] <- 0.0
+	movw 0,y;		am->fpregh;	;		rsuba,la,hi;		  | wec0_right = w0 - x0
+	sub2nw 0,acc;		;		;		;		ap+	  | acc <- 7 (used below)
+	movw =trivaccept3,y;	;		;		adda,la,hi;		  | wec0_bottom = w0 + y0
+	IMM;			am->brreg;	;		;			  | set up brreg for possible branch later
+	movw 0,savoutcode1;	;		;		rsuba,la,hi;		  | wec0_top = w0 - y0; savoutcode1<-0, for
+	mov2nw 3,y;		am->fpbp;	;		;		ap+	  | COREWLDVECNDC_3D cmd; fpbp <- 8
+	movw 0,y;		am->fpdp;	;		adda,lab,a,hi;		  | wec0_hither = 0.0 + z0; fpdp <- 0
+	movw tmp0,y;		am->fpbp;	;		;			  | fpbp <- &w0
+	compw 0,outcode0;	;		;		rsuba,lab,a,st,hi;	  | wec0_yon = w0 - z0; outcode0 = 0xFFFF
+	sl0b d,y;		fpstreg->am;	;		;		adp+	  | get L bit of outcode0
+	addw inptr,acc,tmp1;	am->fpbp;	;		noflop,st,hi;		  | can't set both a & b ptrs fast enough
+	slqw outcode0,outcode0;	;		;		;		adp+	  | to keep pipe going; fpbp<-&w1,fpap<-&x1
+	sl0b d,y;		fpstreg->am;	;		adda,lab,a,hi;		  | wec1_left = w1 + x1
+	slqw outcode0,outcode0;	;		;		;			  | R bit of outcode0
+	compw 0,outcode1;	;		;		rsuba,la,a,st,hi;	  | wec1_right = w1 - x1; outcode1 = 0xFFFF
+	sl0b d,y;		fpstreg->am;	;		;		adp+	  | B bit of outcode0
+	slqw outcode0,outcode0;	;		;		adda,la,a,st,hi;	  | wec1_bottom = w1 + y1
+	sl0b d,y;		fpstreg->am;	;		;		dp+	  | T bit of outcode0
+	slqw outcode0,outcode0;	;		;		rsuba,la,a,st,hi;	  | wec1_top = w1 - y1
+	mov2nw 3,tmp2;		am->fpbp;	;		;		adp+	  | fpbp <- 8
+	sl0b d,y;		fpstreg->am;	;		adda,lab,a,st,hi;	  | wec1_hither = 0.0 + z1
+	slqw outcode0,outcode0;	;		;		;		dp+	  | H bit of outcode0
+	sl0b d,y;		fpstreg->am;	;		noflop,st,hi;		  | have to hiccup pipe to avoid losing last
+	movw tmp1,y;		am->fpbp;	;		;		dp+	  | outcode0 bit; fpbp <- &w1
+	slqw outcode0,outcode0;	;		;		rsuba,lab,a,hi;		  | wec1_yon = w1 - z1; Y bit of outcode0
+	sl0b d,y;		fpstreg->am;	;		;			  | L bit of outcode1
+	slqw outcode1,outcode1;	;		;		noflop,st,hi;		  | hiccup pipe to reload a and b ptrs
+	movw 0,y;		am->fpap;	;		;		dp+	  | fpap <- 0, address of wec0's
+	sub2nw 1,tmp2;		am->fpbp;	;		;			  | fpbp <- 6, address of wec1's
+	sl0b d,y;		fpstreg->am;	;		suba,lab,a,hi;		  | wec0_left - wec1_left
+	slqw outcode1,outcode1;	;		;		;		abp+	  | R bit of outcode1
+	compw outcode0,savoutcode0;;		;		suba,lab,a,st,hi;	  | wec0_right - wec1_right
+	sl0b d,y;		fpstreg->am;	;		;		abdp+	  | B bit of outcode1
+											  | savoutcode0<-~outcode0(COREWLDVECNDC_3D)
+	slqw outcode1,outcode1;	;		;		suba,lab,a,st,hi;	  | wec0_bottom - wec1_bottom
+	sl0b d,y;		fpstreg->am;	;		;		abdp+	  | T bit of outcode1
+	slqw outcode1,outcode1;	;		;		suba,lab,a,st,hi;	  | wec0_top - wec1_top
+	sl0b d,y;		fpstreg->am;	;		;		abdp+	  | H bit of outcode1
+	slqw outcode1,outcode1;	;		;		suba,lab,a,st,hi;	  | wec0_hither - wec1_hither
+	add2nw 0,tmp2;		am->fpdp;	;		;		abp+	  | fpdp <- 7, store wec diffs there
+	sl0b d,y;		fpstreg->am;	;		suba,lab,a,st,hi;	  | wec0_yon - wec1_yon;store wec left diff
+	slqw outcode1,outcode1;	;		;		;		dp+	  | Y bit of outcode1
+	nandw outcode0,outcode1,y; am->am;	;		pa,a,st,hi;		  | store wec right diff
+	andw,s d,clipplanes,y;	;		;		;		dp+	  | result != 0 iff >= 1 pt outside window
+	andw d,clipplanes,outcodes;;		cjp,zer;	pa,a,st,hi;		  | jump if trivial accept; 2-reg op ok here
+	movw =reject3,y;	;		;		;		dp+	  | store wec bottom diff
+	IMM;			am->brreg;	;		pa,a,st,hi;		  | store wec top diff
+	norw outcode0,outcode1,y; am->am;	;		;		dp+
+	andw,s d,clipplanes,y;	;		;		pa,a,st,hi;		  | result != 0 iff 2 pts outside >= 1 plane
+	movw tmp2,y;		am->fpap;	cjp,~zer;	;		dp+	  | jump if trivial reject;store hither diff
+	sub2nw 0,tmp2,recaddr;	;		;		noflop,st,hi;		  | fpap<-7; recaddr<-6; store wec yon diff
+	btstw,s 5,outcodes;	;		;		;
+	compw outcode1,savoutcode1;;		cjs,~zer recip;	;			  | compute left recip if intersect
+											  | savoutcode1<-~outcode1(COREWLDVECNDC_3D)
+	btstw,s 4,outcodes;	;		;		;
+	incw recaddr,recaddr;	;		cjs,~zer recip;	;		ap+	  | compute right recip if intersect
+	btstw,s 3,outcodes;	;		;		;
+	incw recaddr,recaddr;	;		cjs,~zer recip;	;		ap+	  | compute bottom recip if intersect
+	btstw,s 2,outcodes;	;		;		;
+	incw recaddr,recaddr;	;		cjs,~zer recip;	;		ap+	  | compute top recip if intersect
+	btstw,s 1,outcodes;	;		;		;
+	incw recaddr,recaddr;	;		cjs,~zer recip;	;		ap+	  | compute hither recip if intersect
+	btstw,s 0,outcodes;	;		;		;
+	incw recaddr,recaddr;	;		cjs,~zer recip;	;		ap+	  | compute yon recip if intersect
+											  | outcodes bits indicate line crossings:
+											  | L|R|B|T|H|Y is 5|4|3|2|1|0
+											  | have now computed recips for the
+											  | intersection calculations below if the
+											  | corresponding t values will be used
+											  | The calculations of candidate values of
+											  | t below are of the form :
+											  |	t = wec0_x / (wec0_x - wec1_x)
+											  | where x is left, right, bottom, top,
+											  | hither, or yon.
+t0t1_3:	movw 0,t0_hi;		am->fpap;	;		lmode rn,ai,pipe,fast;	  | t0 = 0.0, param t value for line begin
+	movw 0,t0_lo;		6->fpbp;	;		;			  | fpap <- &wec0's, fpbp <- &diff_recip's
+	movw 0x3F80,hi_1;	;		;		maba,lab,hi;		  | wec0_left * recip_left
+	IMM;			;		;		;		abp+	  | hi_1 <- high order 1.0
+	movw hi_1,t1_hi;	;		;		maba,lab,hi;		  | wec0_right * recip_right
+	movw 0,t1_lo;		am->fpdp;	;		;		abp+	  | t1 = 1.0, param t value for line end
+											  | fpdp<-0,store candidate t's at fpreg[0]
+	movw =intersect3,y;	;		;		maba,lab,hi;		  | wec0_bottom * recip_bottom
+	IMM;			am->brreg;	;		;		abp+	  | set up brreg for calls to intersect3
+	compw outcode0,outcode0;;		;		maba,lab,hi;		  | wec0_top * recip_top; now outcode0 bits
+	;			;		;		;		abp+	  | have same polarity as outcodes bits
+	rolw,s 10,outcodes,outcodes;;		;		maba,lab,m,hi;		  | wec0_hither * recip_hither
+	rolw,s 10,outcode0,outcode0;;		cjs,neg;	;		bp+	  | call intersect2 if line crosses L plane
+											  | L|R|B|T|H|Y now 15|14|13|12|11|10
+	;			5->fpap;	;		;			  | reset fpap for final t value
+	sl0w,s outcodes,outcodes;;		;		maba,lab,m,hi;		  | wec0_yon * recip_yon
+	sl0w,s outcode0,outcode0;;		cjs,neg;	;			  | call intersect2 if line crosses R plane
+											  | R|B|T|H|Y now 15|14|13|12|11
+	sl0w,s outcodes,outcodes;;		;		pa,m,hi;		  | B|T|H|Y now 15|14|13|12, advance pipe
+	sl0w,s outcode0,outcode0;;		cjs,neg;	;			  | call intersect2 if line crosses B plane
+	sl0w,s outcodes,outcodes;;		;		pa,m,hi;		  | T|H|Y now 15|14|13, advance pipe
+	sl0w,s outcode0,outcode0;;		cjs,neg;	;			  | call intersect2 if line crosses T plane
+	sl0w,s outcodes,outcodes;;		;		pa,m,hi;		  | H|Y now 15|14, advance pipe
+	sl0w,s outcode0,outcode0;;		cjs,neg;	;			  | call intersect2 if line crosses H plane
+	sl0w,s outcodes,outcodes;;		;		pa,m,hi;		  | Y now 15, advance pipe
+	sl0w,s outcode0,outcode0;;		cjs,neg;	;			  | call intersect2 if line crosses Y plane
+											  | now t0 and t1 represent clipped
+											  | endpoints iff t0 <= t1
+newpts3: movw,s t0_hi,y;	am->fpregh;	;		;			  | fpreg[0] <- t0 & test t0_hi==0 which
+	movw t0_lo,y;		am->fpregl;	;		;		dp+	  | implies t0==0.0 since fast Weitek mode
+	movw t1_hi,acc;		am->fpregh;	;		;			  | will not produce denormalized results
+	movw t1_lo,y;		am->fpregl;	cjp,zer t0eq0_3;;			  | fpreg[1]<-t1 & jump if t0==0.0
+	xorw,s hi_1,acc,y;	0->fpap;	;		;			  | fpap<-&t0; test t1_hi == high order 1.0
+											  | which means t1 == 1.0, since t1 started
+											  | at 1.0 and could only decrease
+vischk_3: subw d,t1_lo,y;	fpregl->am;	cjp,zer t1eq1_3;;			  | jump if t1==1.0, else check for t0>t1,
+	subcw,s d,t1_hi,y;	fpregh->am;	;		;			  | which means line is outside window
+	movw 0,tmp0;		;		cjp,cry twonewpts_3;;			  | jump on no borrow (t1 - t0 >= 0.0)
+											  | tmp0<-&t0 (used below); cc indicating
+											  | cry causes both pts to be computed below
+reject3: movw,s 0,y;		;		crtn,go;	;			  | Z bit <- 1 (indicating rejection) & rtn
+											  |
+trivaccept3: movw,s inptr,y;	am->fpap;	crtn,go;	;			  | Z bit <- 0 (indicating acceptance),
+											  | fpap <- inptr, and return
+											  |
+t0eq0_3: incw,s 0,tmp0;		=t0eq0_3a->brreg;;		;			  | if t0 == 0.0, then the t0,t1 segment is
+	;			;		cjp,go twonewpts_3;;			  | visible since t1 >= 0.0; also, t1 != 1.0
+											  | at this point since that would imply
+											  | trivial acceptance; force cc to indicate
+											  | ~cry -- we use this to arrange
+											  | below to compute and store only one
+											  | point; brreg has a branch address to
+											  | compute the t1 point; tmp0<-&t1
+											  |
+t1eq1_3: movw,s 0,tmp0;		=t1eq1_3a->brreg;;		;			  | if t1 == 1.0, then the t0,t1 segment is
+											  | visible since t0 <= 1.0; also, t0 != 0.0
+											  | at this point since that would imply
+											  | trivial acceptance; force cc to indicate
+											  | ~cry -- we use this to arrange
+											  | below to compute and store only one
+											  | point; brreg has a branch address to
+											  | compute the t0 point; tmp0<-&t0
+											  |
+											  | when we arrive here cc indicates whether
+											  | we have to compute 1 or 2 pts
+											  | cry => need to compute 2 pts
+											  | ~cry => need to compute 1 pt
+											  |
+twonewpts_3: movw inptr,acc;	am->fpbp;	;		;			  | fpbp <- &x0
+	add2nw 2,acc;		am->fpap;	;		;			  | fpap <- &x1
+	mov2nw 1,y;		am->fpdp;	;		suba,lab,hi;		  | dx = x1 - x0
+	;			;		;		;		abp+	  | fpdp <- 2 -- put deltas at fpreg[2-5]
+	;			;		;		suba,lab,hi;		  | dy = y1 - y0
+	;			;		;		;		abp+
+	;			;		;		suba,lab,hi;		  | dz = z1 - z0
+	;			;		;		;		abp+
+	;			;		;		suba,lab,hi;		  | dw = w1 - w0
+	;			;		;		;
+	movw tmp0,y;		am->fpbp;	;		pa,a,hi;		  | fpbp<-&t0 or &t1, as previously set up
+	;			;		;		;			  | advance pipe
+	;			;		;		mabr,lab,a,st,hi;	  | t? * dx; store dx
+	;			;		;		;		dp+
+	;			;		;		mabr,la,a,st,hi;	  | t? * dy; store dy
+	;			;		;		;		dp+
+	;			;		;		mabr,la,a,st,hi;	  | t? * dz; store dz
+	;			;		;		;		dp+
+	;			;		;		mabr,la,st,hi;		  | t? * dw; store dw
+	mov2nw 1,y;		am->fpap;	cjp,~cry;	;		bdp+	  | jump to compute only 1 pt; brreg
+											  | previously set to t0eq0_3a or t1eq1_3a
+											  | else fpap<-&dx, fpbp<-&t1,
+											  | fpdp<-6 -- store t0*d's at fpreg[6-9]
+											  | only reach here if computing 2 points
+	;			;		;		maba,lab,m,hi;		  | t1 * dx
+	;			;		;		;		ap+
+	;			;		;		maba,la,m,st,hi;	  | t1 * dy; store (t0 * dx)
+	;			;		;		;		adp+
+	;			;		;		maba,la,m,st,hi;	  | t1 * dz; store (t0 * dy)
+	movw 6,y;		;		;		;		adp+
+	IMM;			am->fpbp;	;		maba,la,m,st,hi;	  | t1 * dw; store (t0 * dz); fpbp<-&(t0*dx)
+	movw inptr,y;		am->fpap;	;		;		dp+	  | fpap<-&x0;store t1*d's at fpreg[10-13]
+	;			;		;		adda,lab,m,st,hi;	  | x0' = x0 + (t0*dx); store (t0 * dw)
+	;			;		;		;		abdp+
+	;			;		;		adda,lab,m,st,hi;	  | y0' = y0 + (t0*dy); store (t1 * dx)
+	;			;		;		;		abdp+
+	;			;		;		adda,lab,m,st,hi;	  | z0' = z0 + (t0*dz); store (t1 * dy)
+	;			;		;		;		abdp+
+	;			;		;		adda,lab,m,st,hi;	  | w0' = w0 + (t0*dw); store (t1 * dz)
+	movw inptr,y;		am->fpap;	;		;		bdp+	  | fpap<-&x0; fpbp<-&(t1*dx)
+	;			;		;		adda,lab,a,st,hi;	  | x1' = x0 + (t1*dx); store (t1 * dw)
+	movw inptr,y;		am->fpdp;	;		;		abp+	  | fpdp<-&x0
+	;			;		;		adda,lab,a,st,hi;	  | y1' = y0 + (t1*dy); store x0'
+	;			;		;		;		abdp+
+	;			;		;		adda,lab,a,st,hi;	  | z1' = z0 + (t1*dz); store y0'
+	;			;		;		;		abdp+
+	;			;		;		adda,lab,a,st,hi;	  | w1' = w0 + (t1*dw); store z0'
+	;			;		;		;		dp+
+	;			;		;		pa,a,st,hi;		  | store w0'
+	;			;		;		;		dp+
+											  | can reach here to store pt1' from above
+											  | when computing 2 pts or from below when
+											  | computing only pt1'; also can reach here
+											  | from below to store pt0' when computing
+											  | only that pt
+storept_3: ;			;		;		pa,a,st,hi;		  | store x1' (or x0')
+	;			;		;		;		dp+
+	;			;		;		pa,a,st,hi;		  | store y1' (or y0')
+	;			;		;		;		dp+
+	;			;		;		pa,a,st,hi;		  | store z1' (or z0')
+	;			;		;		;		dp+
+	;			;		;		noflop,st,hi;		  | store w1' (or w0')
+	movw,s inptr,y;		am->fpap;	crtn,go;	;			  | return with Z bit==0 & fpap==inptr
+											  |
+t1eq1_3a: movw inptr,y;		am->fpdp;	cjp,go onenewpt_3;;			  | fpdp<-&x0 so we will store x0'
+											  |
+t0eq0_3a: movw acc,y;		am->fpdp;	;		;			  | fpdp<-&x1 so we will store x1'
+											  | arrive here to compute only 1 pt; pipe
+											  | contains either t0*d's or t1*d's
+onenewpt_3: movw inptr,y;	am->fpbp;	;		pa,m,hi;		  | fpbp<-&x0; advance pipeline
+	;			;		;		;
+	movw =storept_3,y;	;		;		addr,lab,m,hi;		  | x?' = x0 + (t?*dx)
+	IMM;			am->brreg;	;		;		bp+	  | brreg<-storept_3 for subsequent branch
+	;			;		;		addr,lab,m,hi;		  | y?' = y0 + (t?*dy)
+	;			;		;		;		bp+
+	;			;		;		addr,lab,m,hi;		  | z?' = z0 + (t?*dz)
+	;			;		;		;		bp+
+	;			;		;		addr,lab,hi;		  | w?' = w0 + (t?*dw)
+	;			;		;		;
+	;			;		;		pa,a,hi;		  | advance pipeline
+	;			;		cjp,go;		;			  | goto storept_3
+											  |
+											  |
+intersect3: movw 0,y;		am->fpap;	;		noflop,st,hi;		  | fpreg[0] <- candidate value; fpap<-0
+	not2nw 15,acc;		;		;		;			  | acc <- 0x7FFF
+	andw,s d,acc,acc;	fpregh->am;	cjp,~neg updt1_3;;			  | update t0 or t1 based upon previously
+											  | tested bit of outcode0; acc <- high
+											  | order t & 0x7FFF (to convert -0.0 to
+											  | +0.0,since t is guaranteed 0.0<=t<=1.0)
+updt0_3: subw d,t0_lo,y;	fpregl->am;	;		;			  | compare t with t0 (t0 - t)
+	rsubcw,s t0_hi,acc,y;	;		;		;
+	bclrw,s 15,outcodes;	;		cjp,cry chkthru3;;			  | no borrow means t <= t0
+	movw acc,t0_hi;		;		;		;			  | else t0 <- t
+	movw d,t0_lo;		;		cjpp,zer newpts3;;			  | outcodes==0 -> no more intersections
+	;			;		crtn,go;	;			  | else return to check next plane
+updt1_3: rsubw d,t1_lo,y;	fpregl->am;	;		;			  | compare t with t1 (t - t1)
+	subcw,s t1_hi,acc,y;	;		;		;
+	bclrw,s 15,outcodes;	;		cjp,cry chkthru3;;			  | no borrow means t >= t1
+	movw acc,t1_hi;		;		;		;			  | else t1 <- t
+	movw d,t1_lo;		;		cjpp,zer newpts3;;			  | outcodes==0 -> no more intersections
+	;			;		crtn,go;	;			  | else return to check next plane
+chkthru3: ;			;		crtn,~zer;	;			  | outcodes != 0 -> more intersections, rtn
+	;			;		cjpp,go newpts3;;			  | else pop stack and goto newpts3
+
+
+#undef outcode0
+#undef outcode1
+#undef outcodes
+#undef t0_hi
+#undef t0_lo
+#undef recaddr
+#undef t1_hi
+#undef t1_lo
+#undef hi_1
+#undef tmp0
+#undef tmp1
+#undef tmp2

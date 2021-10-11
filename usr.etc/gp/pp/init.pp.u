@@ -1,0 +1,77 @@
+| "@(#)init.pp.u 1.1 94/10/31 SMI"
+
+| Copyright 1985 by Sun Microsystems, Inc.
+
+|   ldmasktbl:  Load mask table.
+|   From /usr/src/sun/usr.lib/libpixrect/cg2_rop.c
+|   short mrc_lmasktable[]= {0x0000, 0x8000, 0xc000, 0xe000,
+|			     0xf000, 0xf800, 0xfc00, 0xfe00,
+|			     0xff00, 0xff80, 0xffc0, 0xffe0,
+|			     0xfff0, 0xfff8, 0xfffc, 0xfffe}; 
+|   short mrc_rmasktable[]= {0x7fff, 0x3fff, 0x1fff, 0x0fff,
+|			     0x07ff, 0x03ff, 0x01ff, 0x00ff,
+|			     0x007f, 0x003f, 0x001f, 0x000f,
+|			     0x0007, 0x0003, 0x0001, 0x0000}
+
+ppinit:	;			GPAddress->scrmemp; ;				| 
+	movw d, acc;		fifo1->am;	cjp, f1e .;			| High address bits of gp.
+	movw acc, y;		am->scrmem;	;				| 
+	;			;		cjp,~gbr .;			|
+	;			0x6000->gbhiptr; ;				| Reset gbuffer state.
+	movw d, planes;		0xff->am;	;				| 
+	movw 0, acc;		LMaskTable->scrmemp; ;				| 
+	;			14->brreg;	;				| Rdy to load counter.
+	movw acc, y;		am->scrmem;	push, go;		scrmp +	| 
+	sr1w acc, acc;		am->scrmem;	rfct;			scrmp +	| mrc_lmasktable.
+	;			15->brreg;	;				| 
+	;			RMaskTable->scrmemp;push, go;			| 
+	sr0w acc, acc;		am->scrmem;	rfct;			scrmp +	| mrc_rmasktable.
+#ifndef GPPLUS
+	;			;		cjp, go start;			| 
+#else GPPLUS
+	;			PickOffset->scrmemp; ;				| start with picking off for all 8 contexts
+	;			;		push,go 127;			| 16 locations per context for 8 contexts
+	movw 0,y;		am->scrmem;	rfct;			scrmp+	| 
+	;			;		cjp, go start;			| 
+#endif GPPLUS
+
+fbaddr:	movw d, FBHi;		fifo1->am;	cjp, f1e .;			| High address bits of frame buffer (fb).
+	addw d, FBHi, FBCont;	0x30->am;	;				| Control area of fb
+	;			;		cjs, go resetrr;		| 
+	;			;		cjp, go start;			| 
+
+ppmask:	subw,s d, planes, y;	fifo1->am;	cjp, f1e .;			| 
+	movw d, planes;		FBPPMask->vloareg; ;				| 
+	;			;		cjs, ~zer resetrr;		| 
+	;			;		cjp, go start;			| 
+
+resetrr: movw FBCont, y;	am->vhiareg;	;				| Must actually load patt since ffff is valid.
+	;			;		cjp, ~vir .;			| Wait till vctlreg ready.
+	;			GPVWord->vctlreg; ;				| 
+	;			FBPPMask->vloareg; ;				| 
+	movw planes, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+	;			RRValues->scrmemp; ;				| Set defaults so all will change first time thru.
+	;			0xffff->scrmem;	;			scrmp +	| Op.
+	;			FBAllRopRegPatt->vloareg; ;			| 
+	movw 0, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+|	movw acc, r[3];		;		;				| 
+|	movw d, acc;		0x200->am;	;				| 
+|	incw 0, r[0];		;		cjs, go cndflash;		| 
+|	movw r[3], acc;		;		;				| 
+|	;			RRValues->scrmemp; ;				| 
+|	;			;		;			scrmp +	| 
+	;			0->scrmem;	;			scrmp +	| Pattern.
+	;			;		;				| 
+	;			0xffff->scrmem;	;			scrmp +	| Mask2
+	;			;		;				| 
+	;			0xffff->scrmem;	;			scrmp +	| Mask1
+	;			;		;				| 
+	;			0xffff->scrmem;	;			scrmp +	| Width
+	;			;		;				| 
+	;			0xffff->scrmem;	;			scrmp +	| OpCnt
+	;			;		;				| 
+	;			0xffff->scrmem;	;			scrmp +	| Shift
+	;			;		crtn, go;		varegs +| 
+
+stcolor: movw d, acc;		fifo1->am;	cjp, f1e .;			| 
+	;			;		cjp, go start;			| 

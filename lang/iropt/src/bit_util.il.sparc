@@ -1,0 +1,66 @@
+!	"@(#)bit_util.il.sparc 1.1 94/10/31 Copyr 1988 Sun Micro"
+
+!	Copyright (c) 1988 by Sun Microsystems, Inc.
+
+! BOOLEAN
+! test_bit( set, bitno ) register SET set; register int bitno;
+! {
+! 	register int word_index, bit_offset;
+! 
+! 	word_index = (unsigned)bitno / BPW;
+! 	bit_offset = (unsigned)bitno % BPW;
+! 	return (BOOLEAN)((set[word_index]>>bit_offset)&1);
+! }
+
+	.inline	_test_bit,2
+	srl	%o1,5,%o5
+	sll	%o5,2,%o5
+	ld	[%o0+%o5],%o0
+!	note shift counts are evaluated mod 32 on sparc
+	srl	%o0,%o1,%o0
+	and	%o0,1,%o0
+	.end
+
+! void
+! set_bit( set, bitno ) register SET set; register int bitno;
+! {
+! 	register int word_index, bit_offset;
+! 
+! 	word_index = (unsigned)bitno / BPW;
+! 	bit_offset = (unsigned)bitno % BPW;
+! 	set[word_index] |= (1<<bit_offset);
+! }
+
+	.inline	_set_bit,2
+	srl	%o1,5,%o5
+	sll	%o5,2,%o5
+	add	%o0,%o5,%o0
+	ld	[%o0],%o3
+	mov	1,%o2
+!	note shift counts are evaluated mod 32 on sparc
+	sll	%o2,%o1,%o2
+	or	%o3,%o2,%o3
+	st	%o3,[%o0]
+	.end
+
+! void
+! reset_bit( set, bitno ) register SET set; register int bitno;
+! {
+! 	register int word_index, bit_offset;
+! 
+! 	word_index = (unsigned)bitno / BPW;
+! 	bit_offset = (unsigned)bitno % BPW;
+! 	set[word_index] &= ~(1<<bit_offset);
+! }
+
+	.inline	_reset_bit,2
+	srl	%o1,5,%o5
+	sll	%o5,2,%o5
+	add	%o0,%o5,%o0
+	ld	[%o0],%o3
+	mov	1,%o2
+!	note shift counts are evaluated mod 32 on sparc
+	sll	%o2,%o1,%o2
+	andn	%o3,%o2,%o3
+	st	%o3,[%o0]
+	.end

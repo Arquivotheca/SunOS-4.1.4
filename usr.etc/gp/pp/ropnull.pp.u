@@ -1,0 +1,121 @@
+| "@(#)ropnull.pp.u 1.1 94/10/31 SMI"
+| Copyright 1985 by Sun Microsystems, Inc.
+
+|   Implements null to frame buffer rasterops.
+|   rsetup is called by ropnull and ropfb.
+
+#define linebytes r[9]
+#define recht	r[8]
+#define w	r[7]
+#define w2	r[6]
+#define ropmode	r[5]
+#define two	r[4]
+
+#define temp	r[2]
+#define junk	r[2]
+#define addrhi	r[1]
+#define addrlo	r[0]
+
+rnull:	;			;		cjs,go ropreg;			
+	movw d,addrlo;		fifo1->am;	cjp,f1e .;			
+	movw addrlo,y;		am->vloareg;	;				
+	movw d,addrhi;		fifo1->am;	cjp,f1e .;			
+	movw d,recht;		fifo1->am;	cjp,f1e .;			
+	movw d,color;		fifo1->am;	cjp,f1e .;			
+	movw d,w;		fifo1->am;	cjp,f1e .;			
+	movw d,nodst;		fifo1->am;	cjp,f1e .;			
+	movw d,ropmode;		fifo1->am;	cjp,f1e .;			
+	movw d,linebytes;	SWWidth->am;	;				
+	movw addrhi,y;		am->vhiareg;	;				
+	testw (w);		;		;				| switch (w)
+	decw recht;		am->brreg;	cjp,~zer rnull1;		| case 0:  w= sizey.
+	movw linebytes,acc;	0->am;		push,go;			| while (w--) { 
+	movw color,y;		am->vwdreg;	cjp,~vir .;		vmewr	| *((short*)by)= color.
+	addw addrlo,acc,addrlo;am->vloareg;	;				
+	addcw d,addrhi,addrhi;am->vhiareg;	rfct;				
+	;			;		cjp,go start;			
+
+rnull1:	xorw,s d,w,y;		1->am;		;				
+	movw recht,y;		am->brreg;	cjp,~zer rnull2;		| case 1:  while (sizey--) {
+	movw linebytes,acc;	0->am;		push,go;			
+	movw color,y;		am->vwdreg;	cjp,~vir .;		vmewr	| *((short*)by)= color.
+	;			;		;			varegs +
+	;			;		;			varegs +
+	movw color,y;		am->vwdreg;	cjp,~vir .;		vmewr	| *((short*)by)= color.
+	addw addrlo,acc,addrlo;am->vloareg;	;				
+	addcw d,addrhi,addrhi;am->vhiareg;	rfct;				| by += linebytes.
+	;			;		cjp,go start;			
+
+rnull2:	testw (nodst);		FBAllRopRegWidth->vloareg; ;			| if (nodst) cg2_setwidth (,,2,2)
+	movw FBCont,y;		am->vhiareg;	cjp,zer rnull2d;		
+	mov2nw 1,two;		RRValues->am;	;				
+	add2nw 2,d,y;		am->scrmemp;	;				| Width = RRValues + 4
+	xorw,s d,two,y;		scrmem->am;	;				
+	movw two,acc;		am->scrmem;	cjp,zer .+2;		scrmp+	
+	movw two,y;		am->vwdreg;	cjp,~vir .;		vmewr	
+	xorw,s d,two,y;		scrmem->am;	;				
+	movw two,y;		am->scrmem;	cjp,zer .+3;			
+	;			FBAllRopRegOpCnt->vloareg; ;			
+	movw acc,y;		am->vwdreg;	cjp,~vir .;		vmewr	
+	sl0w w,temp;		am->am;		;				
+	subw d,linebytes,linebytes; ;		;				
+	rsubw w,acc,w;		;		;				| w -= 2
+	;			0->am;		;				| 0 for d register for high word addition.
+| while (sizey--) {
+rn2loop: movw addrlo,y;		am->vloareg;	;				| bx= y
+	movw addrhi,y;		am->vhiareg;	;				
+	movw color,y;		am->vwdreg;	cjp,~vir .;		vmewr	| *((short*)by)= color.
+	addw addrlo,acc,addrlo; am->vloareg;	;				
+	addcw d,addrhi,addrhi; am->vhiareg;	;				
+	movw color,y;		am->vwdreg;	cjp,~vir .;		vmewr	| *((short*)by)= color.
+	decws w,temp;		;		;				
+	addw addrlo,acc,addrlo; ;		;				
+	addcw d,addrhi,addrhi; ;		cjp,neg rnvme2c;		| if (w <= 0) skip fastloop.
+	movw ropmode,acc;	;		cjs,go vropmode;		
+	decw w,temp;		am->brreg;	;				
+	movw addrlo,y;		am->vloareg;	;				| reload address registers.
+	movw addrhi,y;		am->vhiareg;	push,go;			
+
+	movw color,y;		am->vwdreg;	cjp,~vir .;		vmewr	| *((short*)by)= color.
+	addw d,addrlo,addrlo;	2->am;		;			varegs +| 
+	addcw d,addrhi,addrhi; 0->am;		rfct;			varegs +| 
+
+rnvme2c: movw d,acc;		PWRWRD->am;	;				
+	;			;		cjs,go vropmode;		
+	movw addrlo,y;		am->vloareg;	;				
+	movw addrhi,y;		am->vhiareg;	;				
+	movw color,y;		am->vwdreg;	cjp,~vir .;		vmewr	| *((short*)by)= color.
+	movw linebytes,acc;	0->am;		;				| 0 for d register for high word addition.
+	addw addrlo,acc,addrlo; am->vloareg;	;				
+	addcw d,addrhi,addrhi; am->vhiareg;	;				
+	decws recht,recht;	;		;				| sizey--
+	movw two,acc;		;		cjp,~neg rn2loop;		
+	;			;		cjp,go start;			
+
+rnull2d: movw recht,y;		am->brreg;	;				
+	movw addrlo,y;		am->vloareg;	;				
+	movw addrhi,y;		am->vhiareg;	push,go;			
+
+	movw w,acc;		;		;				
+	
+rnvme2d: movw color,y;		am->vwdreg;	cjp,~vir rnvme2d;	vmewr	
+	decws acc;		;		;			varegs +
+	;			;		cjp,~neg rnvme2d;	varegs +
+
+	movw linebytes,acc;	0->am;		;				
+	addw addrlo,acc,addrlo; am->vloareg;	;				
+	addcw d,addrhi,addrhi; am->vhiareg;	rfct;				
+
+	;			;		cjp,go start;			
+
+#undef recht
+#undef linebytes
+#undef w
+#undef w2
+#undef ropmode
+#undef two
+
+#undef addrhi
+#undef addrlo
+#undef junk
+#undef temp

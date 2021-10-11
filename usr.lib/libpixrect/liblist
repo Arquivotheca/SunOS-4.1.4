@@ -1,0 +1,112 @@
+# @(#)liblist 1.1 94/10/31 SMI
+#
+# object file ordering for libpixrect.so
+#
+# this is really the Campus-1 version
+#
+
+# common small
+pr_open.o
+pr_make.o
+pr_makefun.o
+bw2.o
+bw2_ops.o
+mem_colormap.o
+cg3.o
+cg3_ops.o
+cg3_colormap.o
+cg3_region.o
+mem.o
+mem_ops.o
+mem_region.o
+mem_getput.o
+pf_ttext.o
+mem_stencil.o
+pr_replrop.o
+
+# common large
+pf_text.o
+mem_batch.o
+pr_clip.o
+MEM_ROP_sa.o
+mem_rop.o
+mem_vec.o
+
+# less common
+pf_default.o
+pf_defdata.o
+pr_plngrp.o
+pr_polypoint.o
+mem_polypoint.o
+
+# covered by libsunwindow
+pf.o
+
+# rarely used
+pr_text.o
+mem_prs.o
+pr_reverse.o
+pr_polygon2.o
+pr_polyline.o
+pr_line.o
+pr_texpat.o
+pr_texvec.o
+pr_io.o
+pr_dblbuf.o
+
+# cg6 stuff
+# XXX order this
+cg6.o
+cg6_ops.o
+cg6_colormap.o
+cg6_region.o
+cg6_util.o
+cg6_batch.o
+cg6_getput.o
+cg6_line.o
+cg6_polygon2.o
+cg6_polyline.o
+cg6_polyline0.o
+cg6_polypoint.o
+cg6_replrop.o
+cg6_rop.o
+cg6_stencil.o
+cg6_vec.o
+cg6_vec0.o
+
+# never used
+pr_traprop.o
+
+# devices not relevant to Campus
+cg4.o
+cg4_colormap.o
+cg4_ops.o
+cg4_region.o
+
+cg2.o
+cg2_batch.o
+cg2_colormap.o
+cg2_getput.o
+cg2_ops.o
+cg2_polypoint.o
+cg2_region.o
+cg2_rop.o
+cg2_stencil.o
+cg2_vec.o
+
+gp1.o
+gp1_line.o
+gp1_loadtex.o
+gp1_ops.o
+gp1_polygon2.o
+gp1_polyline.o
+gp1_replrop.o
+GP1_ROP_sa.o
+gp1_rop.o
+gp1_shmem.o
+gp1_util.o
+gp1_vec.o
+
+cg8.o
+cg8_colormap.o
+cg8_ops.o

@@ -1,0 +1,65 @@
+| Copyright (c) 1985 by Sun Microsystems, Inc.
+| @(#)statrecip.vp.u 1.1 94/10/31 SMI
+
+|   Reciprocal and integer multiplication routines for viewing processor.
+
+|	Recip -- compute reciprocal of floating point number (IEEE single precision)
+|
+|	Input Parameters:	fpap -- Address of X, number to be reciprocated
+|				recaddr -- register containing fpreg address for Y, the reciprocal
+|				N.B.: fpap and recaddr cannot point to the same location
+|
+|	Method:	1) Initial Guess
+|		   Y0 = (2B-lambda)-X
+|			A 32-bit integer subtraction
+|			The constant 2B-lambda is looked up in a table stored in the VP Prom
+|			The table index is the 1st 11 bits of the mantissa of X
+|			See notes by W. Kahan and D. Hough
+|		2) Iteration
+|		   Y1 = Y0 + Y0 * (1.0 - X * Y0)
+|			Floating point operations
+|			The approximation Y1 is taken to be Y, i.e. only one iteration
+
+#define recaddr r[2]
+#define xlo r[1]
+#define xhi r[0]
+
+
+strecip: movw d,acc;		fpregl->am;	;		;			| get low order X
+	movb d,acc;		fpregh->am;	;		;		 	| get low 8 bits of high order X
+	rolw 5,acc,acc;		0xFFE->am;	;		;			| compute address of low order 2B-lambda
+	andw d,acc,acc;		am->vppromp;	;		;			| load address into VP Prom pointer
+	movw d,xlo;		fpregl->am;	;		;			| low order X again
+	movw,s d,xhi;		fpregh->am;	;		;			| high order X again, save sign of X
+	bclrw 15,xhi;		vpprom->am;	;		;			| compute positive X
+	incw acc,y;		am->vppromp;	;		;			| Prom address for high order 2B-lambda
+	movw recaddr,y;		am->fpdp;	;		;			| set up fpdp
+	rsubw d,xlo,xlo;	am->fpregl;	;		;			| low order 2B - lambda - X
+	rsubcw d,xhi,xhi;	vpprom->am;	cjp,neg stnegrecip; ;			| high order 2B - lambda - X
+	bclrw 15,xhi;		am->fpregh;	cjp,go strecip1; ;			| store positive reciprocal
+stnegrecip: bsetw 15,xhi;	am->fpregh;	;		;			| store negative reciprocal
+strecip1: movw recaddr,y;	am->fpbp;	;		lmode rn,ai,flow,fast;	| do iteration step in flow mode
+	mov2nw,s 0,acc;		;		;		maba,lab,hi;		| x * Y0; acc <- 1
+	movw 0,y;		am->fpregl;	;		;			| fpr[recaddr] <- low order 1.0
+	;			0x3F80->fpregh;	;		;			| fpr[recaddr] <- high order 1.0
+	sub2nw,s 0,acc;		;		cjp,~neg .;	;			| delay until unload
+	;			;		;		noflop,m,hi;		| enable unload
+	;			;		;		;
+	mov2nw,s 0,acc;		;		;		rsubr,lab,hi;		| 1.0 - (X*Y0); acc <- 1
+	movw xlo,y;		am->fpregl;	;		;			| fpr[recaddr] <- low order Y0
+	movw xhi,y;		am->fpregh;	;		;			| fpr[recaddr] <- high order Y0
+	sub2nw,s 0,acc;		;		cjp,~neg .;	;			| delay until unload
+	;			;		;		noflop,a,hi;		| enable unload
+	;			;		;		;
+	;			;		;		mabr,lab,hi;		| Y0 * (1.0-X*Y0)
+	mov2nw,s 1,acc;		;		;		;
+	sub2nw,s 0,acc;		;		cjp,~neg .;	;			| delay until unload
+	;			;		;		noflop,m,hi;		| enable unload
+	;			;		;		;
+	;			;		;		addr,lab,hi;		| Y0 + (Y0*(1.0-X*Y0))
+	mov2nw,s 1,acc;		;		;		;
+	sub2nw,s 0,acc;		;		cjp,~neg .;	;			| delay until unload
+	;			;		;		noflop,a,hi;		| enable unload
+	;			;		;		;
+	;			;		;		noflop,st,hi;		| store Y1
+	;			;		crtn,go;	;			| return

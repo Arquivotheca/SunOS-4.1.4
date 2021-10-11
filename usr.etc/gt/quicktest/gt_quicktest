@@ -1,0 +1,46 @@
+#! /bin/sh
+#set -x
+#
+# Copyright (c) 1990 by Sun Microsystems, Inc.
+# @(#)gt_quicktest 1.1 94/10/31 SMI
+#
+# Name: gt_quicktest
+#
+# Description: 
+# Executes gt/{quicktest.sv,quicktest.ow} -f load_images to exercise the
+# GT Graphics device.  Can be run anywhere and will handle symbolic links.
+# 
+# USAGE:
+#       gt_quicktest
+#
+
+if [ "`which xset | grep \"^no\"`" != "" ]; then
+	PROG=quicktest.sv
+else
+	xset -q > /dev/null 2>&1 
+	if [ $? = 0 ]; then
+	PROG=quicktest.ow
+	else
+		PROG=quicktest.sv
+	fi
+fi
+if [ -f gt/$PROG ]; then
+	cd gt
+	eval ./$PROG -f load_images < /dev/null > /dev/null &
+else
+	if [ -h $0 ]; then
+		gtdir=/usr/diag/
+	else		
+		gtdir=`echo $0|/bin/awk -F/ '{for(i=1;i<NF;i++) printf("%s/",$i)}'`
+	fi
+	[ "$gtdir" = "" ] && gtdir=./
+	if [ -f $gtdir/gt/$PROG ]; then
+		cd $gtdir/gt
+		./$PROG -f load_images < /dev/null  > /dev/null &
+	else
+		echo "$0: Could not find data directory, expecting to find ${gtdir}gt"
+		exit 1
+	fi
+fi
+
+exit 0

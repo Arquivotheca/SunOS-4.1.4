@@ -1,0 +1,65 @@
+| "@(#)statmultiply.vp.u 1.1 94/10/31 SMI"
+
+| Copyright (c) 1985 by Sun Microsystems, Inc.
+
+|   Multiplier routine.
+|   Multiplier arrives in r[2].  It should have fewer one bits than
+|   multiplicand which arrives in acc.  The result is computed and
+|   in r[0,1] with the low order bits in r[0].  The algorithm is a
+|   simple shift-add.  It was chosen because the majority of
+|   multipliers will not have many bits.
+
+#define Mulcand	acc
+#define Multiplier	r[2]
+#define LoRslt	r[0]
+#define HiRslt	r[1]
+
+
+#define HiBit	r[3]
+#define Mask	r[3]	/* Re-use HiBit register. */
+#define Sign	r[4]
+
+
+stmultiply: xorw,s Multiplier, Mulcand, y; ;	;		;			| 
+	movw 0, Sign;		;		cjp, ~neg stmul; ;			| 
+	incw 0, Sign;		;		;		;			| 
+stmul:	movw 0, LoRslt;		;		;		;			| Clear.
+	movw,s Multiplier, y;	=stmul2->brreg;	;		;			| 
+	movw 0, HiRslt;		;		cjp, ~neg stmul1; ;			| 
+	negw Multiplier, Multiplier; ;		;		;			| 
+stmul1:	movw,s Mulcand, y;	;		crtn, zer;	;			| 
+	priw Multiplier, 0, HiBit; 16->am;	cjp, ~neg;	;			| Find highest bit and test Multiplier.
+	;			;		;		;			| NOP ASSEMBLER BUG WORKAROUND
+	negw Mulcand, Mulcand;	;		;		;			| 
+stmul2:	rsubw d, HiBit, HiBit;	am->brreg;	crtn, zer;	;			| Generate number of times for loop.
+	rolw,s 15, Multiplier, Multiplier; ;	push, go;	;			| Shift Multiplier. Set carry 0.
+| Ld cntr.  Push mulloop on stack.
+
+	;			;		cjp, ~neg stmulshift; ;			| If bit 15 zero skip addition.
+	addw,s HiRslt, Mulcand, HiRslt; ;	;		;			| Add Multiplicand to result.
+stmulshift: srcw HiRslt, HiRslt; ;		;		;			| Shift result.
+	srqw LoRslt, LoRslt;	;		;		;			| 
+	rolw,s 15, Multiplier, Multiplier; ;	rfct;		;			| Shift Multiplier. Set carry 0.
+
+	incw HiBit, y;		am->nreg;	;		;			| 
+	movw 0, Mask;		;		;		;			| 
+	bsetw n, Mask;		;		;		;			| 
+	sub2nw 0, Mask, Mask;	am->am;		;		;			| 
+	rolw n, HiRslt, HiRslt;	;		;		;			| Rotate right 1 bit.
+	movw HiRslt, acc;	;		;		;			| 
+	andw d, HiRslt, HiRslt;	;		;		;			| Mask is in d.
+	movw LoRslt, y;		am->am;		;		;			| Save LoRslt in d.
+	romw n, d, acc, Mask;	;		;		;			| 
+	movw,s Sign, y;		;		;		;			| 
+	movw acc, LoRslt;	;		crtn, zer;	;			| 
+	negw,s LoRslt, LoRslt;	;		;		;			| 
+	compw HiRslt, HiRslt;	;		crtn, ~cry;	;			| 
+	incw HiRslt, HiRslt;	;		crtn, go;	;			| 
+
+#undef Mask
+#undef HiBit
+
+#ifndef SWIDTH
+#define SWIDTH 1152
+#endif
+

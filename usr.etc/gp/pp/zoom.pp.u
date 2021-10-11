@@ -1,0 +1,18 @@
+| "@(#)zoom.pp.u 1.1 94/10/31 SMI"
+
+| Copyright 1985 by Sun Microsystems, Inc.
+
+zoom:	movw d, acc;		fifo1->am;	cjp, f1e zoom;			| 
+	;			0x70->vhiareg;	;				| 
+	;			0xB000->vloareg;;				| Word Pan.
+zoom0a:	movw acc, y;		am->vwdreg;	cjp, ~vir zoom0a;	vmewr	| 
+zoom1:	movw d, acc;		fifo1->am;	cjp, f1e zoom1;			| 
+	;			0xC000->vloareg;;				| Zoom and Line Offset.
+zoom0b:	movw acc, y;		am->vwdreg;	cjp, ~vir zoom0b;	vmewr	| 
+zoom2:	movw d, acc;		fifo1->am;	cjp, f1e zoom2;			| 
+	;			0xD000->vloareg;;				| Pixel Pan.
+zoom0c:	movw acc, y;		am->vwdreg;	cjp, ~vir zoom0c;	vmewr	| 
+zoom3:	movw d, acc;		fifo1->am;	cjp, f1e zoom3;			| 
+	;			0xE000->vloareg;;				| Variable Zoom.
+zoom0d:	movw acc, y;		am->vwdreg;	cjp, ~vir zoom0d;	vmewr	| 
+	;			;		cjp, go start;			| 

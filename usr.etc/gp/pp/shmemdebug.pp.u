@@ -1,0 +1,246 @@
+| "@(#)shmemdebug.pp.u 1.1 94/10/31 SMI"
+| Copyright 1988 by Sun Microsystems, Inc.
+
+| Written by Stuart Levy
+
+#define addrlo		r[0]
+#define addrhi		r[1]
+
+#define SHADDRHI	0x21
+#define SHADDRLO	0xF800		/* context 7 */
+
+#define TEST1
+#undef TEST2
+#undef TEST3
+#undef TEST4
+
+
+#ifdef TEST1
+zbshtest: ;			SHADDRHI->vhiareg; ;				| 
+	;			SHADDRLO->vloareg; ;				| 
+	;			;		cjp,~vir .;		vmerd	| 
+	;			vrdreg->am;	cjp,~vir .;			| 
+	incw d,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 
+	movw color,y;		am->vwdreg;	;				| 
+	movw addrlo,y;		am->vloareg;	;				| 
+	movw addrhi,y;		am->vhiareg;	crtn,go;			| 
+	
+
+zbshtest_byte: ;		SHADDRHI->vhiareg; ;				| 
+	;			SHADDRLO->vloareg; ;				| 
+	;			;		cjp,~vir .;			| 
+	;			VWord->vctlreg;	;				| word mode
+	;			;		cjp,~vir .;		vmerd	| 
+	;			vrdreg->am;	cjp,~vir .;			| 
+	incw d,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 
+	movw color,y;		am->vwdreg;	;				| 
+	movw addrlo,y;		am->vloareg;	cjp,~vir .;			| 
+	;			VByte->vctlreg;	;				| restore to byte mode
+	movw addrhi,y;		am->vhiareg;	crtn,go;			| 
+#endif TEST1
+	
+
+#ifdef TEST2
+|   Here we initialize the debug address, and write the count as the first argument for the vector.
+zbshwrtinit: ;			SHADDRHI->vhiareg; ;				| 
+	;			SHADDRLO->vloareg; ;	
+	;			;		cjp,~vir .;			| 
+	;			VWord->vctlreg;	;				| word mode
+	mov2nw 2,y;		am->vwdreg;	cjp,~vir .;		vmewr	| write initial offset (addr + 1)
+	;			;		;			varegs+	| increment address (word mode adds 2)
+	movw count,y;		am->vwdreg;	cjp,~vir .;		vmewr	| write count
+	movw addrlo,y;		am->vloareg;	;				| 
+	movw addrhi,y;		am->vhiareg;	cjp,~vir .;			| restore address
+	;			VByte->vctlreg;	crtn,go;			| 
+	
+	
+zbshwrt: ;			SHADDRHI->vhiareg; ;				| 
+	;			SHADDRLO->vloareg; ;				| 
+	;			;		cjp,~vir .;			| 
+	;			VWord->vctlreg;	;				| 
+	;			;		cjp,~vir .;		vmerd	| read offset from this address where to write
+	;			vrdreg->am;	cjp,~vir .;			| 
+	add2nw 1,d,y;		am->vwdreg;	cjp,~vir .;		vmewr	| offset += 2 (vme is byte addressable)
+	addw d,SHADDRLO,y;	;		;				| address = SHADDRLO + offset
+	IMM;			am->vloareg;	;				| 
+	movw addrlo,y;		am->vwdreg;	cjp,~vir .;		vmewr	| write address
+	movw addrlo,y;		am->vloareg;	cjp,~vir .;			| restore original address
+	;			VByte->vctlreg;	;				| 
+	movw addrhi,y;		am->vhiareg;	crtn,go;			| 
+#endif TEST2
+
+
+#ifdef TEST4
+vec3test:
+	movw d,depth;		0x8000->am;	;				| 
+	movw d,x0;		10->am;		;				| 
+	movw d,y0;		200->am;	;				| 
+	movw d,count;		20->am;		;				| 
+	movw y0,Multiplier;	;		cjs,go MulSWid;			| compute gbuffer address
+	movw x0,acc;		;		;				| 
+	addw LoRslt,acc,glo;	;		;				| 
+	addcw d,HiRslt,ghi;	0->am;		push,go;			| 
+	;			0x6000->gbhiptr; loop,gbr;			| set normal mode
+	movw ghi,y;		am->gbhiptr;	cjp,~gbr .;			| load g buffer address pointers
+	movw glo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| initiate read
+	
+	movw count,y;		am->brreg;	;				| set up width as count
+	;			;		ldct;				| 
+v3test:	xorw,s d,depth,y;	gbrdreg->am;	cjp,~gbr .;			| compare depth values
+	;			;		cjp,~zer v3badcmd;		| exit if pixel in back
+	movw depth,y;		am->gbwdreg;	cjp,~gbr .;			| write value
+	addw d,glo,glo;		IncXY->am;	;				| increment low pointer
+	;			0->am;		;				| 
+	addcw d,ghi,ghi;	am->gbhiptr;	cjp,~gbr .;			| update high pointer
+	movw glo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| read next location
+	;			;		rpct v3test;			| loop until done
+	;			;		crtn,go;			| 
+v3badcmd: ;			;		jmap badcmd;			| 
+#endif TEST4
+
+|   These routines were used for the muldbl and vec3clip routines.
+#ifdef TEST5
+
+befmul: ;			SHADDRHI->vhiareg; ;				| 
+	;			SHADDRLO->vloareg; ;				| 
+	;			;		cjp,~vir .;			| 
+	;			GPVWord->vctlreg; ;				| 
+	movw acc,y;		am->vwdreg;	cjp,~vir .;		vmewr	| clip value
+	;			;		;			varegs+	| 
+	;			;		;			varegs+	| 
+	movw advhi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| advance value high
+	;			;		;			varegs+	| 
+	;			;		;			varegs+	| 
+	movw advlo,y;		am->vwdreg;	cjp,~vir .;		vmewr	| advance value low
+	;			;		;			varegs+	| 
+	;			;		crtn,go;		varegs+	| 
+
+aftmul:	movw r[0],y;		am->vwdreg;	cjp,~vir .;		vmewr	| LoRslt
+	;			;		;			varegs+	| 
+	;			;		;			varegs+	| 
+	movw r[1],y;		am->vwdreg;	cjp,~vir .;		vmewr	| HiRslt
+	movw glo,y;		am->vloareg;	crtn,go;			| 
+#endif TEST5
+
+#ifdef TEST6
+tstmul:	;			SHADDRHI->vhiareg; ;				| 
+	;			SHADDRLO->vloareg; ;				| 
+	;			;		cjp,~vir .;			| 
+	;			GPVWord->vctlreg; ;				| 
+	movw d,acc;		20->am;		;				| clip value
+	movw d,advhi;		0->am;		;				| high dc/dmaj
+	movw d,advlo;		24238->am;	;				| low dc/dmaj	.37
+	;			;		cjs,go muldbl;			| 
+	movw r[0],y;		am->vwdreg;	cjp,~vir .;		vmewr	| write high part of result
+	;			;		;			varegs+	| 
+	;			;		;			varegs+	| 
+	movw r[1],y;		am->vwdreg;	cjp,~vir .;		vmewr	| write low part of result
+	;			;		;			varegs+	| 
+	;			;		;			varegs+	| 
+	
+	movw d,acc;		20->am;		;				| clip value
+	movw d,advhi;		0->am;		;				| high dc/dmaj
+	movw d,advlo;		16384->am;	;				| low dc/dmaj	.25
+	;			;		cjs,go muldbl;			| 
+
+	movw r[0],y;		am->vwdreg;	cjp,~vir .;		vmewr	| write high part of result
+	;			;		;			varegs+	| 
+	;			;		;			varegs+	| 
+	movw r[1],y;		am->vwdreg;	cjp,~vir .;		vmewr	| write low part of result
+	;			;		;			varegs+	| 
+	;			;		;			varegs+	| 
+
+	movw d,acc;		20->am;		;				| clip value
+	movw d,advhi;		0->am;		;				| high dc/dmaj
+	movw d,advlo;		47841->am;	;				| low dc/dmaj	.73
+	;			;		cjs,go muldbl;			| 
+	movw r[0],y;		am->vwdreg;	cjp,~vir .;		vmewr	| write high part of result
+	;			;		;			varegs+	| 
+	;			;		;			varegs+	| 
+	movw r[1],y;		am->vwdreg;	cjp,~vir .;		vmewr	| write low part of result
+	;			;		;			varegs+	| 
+	;			;		;			varegs+	| 
+	;			;		crtn,go;			| 
+#endif TEST6	
+	
+#ifdef TEST7
+tstwrt:	;			SHADDRHI->vhiareg; ;				| 
+	;			SHADDRLO->vloareg; ;				| 
+	;			;		cjp,~vir .;			| 
+	;			GPVWord->vctlreg; ;		
+	;			;		cjp,~vir .;			| 
+	mov2nw 0,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 
+	;			;		;			varegs +| 
+	;			;		;			varegs +| 
+	mov2nw 1,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 
+	;			;		;			varegs +| 
+	;			;		;			varegs +| 
+	mov2nw 2,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 
+	;			;		;			varegs +| 
+	;			;		;			varegs +| 
+	mov2nw 3,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 
+	;			;		crtn,go;			| 
+#endif TEST7	
+
+		
+
+#ifdef TEST8
+
+tstclip: ;			SHADDRHI->vhiareg; ;				| 
+	;			SHADDRLO2->vloareg; ;				| 
+	;			;		cjp,~vir .;			| 
+	;			GPVWord->vctlreg; ;				| 
+	mov2nw 3,y;		am->vwdreg;	cjp,~vir .;		vmewr	| clip value
+	;			;		crtn,go;			| 
+	
+tstcol6: ;			SHADDRHI->vhiareg; ;				| 
+	;			SHADDRLO->vloareg; ;				| 
+	;			;		cjp,~vir .;			| 
+	;			GPVWord->vctlreg; ;				| 
+	movw startx,y;		am->vwdreg;	cjp,~vir .;		vmewr	| startx
+	;			;		;			varegs+	| 
+	;			;		;			varegs+	| 
+	movw r[6],y;		am->vwdreg;	cjp,~vir .;		vmewr	| starty
+	;			;		;			varegs+	| 
+	;			;		;			varegs+	| 
+	movw offsetx,y;		am->vwdreg;	cjp,~vir .;		vmewr	| offsetx
+	;			;		;			varegs+	| 
+	;			SavePts->scrmemp; ;			varegs+	| 
+	movw r[20],y;		am->vwdreg;	cjp,~vir .;		vmewr	| offsety
+	;			;		;			varegs+	| 
+	;			;		ldct 3;			varegs+	| 
+	;			scrmem->vwdreg;	cjp,~vir .;		vmewr	| fetch original x0, y0, x1, y1
+	;			;		;			varegs+	| 
+	;			;		;			varegs+	| 
+	;			;		rpct .-3;		scrmp+	| 
+	movw 0,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 0
+	;			;		;			varegs+	| 
+	;			;		;			varegs+	| 
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| new color
+	;			;		;			varegs+	| 
+	;			;		;			varegs+	| 
+	movw clo,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 
+	;			;		;			varegs+	| 
+	;			;		;			varegs+	| 
+	movw advhi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| clipped value
+	;			;		;			varegs+	| 
+	;			;		;			varegs+	| 
+	movw advlo,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 
+	;			;		;			varegs+	| 
+	;			;		ldct 3;			varegs+	| 
+	;			DCSaveC->scrmemp; ;				| 
+	;			scrmem->am;	;			scrmp+	| 
+	movw d,y;		am->vwdreg;	cjp,~vir .;		vmewr	| initial color and dc/dmaj
+	;			;		;			varegs+	| 
+	;			;		rpct .-3;		varegs+	| 
+	;			;		crtn,go;			| 
+#endif TEST8
+
+
+#undef SHADDRHI
+#undef  SHADDRLO
+#undef  SHADDRLO2
+
+#undef addrlo		
+#undef addrhi		
+

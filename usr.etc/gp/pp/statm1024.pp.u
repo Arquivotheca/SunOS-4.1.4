@@ -1,0 +1,22 @@
+| "@(#)statm1024.pp.u 1.1 94/10/31 SMI"
+
+| Copyright 1988 by Sun Microsystems, Inc.
+
+|   Multiply by 1024.  Number comes in r[2] (Multiplier as in mul.pp.u)
+|   and goes out in r[0] (low) and r[1] (high).
+
+#define data r[0]
+#define high r[1]
+
+|   y * 1024 = y << 10
+stMulSWid:rolw 10, Multiplier, high;;		;				| (y << 3 + y) << 7.
+	andw d, high, data;	0xfc00->am;	;				| 
+	andw d, high, high;	0x3ff->am;	crtn, go;			| 
+
+|   y * 128 = y << 7
+stMulSWWid:rolw 7, Multiplier, high;;		;				| (y << 3 + y) << 7.
+	andw d, high, data;	0xff80->am;	;				| 
+	andw d, high, high;	0x7f->am;	crtn, go;			| 
+
+#undef data
+#undef high

@@ -1,0 +1,698 @@
+| "@(#)3Dfp.vp.u 1.1 94/10/31 SMI"
+| Copyright 1986 by Sun Microsystems, Inc.
+
+| data pointers for 3-D routines
+
+#define zbdcln r[25]
+#define resltflg r[24]
+#define xf3ptr r[23]
+#define mvlist r[16]
+
+#define inptr r[15]
+#define outptr r[14]
+#define clipplanes r[11]
+#define countr r[10]
+#define matrixptr r[9]
+#define savoutcode1 r[8]
+#define savoutcode0 r[7]
+#define parallel r[5]
+#define vwpsclptr r[4]
+#define recaddr r[2]
+#define count r[0]
+#define tmp0 r[0]
+#define tmp1 r[1]
+
+|   This utility checks if there is a gb present, and it is linked to this frame buffer.  Returns a value
+|   of '1' if all ok, and '0' if we can't do 3d.
+check3d: ;			;		cjs,go gb_board_inq; ;			| check GB status  
+	xorw,s fbindx,acc,y;	;		cjp,neg .+2;	;			| 2D if there is no GB
+	incw,s 0,y;		;		crtn,zer;	;			| return 1 if ok
+	movw,s 0,y;		;		crtn,go;	;			| return 0 if fails
+
+
+
+|   Floating point register addresses for xf_line_flt_3d & xf_line_int_3d
+|   	store pt1	stored at fpr[64] (fpdp=64)
+|   	store pt2	stored at fpr[68] (fpdp=68)
+|	xform pt1	inptr=64, outptr = 72
+|	xform pt2	inptr=68, outptr = 76
+|   	clip vector	inptr=72, outptr = x
+|	vwp pts 1 & 2	inptr=72, outptr = 80	
+|   	store xf pt2	stored at fpr[88] (this is done before we clip)
+
+#define move	0	
+#define dcue 	0
+	
+
+|   xfln3dinit sets up the texture attributes on the pp, loads the 3d matrix and viewport scaling parameters,
+|   and loads 1.0 for w2 before returning.  It is called by xflineflt3d, and xflineint3d. 
+xfln3dinit:
+	addw frameptr,VWPXSCL_FRMOFF,y; ;	;		;			| move viewport parameters (x,y & z) to fpr[32]
+	IMM;			am->shmemp;	ldct 5;		;			| must do before calling dcinit
+	mov2nw 5,y;		am->fpdp;	cjs,go shm_to_fpr; ;			| x,y & z parameters are moved
+#ifdef GPPLUS
+	addw frameptr,HIDDENSURF_FRMOFF,y; ;	;		;			| prepare zbdcln
+	IMM;			am->shmemp;	cjs,go check3d;	;			| will shift offset up 7 bits for z-buffering
+	movw d,zbdcln;		shmem->am;	cjp,~zer .+2;	;			| word is now zb.hs
+	movw 0,zbdcln;		;		;		;			| ignore zbline attribute if no gb
+	bclrw dcue,zbdcln;	;		cjs,go zbshiftoff; ;			| clear depth cueing bit, make word zb.0
+	addw frameptr,DEPTHCUE_FRMOFF,y; ;	;		;			| 
+	IMM;			am->shmemp;	;		;			| 
+	orw d,zbdcln,zbdcln;	shmem->am;	push,~go;	;			| or in depth cueing bit
+	testw (d);		PPSETZBLINE->fifo1; loop,f1nf;	;			| send zbdc status to pp
+	movw zbdcln,y;		am->fifo1;	cjp,f1f .;	;			| 
+	;			;		cjs,~zer dcinit_jmap; ;			| initialize depth cueing params if enabaled
+#endif GPPLUS	
+	addw frameptr,TEX_FRMOFF,y; ;		;		;			| 
+	IMM;			am->shmemp;	cjs, go tvec_attr; ;			| Texture addr->scrmemp.
+	movw matrixptr,y;	am->shmemp;	ldct 15;	;			| 
+	mov2nw 4,y;		am->fpdp;	cjs,go shm_to_fpr; ;			| move matrix to fpr[16]
+	;			71->fpdp;	;		;			| movw w2=1.0 to fpr[71] (only done once)
+	;			0x3F80->fpregh;	;		;			| 
+	;			0->fpregl;	;		;			| 
+	movw cmdptr,y;		am->shmemp;	ldct 2;		;			| 
+	movw,s d,mvlist;	shmem->am;	crtn, go;	;		shp+	| pull first mvlist element & return.
+
+#ifdef GPPLUS
+dcinit_jmap:
+	;			;		jmap dcinit;	;			| jmap to dcinit on other bank
+dcinit_ret: ;			;		crtn,go;	;			| return to line initialization
+#endif GPPLUS
+
+
+|	incw cmdptr,cmdptr;	;		jmap XF_LINE_FLT_3D;			| cmdptr points to first element of mvlist		
+XF_LINE_FLT_3D: 
+	;			;		cjs,go xfln3dinit; ;			| 
+xf1stpt: mov2nw 6,inptr;	am->fpdp;	cjs,go shm_to_fpr; ;			| inptr=64, move pt1 x,y,z to here
+	addw d,cmdptr,cmdptr;	7->am;		;		;			| cmdptr += 7
+#ifndef GPPLUS
+	;			;		cjp,neg getcmd; ;			| return if was last pt
+#else GPPLUS
+	;			;		cjp,neg pickup; ;			| return if was last pt
+#endif GPPLUS
+	btstw,s move,d;		shmem->am;	ldct 2;		;		shp+	| mvlist for second point
+	movw,s d,mvlist;	;		cjp,~zer xf1stpt; ;			| jump if 2nd point is a move.
+	add2nw 3,inptr,outptr;	0x3F80->fpregh;	;		;			| outptr=72, want xf pt1 x,y,z,w here
+	movw 0,y;		am->fpregl;	;		;			| w1 = 1.0 at fpr[67]
+	mov2nw 4,y;		am->fpap;	cjs,go xf3;	;			| matrix ptr in fpap; xform 1st point
+
+	add2nw 3,inptr;		;		;		;			| inptr = 72
+	add2nw 3,outptr;	;		;		;			| outptr = 80
+xf2ndpt: ;			16->fpap;	;		;			| move pt2 x,y,z coords to fpr[68]
+	sub2nw 2,inptr;		am->fpdp;	cjs,go shm_to_fpr; ;			| inptr = 68, fetch pt2 x,y,z & store here
+	sub2nw 2,outptr;	;		cjs,go xf3;	;			| outptr = 76, want xf 2nd pt here
+#ifndef GPPLUS
+	;			88->fpdp;	;		;			| store xformed, unclipped pt2 at fpr[88]
+#else GPPLUS
+	incw pkcntlo,pkcntlo;	88->fpdp;	;		;			| store xformed, unclipped pt2 at fpr[88]
+	addcw d,pkcnthi,pkcnthi; 0->am;		;		;			| add carry to high word
+#endif GPPLUS	
+	mov2nw 2,count;		76->fpap;	;		;			| xformed pt2 is currently at fpr[76]
+xfstpt2: sub2nw,s 0,count;	fpregh->fpregh;	;		;			| 
+	movw,s clipplanes,y;	fpregl->fpregl;	cjp,~zer xfstpt2; ;		adp+	| increment a & d pointers, loop till done
+	add2nw,s 2,inptr;	am->fpap;	cjs,~zer clpvec3;;			| inptr = 72 (xf 1st pt.) clip vector if clipplanes!=0;
+											| also if no clip, force cc to ~zer so vec is drawn
+	add2nw 2,outptr;	;		cjs,~zer vwpsndvec3_xy;;		| outptr = 80.  if visible, scale to viewport, cnvrt to
+											| int, & xmit to PP
+	movw,s mvlist,y;	7->am;		;		;			| test if just sent last vector
+#ifndef GPPLUS
+	addw d,cmdptr,cmdptr;	am->shmemp;	cjp,neg getcmd;	;			| cmdptr += 7 and exit if was last vector
+#else GPPLUS
+	addw d,cmdptr,cmdptr;	am->shmemp;	cjp,neg pickup;	;			| cmdptr += 7 and exit if was last vector
+#endif GPPLUS
+	movw d,mvlist;		shmem->am;	ldct 2;		;		shp+	| fetch mvlist for next point
+	btstw,s move,mvlist;	88->fpap;	;		;			| copy xf pt2 to xf pt1 area
+	mov2nw 2,count;		72->fpdp;	;		;			| 
+	movw,s mvlist,y;	;		cjp,~zer xf1stpt; ;			| Will check if last point if jump.
+	sub2nw,s 0,count;	fpregh->fpregh;	;		;			| jump if 2nd point is a movw
+xfswap:	;			fpregl->fpregl;	cjp,zer xf2ndpt; ;		adp+	| increment a & d pointers
+	sub2nw,s 0,count;	fpregh->fpregh;	cjp,go xfswap;	;			| loop
+
+
+
+|	incw cmdptr,cmdptr;	;		jmap XF_LINE_INT_3D;			| cmdptr points to first element of mvlist			
+XF_LINE_INT_3D: 
+	;			;		cjs,go xfln3dinit; ;			| 
+xf1stpti: mov2nw 6,inptr;	am->fpdp;	cjs,go shm_to_fpr; ;			| inptr=64, move pt1 x,y,z to here
+	addw d,cmdptr,cmdptr;	7->am;		;		;			| cmdptr += 7
+#ifndef GPPLUS
+	;			;		cjp,neg getcmd; ;			| return if was last pt
+#else GPPLUS
+	;			;		cjp,neg pickup; ;			| return if was last pt
+#endif GPPLUS
+	btstw,s move,d;		shmem->am;	ldct 2;		;		shp+	| mvlist for second point
+	movw,s d,mvlist;	;		cjp,~zer xf1stpti; ;			| jump if 2nd point is a move.
+	add2nw 3,inptr,outptr;	0x3F80->fpregh;	;		;			| outptr=72, want xf pt1 x,y,z,w here
+	movw 0,y;		am->fpregl;	;		;			| w1 = 1.0 at fpr[67]
+	mov2nw 4,y;		am->fpap;	cjs,go xfint3; ;			| matrix ptr in fpap; convert to int & xform 1st point
+
+	add2nw 3,inptr;		;		;		;			| inptr = 72
+	add2nw 3,outptr;	;		;		;			| outptr = 80
+xf2ndpti: ;			16->fpap;	;		;			| move pt2 x,y,z coords to fpr[68]
+	sub2nw 2,inptr;		am->fpdp;	cjs,go shm_to_fpr; ;			| inptr = 68, fetch pt2 x,y,z & store here
+	sub2nw 2,outptr;	;		cjs,go xfint3; ;			| outptr = 76, 2nd pt->int & xform to here
+#ifndef GPPLUS
+	;			88->fpdp;	;		;			| store xformed, unclipped pt2 at fpr[88]
+#else GPPLUS
+	incw,s pkcntlo,pkcntlo;	88->fpdp;	;		;			| store xformed, unclipped pt2 at fpr[88]
+	addcw d,pkcnthi,pkcnthi; 0->am;		;		;			| add carry to high word
+#endif GPPLUS
+	mov2nw 2,count;		76->fpap;	;		;			| xformed pt2 is currently at fpr[76]
+xfstpt2i: sub2nw,s 0,count;	fpregh->fpregh;	;		;			| 
+	movw,s clipplanes,y;	fpregl->fpregl;	cjp,~zer xfstpt2i; ;		adp+	| increment a & d pointers, loop till done
+	add2nw,s 2,inptr;	am->fpap;	cjs,~zer clpvec3;;			| inptr = 72 (xf 1st pt.) clip vector if clipplanes!=0;
+											| also if no clip, force cc to ~zer so vec is drawn
+	add2nw 2,outptr;	;		cjs,~zer vwpsndvec3_xy;;		| outptr = 80.  if visible, scale to viewport, cnvrt to
+											| int, & xmit to PP
+	movw,s mvlist,y;	7->am;		;		;			| test if just sent last vector
+#ifndef GPPLUS
+	addw d,cmdptr,cmdptr;	am->shmemp;	cjp,neg getcmd;	;			| cmdptr += 7 and exit if was last vector
+#else GPPLUS
+	addw d,cmdptr,cmdptr;	am->shmemp;	cjp,neg pickup;	;			| cmdptr += 7 and exit if was last vector
+#endif GPPLUS
+	movw d,mvlist;		shmem->am;	ldct 2;		;		shp+	| fetch mvlist for next point
+	btstw,s move,mvlist;	88->fpap;	;		;			| copy xf pt2 to xf pt1 area
+	mov2nw 2,count;		72->fpdp;	;		;			| 
+	movw,s mvlist,y;	;		cjp,~zer xf1stpti; ;			| Will check if last point if jump.
+	sub2nw,s 0,count;	fpregh->fpregh;	;		;			| jump if 2nd point is a movw
+xfswapi: ;			fpregl->fpregl;	cjp,zer xf2ndpti; ;		adp+	| increment a & d pointers
+	sub2nw,s 0,count;	fpregh->fpregh;	cjp,go xfswapi; ;			| loop
+
+#undef move	
+
+
+|   xfvec3dinit is called by xfvec_3d and corendcvec_3d to perform initialization.
+xfvec3dinit:
+	movw frameptr,y;	am->shmemp;	cjs,go vec_attr; ;			 
+	movw matrixptr,y;	am->shmemp;	ldct 15;	;
+	mov2nw 4,y;		am->fpdp;	cjs,go shm_to_fpr;;			| move matrix to fpr[16]
+#ifndef GPPLUS
+	addw d,frameptr,acc;	VWPXSCL_FRMOFF->am; ;		;			| 
+#else
+	addw d,frameptr,acc;	VWPXSCL_FRMOFF->am; push,~go;	;			| 
+	;			PPSETZBLINE->fifo1; loop,f1nf;	;			| 
+	movw 0,zbdcln;		am->fifo1;	cjp,f1f .;	;			| disable zbuffering and depth cueing for line
+	;			PPSETPICKMODE->am; ;		;			| disable picking for old commands
+	movw d,y;		am->fifo1;	cjp,f1f .;	;			| 
+	movw 0,y;		am->fifo1;	cjp,f1f .;	;			| 
+#endif GPPLUS	
+	movw acc,y;		am->shmemp;	ldct 5;		;			| move viewport parameters to fpr[32]
+	mov2nw 5,y;		am->fpdp;	cjp,go shm_to_fpr; ;			| x,y & z parameters
+
+
+|	negw d,countr;		shmem->am;	jmap XFVEC_3D;	;
+XFVEC_3D: ;			;		cjs,go xfvec3dinit; ;			| initialization for old format opers.
+	add2nw 1,cmdptr;	am->shmemp;	ldct 2;		;
+nxtvec3: mov2nw 6,inptr;	am->fpdp;	cjs,go shm_to_fpr;;			| move pt1 x,y,z coords to fpr[64]
+	add2nw 2,cmdptr;	0x3F80->fpregh;	;		;			| w1 = 1.0, cmdptr += 4
+	movw 0,y;		am->fpregl;	ldct 2;		;		dp+	| ldct 2 into 2910 counter
+	movw,s clipplanes,y;	;		cjs,go shm_to_fpr;;			| move pt2 x,y,z coords to fpr[68]
+											| clipplanes==0? (xf3 doesn't affect cc's)
+	add2nw 3,inptr,outptr;	0x3F80->fpregh;	;		;			| want transformed endpoints at fpr[72]
+	movw 0,y;		am->fpregl;	;		;			| w2 = 1.0
+	mov2nw 4,y;		am->fpap;	cjs,go xf3;	;			| matrix ptr in fpap; xform 1st point
+	add2nw 2,inptr;		16->fpap;	;		;
+	add2nw 2,outptr;	;		cjs,go xf3;	;			| transform 2nd point
+	add2nw,s 2,inptr;	am->fpap;	cjs,~zer clpvec3;;			| clip vector if clipplanes!=0; also if no
+											| clip, force cc to ~zer so vec is drawn
+	add2nw 2,outptr;	;		cjs,~zer vwpsndvec3_xy;;		| if visible, scale to viewport, cnvrt to
+											| int, & xmit to PP
+	incw,s countr,countr;	;		ldct 2;		;			| reload 2910 R reg; incr vec loop cntr
+	add2nw 3,cmdptr;	am->shmemp;	cjp,~zer nxtvec3;;			| cmdptr += 8 and loop if more vectors
+	;			;		jmap getcmd;	;
+
+
+
+|	negw d,countr;		shmem->am;	jmap CORENDCVEC_3D;;
+CORENDCVEC_3D:
+	;			;		cjs,go xfvec3dinit; ;			| initialization for old format opers.
+	add2nw 1,cmdptr;	am->shmemp;	ldct 2;		;
+cnxtvec3: mov2nw 6,inptr;	am->fpdp;	cjs,go shm_to_fpr;;			| move pt1 x,y,z coords to fpr[64]
+	add2nw 2,cmdptr;	0x3F80->fpregh;	;		;			| w1 = 1.0, cmdptr += 4
+	movw 0,y;		am->fpregl;	ldct 2;		;		dp+	| ldct 2 into 2910 counter
+	movw,s clipplanes,y;	;		cjs,go shm_to_fpr;;			| move pt2 x,y,z coords to fpr[68]
+											| clipplanes==0? (xf3 doesn't affect cc's)
+	add2nw 3,inptr,outptr;	0x3F80->fpregh;	;		;			| want transformed endpoints at fpr[72]
+	movw 0,y;		am->fpregl;	cjs,go ndcflt3;	;			| w2 = 1.0; convert xyz's to float
+	mov2nw 4,y;		am->fpap;	cjs,go xf3;	;			| matrix ptr in fpap; xform 1st point
+	add2nw 2,inptr;		16->fpap;	;		;
+	add2nw 2,outptr;	;		cjs,go xf3;	;			| transform 2nd point
+	add2nw,s 2,inptr;	am->fpap;	cjs,~zer clpvec3;;			| clip vector if clipplanes!=0; also if no
+											| clip, force cc to ~zer so vec is drawn
+	add2nw 2,outptr;	;		cjs,~zer vwpsndvec3_xy;;		| if visible, scale to viewport, cnvrt to
+											| int, & xmit to PP
+
+	incw,s countr,countr;	;		ldct 2;		;			| reload 2910 R reg; incr vec loop cntr
+	add2nw 3,cmdptr;	am->shmemp;	cjp,~zer cnxtvec3;;			| cmdptr += 8 and loop if more vectors
+	;			;		jmap getcmd;	;
+
+
+
+ndcflt3: movw inptr,y;		am->fpap;	;		lmode rn,ai,pipe,fast;	| cnvrt 2 xyz's starting at inptr to float
+	;			;		;		floata,la,hi;		| x0
+	;			;		;		;		ap+
+	;			;		;		floata,la,hi;		| y0
+	;			;		;		;		ap+
+	addw inptr,4,acc;	;		;		floata,la,hi;		| z0
+	IMM;			am->fpap;	;		;
+	;			;		;		floata,la,hi;		| x1
+	;			;		;		;		ap+
+	mov2nw 0,y;		am->brreg;	;		floata,la,a,hi;		| y1
+	movw inptr,y;		am->fpdp;	push,go;	;		ap+
+	;			;		;		floata,la,a,st,hi;	| z1; store x0' & y0'
+	;			;		rfct;		;		dp+
+	;			;		;		pa,a,st,hi;		| store z0
+	movw acc,y;		am->fpdp;	push,go;	;
+	;			;		;		pa,a,st,hi;		| store x1 and y1
+	;			;		rfct;		;		dp+
+	;			;		;		noflop,st,hi;		| store z1
+	;			;		crtn,go;	;			| return
+
+
+
+|	negw d,countr;		shmem->am;	jmap PROC_LINE_INT_3D;;
+PROC_LINE_INT_3D:
+	movw d,xf3ptr;		=xfint3->am;	;		;			| set ptr to fixtofloat routine
+	;			;		cjp,~zer cwdvec3; ;			| and fall through to xf3. otherwise
+											| use regular float routine
+proc3_ret: add2nw 1,cmdptr;	am->shmemp;	jmap getcmd2;	;			| return if nvecs == 0
+
+
+|	negw,s d,countr;	shmem->am;	jmap PROC_LINE_FLT_3D;;
+PROC_LINE_FLT_3D:
+	movw d,xf3ptr;		=xf3->am;	;		;			| set ptr to regular xf3 routine
+cwdvec3: addw d,frameptr,acc;	CLPPLNS_FRMOFF->am; ;		;			| 
+	movw acc,y;		am->shmemp;	cjp,zer proc3_ret; ;			| 
+	movw d,clipplanes;	shmem->am;	;		;		shp+	| save clipplanes
+	;			shmem->shmemp;	ldct 15;	;			| shmemp <- matrixptr
+	mov2nw 4,y;		am->fpdp;	cjs,go shm_to_fpr;;			| move matrix to fpr[16]
+	addw d,frameptr,acc;	VWPXSCL_FRMOFF->am;;		;
+	movw acc,y;		am->shmemp;	ldct 5;		;			|shmemp <- addr of vwp params
+	mov2nw 5,y;		am->fpdp;	cjs,go shm_to_fpr;;			| move viewport parameters to fpr[32]
+	add2nw 1,cmdptr;	am->shmemp;	ldct 2;		;
+cwnnxtvec3:
+	mov2nw 6,inptr;		am->fpdp;	cjs,go shm_to_fpr; ;		shp+	| move pt1 x,y,z coords to fpr[64]
+	movw 0,resltflg;	0x3F80->fpregh;	;		;			| w1 = 1.0; reset resltflg for each vector
+	movw 0,y;		am->fpregl;	ldct 2;		;		dp+	| ldct 2 into 2910 counter
+	movw,s clipplanes,y;	;		cjs,go shm_to_fpr;;			| move pt2 x,y,z coords to fpr[68]
+											| clipplanes==0? (xf3 doesn't affect cc's)
+	;			;		cjs,go cwn3;	;			| shared routine to process 3D vector
+
+cwnout3: btstw,s 0,resltflg;	;		;		;			| test if invisible
+	;			;		cjp,~zer cwnnovec3; ;			| if so next vector
+	movw vwpsclptr,y;	am->fpap;	;		lmode rn,ai,pipe,fast;	| fpap <- &x0; pipeline mode
+	;			;		;		fixa,la,hi;		| convert x0 to integer
+	;			;		;		;		ap+
+	;			;		;		fixa,la,hi;		| y0
+	;			;		;		;		ap+
+	movw 76,y;		;		;		fixa,la,hi;		| z0
+	IMM;			am->fpap;	;		;			| fpap <- &x1
+	movw 5,y;		;		;		fixa,la,hi;		| x1
+	IMM;			am->brreg;	;		;		ap+	| brreg <- 5
+	;			;		;		fixa,la,a,hi;		| y1
+	movw 0,y;		am->fpdp;	push,go;	;		ap+	| fpdp <- 0; 2910 R reg <- 5
+	;			;		;		fixa,la,a,st,hi;	| fix z1; store x0,y0,z0,x1,y1,z1 starting
+	movw 0,y;		am->fpap;	rfct;		;		dp+	| fpreg[0]; fpap <- 0
+	addw d,cmdptr,cmdptr;	13->am;		push,go;	;			| cmdptr += 13
+	;			fpregh->shmem;	;		;		shp+	| overwrite original coords in shmem
+	;			fpregl->shmem;	rfct;		;		shp+,abp+
+
+cwnloop3:
+	movw 0,y;		am->shmem;	;		;		shp+	| dataready[i] <- 0;shmemp <- nxt vec addr
+	incw,s countr,countr;	;		ldct 2;		;			| reload 2910 R reg; incr vec loop cntr
+	incw cmdptr,cmdptr;	;		cjp,~zer cwnnxtvec3;;			| cmdptr += 1 and loop if more vectors
+	;			;		jmap getcmd;	;
+
+cwn3:	movw xf3ptr,y;		am->brreg;	;		;			| 
+	add2nw 3,inptr,outptr;	0x3F80->fpregh;	;		;			| want transformed endpoints at fpr[72]
+	movw 0,y;		am->fpregl;	;		;			| w2 = 1.0
+	mov2nw 4,y;		am->fpap;	cjs,go;		;			| matrix ptr in fpap; xform 1st point
+	add2nw 2,inptr;		16->fpap;	;		;
+	add2nw 2,outptr;	;		cjs,go;		;			| transform 2nd point
+	add2nw,s 2,inptr;	am->fpap;	cjs,~zer clpvec3;;			| clip vector if clipplanes!=0; also if no
+											| clip, force cc to ~zer so vec is vwpscld
+	movw clipplanes,acc;	;		cjp,zer cwnsetreslt;;			| if invisible, don't scale to viewport
+	andw,s savoutcode0,acc,y;;		;		;			| set cc to reflect clip status of pt1
+	movw 0,tmp0;		;		cjp,zer .+2;	;			| tmp0<-0; compute resultflag[i] in tmp0
+	bsetw 0,tmp0;		;		;		;			| set bit 0 if pt1 was clipped
+	andw,s savoutcode1,acc,y;;		;		;			| set cc to reflect clip status of pt2
+	movw cmdptr,y;		am->shmemp;	cjp,zer .+2;	;			| shmemp <- &resultflag[i]
+	bsetw 1,tmp0;		am->shmem;	cjp,go .+2;	;		shp+	| set bit 1 if pt2 clip; resultflag<-tmp0
+	movw tmp0,y;		am->shmem;	;		;		shp+	| resultflag<-tmp0 (if pt2 not clipped)
+											| clpvec3 returns with fpap==inptr if pt
+											| visible, so fpap==inptr==72 from above
+	sub2nw 0,inptr,vwpsclptr; am->fpdp;	push,go 3;	;			| fpdp <- vwpsclptr <- 71
+	;			fpregh->fpregh;	;		;			| shift x0,y0,z0,w0 up by 1 fpreg location
+	;			fpregl->fpregl;	rfct;		;		adp+	| so spacing between x0 and x1 is correct
+											| for vwpsclpts3 routine (5 locations)
+	incw 0,y;		am->brreg;	cjp,go vwpsclpts3;;			| call vwpsclpts3 with brreg==1 (npts-1)
+											| & vwpsclptr==&x0 to vwpscl pts in place
+cwnsetreslt:
+	mov2nw 0,resltflg;	;		crtn,go;	;			| set resultflag = 1 for invisible
+
+cwnnovec3:
+	movw cmdptr,y;		am->shmemp;	;		;			| shmemp <- &resultflag[i]
+	addw cmdptr,13,cmdptr;	0xFFFF->shmem;	;		;			| resultflag for this vector <- 0xFFFF
+	IMM;			am->shmemp;	cjp,go cwnloop3;;			| shmemp <- cmdptr <- &dataready[i]
+											| goto cwnloop3
+
+
+
+|   mulptinit3 does the initialization for mulpt int and flt 3d.
+mulptinit3:
+	addw frameptr,MATRIXPTR_FRMOFF,y; 3->brreg; ;		;			| brreg <- 3
+	IMM;			am->shmemp;	;		;			| shmemp <- addr of matrixptr
+	mov2nw 2,outptr;	shmem->shmemp;	ldct 15;	;			| shmemp <- addr of matrix; outptr <- 4
+	mov2nw 4,y;		am->fpdp;	cjs,go shm_to_fpr;;			| move matrix to fpr[16]
+	add2nw 1,cmdptr;	am->shmemp;	ldct;		;			| shmemp <- (cmdptr += 2), addr of 1st pt
+	;			;		crtn,go;	;			| 
+
+
+
+|	negw d,countr;		shmem->am;	jmap MUL_POINT_FLT_3D;;			| countr <- -npts
+MUL_POINT_FLT_3D:
+	;			;		cjs,go mulptinit3; ;			| 
+xfpt3nxt: movw 0,inptr;		am->fpdp;	cjs,go shm_to_fpr;;			| move pt[i] to fpr[0]
+	mov2nw 4,y;		am->fpap;	cjs,go xf3;	;			| xform pt and store result at fpr[4]
+	movw cmdptr,y;		am->shmemp;	;		;			| shmemp <- addr of pt
+	incw,s countr,countr;	4->fpap;	push,go;	;			| countr += 1; fpap <- addr of xformed pt
+	;			fpregh->shmem;	;		;		shp+	| move xformed pt to shared memory,
+	;			fpregl->shmem;	rfct;		;		shp+,abp+ | overwriting original pt
+	addw d,cmdptr,cmdptr;	9->am;		ldct;		;			| cmdptr += 9, addr of pt[i+1]
+	movw 0,y;		am->shmem;	cjp,~zer xfpt3nxt;;		shp+	| flag[i] <- 0, indicating xform done
+											| loop back for next pt;shmemp == &pt[i+1]
+	;			;		jmap getcmd;	;
+
+
+
+|	negw d,countr;		shmem->am;	jmap MUL_POINT_INT_3D;;			| countr <- -npts
+MUL_POINT_INT_3D:
+	;			;		cjs,go mulptinit3; ;			| 
+xfpt3nxti: movw 0,inptr;	am->fpdp;	cjs,go shm_to_fpr; ;			| move pt[i] to fpr[0]
+	mov2nw 4,y;		am->fpap;	cjs,go xfint3w;	;			| xform pt & w & store result at fpr[4]
+	movw outptr,inptr;	;		cjs,go fltoint3; ;			| convert float res to int, need inptr
+	movw cmdptr,y;		am->shmemp;	;		;			| shmemp <- addr of pt
+	incw,s countr,countr;	4->fpap;	push,go;	;			| countr += 1; fpap <- addr of xformed pt
+	;			fpregh->shmem;	;		;		shp+	| move xformed pt to shared memory,
+	;			fpregl->shmem;	rfct;		;		shp+,abp+ | overwriting original pt
+	addw d,cmdptr,cmdptr;	9->am;		ldct;		;			| cmdptr += 9, addr of pt[i+1]
+	movw 0,y;		am->shmem;	cjp,~zer xfpt3nxti;;		shp+	| flag[i] <- 0, indicating xform done
+											| loop back for next pt;shmemp == &pt[i+1]
+	;			;		jmap getcmd;	;
+
+
+
+|	movw d,acc;		shmem->am;	jmap MUL_MAT_3D;;		shp+	| acc <- indexA
+MUL_MAT_3D:
+	movw d,tmp0;		shmem->am;	;		;		shp+	| tmp0 <- indexB
+	movw d,tmp1;		shmem->am;	;		;			| tmp1 <- indexC
+	;			;		cjs,go indices2addrs; ;			| convert matrix indices to matrix addresses
+	movw acc,y;		am->shmemp;	ldct 15;	;			| shmemp <- addr of matrix A
+	mov2nw 4,inptr;		am->fpdp;	cjs,go shm_to_fpr;;			| move matrix A to fpr[16]
+	movw tmp0,y;		am->shmemp;	ldct 15;	;			| shmemp <- addr of matrix B
+	mov2nw 5,y;		am->fpdp;	cjs,go shm_to_fpr;;			| move matrix B to fpr[32]
+	mov2nw 5,y;		am->fpap;	;		;			| fpap <- addr of matrix B (in fpr)
+	mov2nw 6,outptr;	;		cjs,go xf3;	;			| outptr <- addr of matrix C (fpr[64])
+											| inptr == addr of 1st row of matrix A
+											| xf3 produces 1st row of matrix C 
+	add2nw 2,inptr;		32->fpap;	;		;
+	add2nw 2,outptr;	;		cjs,go xf3;	;			| produce 2nd row of matrix C
+	add2nw 2,inptr;		32->fpap;	;		;
+	add2nw 2,outptr;	;		cjs,go xf3;	;			| produce 3rd row of matrix C
+	add2nw 2,inptr;		32->fpap;	;		;
+	add2nw 2,outptr;	;		cjs,go xf3;	;			| produce 4th row of matrix C
+	;			64->fpap;	;		;			| fpap <- addr of matrix C (in fpr)
+	movw tmp1,y;		am->shmemp;	push,go 15;	;			| shmemp <- addr of matrix C (in shmem)
+											| (d still has XFORM_FRMOFF)
+	;			fpregh->shmem;	;		;		shp+	| move matrix C to shmem
+	;			fpregl->shmem;	rfct;		;		shp+,abp+
+	add2nw 2,cmdptr,cmdptr;	;		jmap getcmd;	;			| cmdptr += 4; jump to cmd loop
+
+
+
+|	fltoint3 -- 3D conversion from float to int.  Operates on a single point and converts
+|   		    the points in place, ie, overwrites the original floating point value.
+|
+|	Input Parameters:	inptr -- Location of point to be converted.
+
+fltoint3: movw inptr,y;		am->fpap;	;		lmode rn,ai,pipe,fast;	 
+	movw inptr,y;		am->fpdp;	;		fixa,la,hi;		| convert x to int
+	;			;		;		;		ap+	 
+	;			;		;		fixa,la,hi;		| convert y to int	
+	;			;		;		;		ap+	 
+	;			;		;		fixa,la,hi;		| convert z to int	
+	;			;		;		;		ap+	 
+	;			;		;		fixa,la,hi;		| convert w to int	
+	;			;		;		;			
+	;			;		;		pa,a,hi;		 
+	;			;		;		;			 
+	;			;		;		pa,a,st,hi;		| overwrite x
+	;			;		;		;		dp+	 
+	;			;		;		pa,a,st,hi;		| overwrite y
+	;			;		;		;		dp+	 
+	;			;		;		pa,a,st,hi;		| overwrite z
+	;			;		;		;		dp+	 
+	;			;		;		noflop,st,hi;		| overwrite w
+	;			;		crtn, go;	;			 
+
+
+
+
+|	xfint3w -- convert point from fix to float, including w, and jump to xf3.
+|
+|	Important Properties:	Does not use brreg; Does not use 2910 R register (counter)
+|				Does not change latched 29116 condition code status
+|   	Note: difference with xfint3 is that this converts w also.
+|
+xfint3w: movw inptr,y;		am->fpap;	;		lmode rn,ai,pipe,fast;	 
+	;			;		;		floata,la,hi;		| x
+	;			;		;		;		ap+
+	;			;		;		floata,la,hi;		| y
+	;			;		;		;		ap+
+	;			;		;		floata,la,hi;		| z
+	;			;		;		;		ap+
+	;			;		;		floata,la,hi;		| w
+	;			;		;		;
+	;			;		;		pa,a,hi;
+	movw inptr,y;		am->fpdp;	;		;
+	;			;		;		pa,a,st,hi;		| overwrite x
+	;			;		;		;		dp+
+	;			;		;		pa,a,st,hi;		| overwrite y
+	;			;		;		;		dp+
+	;			;		;		pa,a,st,hi;		| overwrite z
+	;			;		;		;		dp+  
+	;			;		;		noflop,st,hi;		| overwrite w
+	mov2nw 4,y;		am->fpap;	;		;			| reload fpap and call xf3
+	;			;		cjp,go xf3;	;			 
+
+
+
+|
+|	Important Properties:	Does not use brreg; Does not use 2910 R register (counter)
+|				Does not change latched 29116 condition code status
+|
+xfint3:	movw inptr,y;		am->fpap;	;		lmode rn,ai,pipe,fast;	| 
+	;			;		;		floata,la,hi;		| x
+	;			;		;		;		ap+
+	;			;		;		floata,la,hi;		| y
+	;			;		;		;		ap+
+	;			;		;		floata,la,hi;		| z
+	;			;		;		;
+	;			;		;		pa,hi;
+	;			;		;		;
+	;			;		;		pa,a,hi;
+	movw inptr,y;		am->fpdp;	;		;
+	;			;		;		pa,a,st,hi;		| overwrite x
+	;			;		;		;		dp+
+	;			;		;		pa,a,st,hi;		| overwrite y
+	;			;		;		;		dp+
+	;			;		;		noflop,st,hi;		| overwrite z
+	mov2nw 4,y;		am->fpap;	;		;			| reload fpap and fall through to xf3
+
+
+
+|	xf3 -- 3-D floating point transform
+|
+|	Input Parameters:	inptr -- Address of input point
+|				outptr -- Address of output point
+|				matrix -- fpap should have been loaded
+|					  with the address of the matrix
+|					  prior to calling this routine.
+|					  A 4x4 matrix
+|
+|	Comments:	Locations at address outptr are used as temporary storage.
+|			This routine cannot be used to transform a point in place,
+|			i.e. inptr should not be the same as outptr.
+|
+|
+|	Important Properties:	Does not use brreg; Does not use 2910 R register (counter)
+|				Does not change latched 29116 condition code status
+|
+
+
+xf3:	movw inptr,y;		am->fpbp;	;		lmode rn,ai,pipe,fast;
+	movw outptr,y;		am->fpdp;	;		maba,lab,hi;		| m11*x
+	;			;		;		;		ap+
+	;			;		;		maba,la,hi;		| m12*x
+	;			;		;		;		ap+
+	;			;		;		maba,la,hi;		| m13*x
+	;			;		;		;		ap+
+	;			;		;		maba,la,hi;		| m14*x
+	;			;		;		;		abp+
+	;			;		;		maba,lab,m,hi;		| m21*y
+	;			;		;		;		ap+
+	;			;		;		maba,la,m,st,hi;	| m22*y , store m11*x
+	;			;		;		;		adp+
+	;			;		;		maba,la,m,st,hi;	| m23*y , store m12*x
+	;			;		;		;		adp+
+	;			;		;		maba,la,m,st,hi;	| m24*y , store m13*x
+	;			;		;		;		adp+
+	movw outptr,y;		am->fpbp;	;		pa,m,st,hi;		| store m14*x
+	movw outptr,y;		am->fpdp;	;		;
+	;			;		;		addr,lab,m,hi;		| m21*y + m11*x
+	;			;		;		;		bp+
+	;			;		;		addr,lab,m,hi;		| m22*y + m12*x
+	;			;		;		;		bp+
+	;			;		;		addr,lab,m,hi;		| m23*y + m13*x
+	;			;		;		;		bp+
+	addw inptr,2,y;		;		;		addr,lab,hi;		| m24*y + m14*x
+	;			am->fpbp;	;		;
+	;			;		;		maba,lab,a,hi;		| m31*z
+	;			;		;		;		ap+
+	;			;		;		maba,la,a,st,hi;	| m32*z , store m21*y + m11*x
+	;			;		;		;		adp+
+	;			;		;		maba,la,a,st,hi;	| m33*z , store m22*y + m12*x
+	;			;		;		;		adp+
+	;			;		;		maba,la,a,st,hi;	| m34*z , store m23*y + m13*x
+	;			;		;		;		adp+
+	movw outptr,y;		am->fpbp;	;		pa,m,st,hi;		| store m24*y + m14*x
+	movw outptr,y;		am->fpdp;	;		;
+	;			;		;		addr,lab,m,hi;		| m31*z + (m21*y + m11*x)
+	;			;		;		;		bp+
+	;			;		;		addr,lab,m,hi;		| m32*z + (m22*y + m12*x)
+	;			;		;		;		bp+
+	;			;		;		addr,lab,m,hi;		| m33*z + (m23*y + m13*x)
+	;			;		;		;		bp+
+	addw inptr,3,y;		;		;		addr,lab,hi;		| m34*z + (m24*y + m14*x)
+	;			am->fpbp;	;		;
+	;			;		;		maba,lab,a,hi;		| m41*w
+	;			;		;		;		ap+
+	;			;		;		maba,la,a,st,hi;	| m42*w , store m31*z + (m21*y + m11*x)
+	;			;		;		;		adp+
+	;			;		;		maba,la,a,st,hi;	| m43*w , store m32*z + (m22*y + m12*x)
+	;			;		;		;		adp+
+	;			;		;		maba,la,a,st,hi;	| m44*w , store m33*z + (m23*y + m13*x)
+	;			;		;		;		dp+
+	movw outptr,y;		am->fpbp;	;		pa,m,st,hi;		| store m34*z + (m24*y + m14*x)
+	movw outptr,y;		am->fpdp;	;		;
+	;			;		;		addr,lab,m,hi;		| m41*w + (m31*z + m21*y + m11*x)
+	;			;		;		;		bp+
+	;			;		;		addr,lab,m,hi;		| m42*w + (m32*z + m22*y + m12*x)
+	;			;		;		;		bp+
+	;			;		;		addr,lab,m,hi;		| m43*w + (m33*z + m23*y + m13*x)
+	;			;		;		;		bp+
+	;			;		;		addr,lab,hi;		| m44*w + (m34*z + m24*y + m14*x)
+	;			;		;		;
+	;			;		;		pa,a,hi;
+	;			;		;		;
+	;			;		;		pa,a,st,hi;		| x' = m41*w + m31*z + m21*y + m11*x
+	;			;		;		;		dp+
+	;			;		;		pa,a,st,hi;		| y' = m42*w + m32*z + m22*y + m12*x
+	;			;		;		;		dp+
+	;			;		;		pa,a,st,hi;		| z' = m43*w + m33*z + m23*y + m13*x
+	;			;		;		;		dp+
+	;			;		;		noflop,st,hi;		| w' = m44*w + m34*z + m24*y + m14*x
+	;			;		crtn,go;	;
+
+
+
+|	vwpsndvec3_xy -- scale 3-D vector (x0,y0,z0,w0 x1,y1,z1,w1) to viewport,
+|			 convert floating point coordinates to integer, and
+|			 send to Painting Processor
+|			 produces only scaled x and y
+|			 input vectors are in NDC, i.e. clipped vectors will have
+|			 -1.0 <= x/w,y/w <= 1.0
+|
+|	Input Parameters:	inptr -- address of first input point x,y,z,w (transformed and clipped)
+|				outptr -- address for viewport scaled x,y
+|
+|
+vwpsndvec3_xy:
+	movw 0,recaddr;		3->am;		;		;			| use fpr[0,1] for reciprocals
+	addw d,inptr,y;		am->fpap;	cjs,go paratest; ;			| test for parallel proj: w == 1
+	incw recaddr,recaddr;	7->am;		;		;
+vwrecp2: addw d,inptr,y;	am->fpap;	cjs,go recip;	;			| compute reciprocal of w1
+	movw inptr,y;		am->fpap;	;		lmode rn,ai,pipe,fast;	
+	movw 0,y;		am->fpbp;	;		;			| address of w0 -> fpbp
+	;			;		;		maba,lab,hi;		| x0 * 1/w0
+	movw 0,parallel;	;		;		;		ap+	
+	addw inptr,4,y;		;		;		maba,la,hi;		| y0 * 1/w0
+	IMM;			am->fpap;	;		;		bp+
+	movw =vwpsv2,y;		;		;		maba,lab,hi;		| x1 * 1/w1
+	IMM;			am->brreg;	;		;		ap+
+	;			;		;		maba,la,hi;		| y1 * 1/w1
+	;			;		;		;
+	mov2nw 5,acc;		am->fpbp;	;		pa,m,hi;		| fpbp pts to viewport params
+	;			;		;		;
+	;			;		;		mabr,lab,m,hi;		| x0 * VWPXSCL
+	add2nw 1,acc;		am->fpbp;	;		;
+	;			;		;		mabr,lab,m,hi;		| y0 * VWPYSCL
+	sub2nw 1,acc;		am->fpbp;	;		;
+	;			;		;		mabr,lab,m,hi;		| x1 * VWPXSCL
+	add2nw 1,acc;		am->fpbp;	;		;
+	movw 0,parallel;	;		;		mabr,lab,hi;		| y1 * VWPYSCL, note that did persp. proj.
+	sub2nw 0,acc;		am->fpbp;	cjp,go;		;			| fpbp<-&Vwpxoff; jump to vwpsv2 to
+											| finish scaling, conversion, & xmit to PP
+
+vwparll: mov2nw 5,acc;		am->fpbp;	;		lmode rn,ai,pipe,fast;	| fpbp pts to viewport params
+	movw =vwpsv2,y;		;		;		;			 
+	IMM;			am->brreg;	;		maba,lab,hi;		| x0 * VWPXSCL
+	add2nw 1,acc;		am->fpbp;	;		;		ap+	 
+	incw 0,parallel;	;		;		maba,lab,hi;		| y0 * VWPYSCL, note that did parallel proj. 
+	sub2nw 1,acc;		am->fpbp;	;		;		ap+	 
+	add2nw 2,inptr,tmp0;	am->fpap;	;		;			 
+	;			;		;		maba,lab,hi;		| x1 * VWPXSCL
+	add2nw 1,acc;		am->fpbp;	;		;		ap+	 
+	;			;		;		maba,lab,hi;		| y1 * VWPYSCL 
+	sub2nw 0,acc;		am->fpbp;	cjp, go;	;			| fpbp<-&Vwpxoff; jump to vwpsv2 to
+											| finish scaling, conversion, & xmit to PP
+
+paratest:
+	movw d,acc;		0x3f80->am;	;		;			| test for fp 1.0
+	subw,s d,acc,y;		fpregh->am;	;		;			| compare msw
+	movw,s d,y;		fpregl->am;	cjp,~zer recip;	;			| compare lsw, if either fail jp recip
+	movw recaddr,y;		am->fpdp;	cjp,~zer recip;	;			| otherwise no need for divide
+	sub2nw 0,outptr,tmp0;	am->fpap;	;		;			| w2 is at (outptr-1)
+	subw,s d,acc,y;		fpregh->am;	;		;			| compare msw (fp 1 is in acc)
+	movw,s d,y;		fpregl->am;	cjp,~zer parecip; ;			| jump if w2 is also 1
+	movw inptr,y;		am->fpap;	cjpp,zer vwparll; ;			| jump to vwp scale if w2==1 also
+parecip: sub2nw 2,tmp0;		am->fpap;	;		;			| 'a' ptr set to w1
+	incw recaddr,recaddr;	fpregh->fpregh;	;		;			| need to set recip for w1==1 for multiply
+	;			7->am;		;		;			| adjust d-latch for vwrecp2
+	;			fpregl->fpregl;	cjpp,go vwrecp2; ;			| return to find recip for pt2
+
+
+#undef tmp0
+#undef tmp1
+#undef count
+#undef matrixptr
+
+
+#include "clpvec3.vp.u"
+
+#undef zbdcln
+#undef resltflg
+#undef xf3ptr
+#undef mvlist
+
+#undef parallel
+#undef inptr
+#undef outptr
+#undef clipplanes
+#undef countr
+#undef recaddr
+
+#undef move
+#undef dcue
+
+#include "xfpolygon3.vp.u"

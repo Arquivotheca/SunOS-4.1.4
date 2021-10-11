@@ -1,0 +1,49 @@
+
+	@(#)README 1.1 94/10/31 21:05:02
+
+	Copyright (c) 1991 by Sun Microsystems, Inc.
+
+	03/31/91     Roger Pham      Originated
+
+Usage:	gtprobe [-v]
+
+	If -v option is entered, there will be many verbose messages printed
+	besides the basic messages.  If a wrong option is entered, the program
+	will abort.
+
+	This program must run on SunOS Release 4.1 or higher in superuser mode.
+	Previous releases may not have the system command "/usr/etc/devinfo"
+	which is used in this program to probe the SBus slots for devices and
+	what they are mapped into.  The following is the general sequence of
+	executions:
+
+	- Use the system command devinfo to determine the SBus slots that are
+	  having hardware device on them.
+
+	- Check if a 'gt' device is found upon executing.  If so, proceed to 
+	  the next step.  If not, it would default to the first unoccupied
+	  SBus slot; unless, all three slots are occupied in which case the
+	  program will have to abort.
+
+	- Open the device that user had selected (/dev/sbus1, /dev/sbus2, or
+	  /dev/sbus3) and map in the address.
+
+	- Read the HSA Mode Register.  If a timeout occurs which would result
+	  a bus error or the system would hang, the HSA is put or specified
+	  within the realm of this program the wrong SBus slot.  Otherwise,
+	  the program proceeds to toggle mode bits inside this register by
+	  writting and reading back to verify.
+
+	- Read the MIA Test Register.  If a timeout occurs which would result
+	  a bus error or the system would hang, the GT is unconnected, not
+	  powered, or a bad cable. Assert a hold to the FE Hold Register.
+	  This is to prevent the FE from executing and might overwrite the
+	  content of the MIA Test Register.  After that, write the test
+	  patterns to the Test Register and read each one back for verification.
+
+	- Read the entire OpenBoot PROM, except for the last 4 bytes because
+	  this is the checksum of the PROM.  Add all the bytes up to form
+	  a calculated checksum.  Verify this calculated checksum with the
+	  checksum that is deposited in the last location of the Openboot PROM
+	  and see if they match.  If there is a mismatch, the OpenBoot PROM
+	  is bad.

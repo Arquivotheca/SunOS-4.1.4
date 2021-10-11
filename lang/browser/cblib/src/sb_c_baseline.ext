@@ -1,0 +1,2157 @@
+/* @(#)sb_c_baseline.ext 1.1 94/10/31 SMI */
+
+/*
+ *	Copyright (c) 1989, Sun Microsystems, Inc.  All Rights Reserved.
+ *	Sun considers its source code as an unpublished, proprietary
+ *	trade secret, and it is available only under strict license
+ *	provisions.  This copyright notice is placed here only to protect
+ *	Sun in the event the source is deemed a published work.  Dissassembly,
+ *	decompilation, or other means of reducing the object code to human
+ *	readable form is prohibited by the license agreement under which
+ *	this code is provided to the user or company in possession of this
+ *	copy.
+ *	RESTRICTED RIGHTS LEGEND: Use, duplication, or disclosure by the
+ *	Government is subject to restrictions as set forth in subparagraph
+ *	(c)(1)(ii) of the Rights in Technical Data and Computer Software
+ *	clause at DFARS 52.227-7013 and in similar clauses in the FAR and
+ *	NASA FAR Supplement.
+ */
+
+
+/*
+ *	This file contains the properties and tags statement that
+ *	should be shared between C family compilers.
+ *	This currently includes
+ *		Sun-C
+ *		ANSI-C
+ *		C++
+ */
+
+/*
+ * This macro defines the properties that should mark a declaration tag
+ */
+#define DEF ALL_HITS c.def
+
+/*
+ * This macro defines the properties that should mark a reference tag
+ */
+#define REF ALL_HITS c.ref
+
+
+properties c {
+	addrof		/* Marks reference to address of variable.
+			   & operator */
+	anonymous	/* Marks struct/union/enum declarations that do not
+			   have a tag. The symbol "struct"/"union"/"enum"
+			   is entered for such declarations. */
+	auto		/* Marks symbols that are local to a function or block
+			   and that are not static. */
+	bitfield	/* Marks struct fields that are bitfields */
+	builtin		/* Marks references to builtin types. Builtin types
+			   ("char" "double" "float" "int" "long" "short"
+			    "unsigned" and "void") are entered in the database
+			    as regular symbols. */
+	call		/* Marks function calls */
+	cast		/* Marks symbols referenced from a cast */
+	decl		/* Marks types referenced from a declaration */
+	def		/* Marks symbol declarations */
+	enum		/* Marks all enum tags and members. This should be
+			   combined with the constant or tag property in
+			   menus */
+	extern		/* Marks all declarations that mentioned the
+			   word "extern" */
+	field		/* Marks symbols declared as struct/union field*/
+	formal		/* Marks symbols that are mentioned in the list
+			   of formals in a function declaration or in the type
+			   declarations in the function header */
+	function	/* Marks all declarations and references to
+			   functions */
+	global		/* Marks all symbols that are declared to have
+			   global scope */
+	implicit	/* Marks functions that were declared implicitly
+			   when they were called the first time */
+	init		/* Marks variable def with init */
+	label		/* Marks declarations and references to labels */
+	list		/* Marks symbols from the list of formals in function
+			   declarations */
+	literal		/* Marks string literals */
+	local		/* Marks declarations that are local to a function
+			   or block. This includes static declarations */
+	named		/* This is the opposite of anonymous */
+	non_bitfield	/* This is the opposite of bitfield */
+	non_field	/* Marks regular variables */
+	non_init	/* Marks variable def without init */
+	non_register	/* Not a register variable */
+	not_val_used	/* Marks fn call that does not use value */
+	plain		/* Marks plain variable references and function
+			   calls */
+	read		/* Marks variables that are referenced for read*/
+	ref		/* Marks refereces to symbols */
+	register	/* Marks local declarations that mentioned the
+			   word "register" */
+	simple_list	/* Old formal list format */
+	sizeof		/* Marks symbols that were referenced from the
+			   sizeof operator */
+	static		/* Marks declarations that mentioned the word
+			   "static" */
+	struct		/* Marks all struct tags and fields. This should
+			   be combined with the field or tag property in
+			   menus */
+	tag		/* Marks struct/union/enum tags */
+	toplevel	/* Marks declarations at the toplevel of the C
+			   file. This includes globals and statics */
+	type		/* Marks declarations and references to all types */
+	union		/* Marks all struct tags and fields. This should
+			   be combined with the field or tag property in
+			   menus */
+	user_defined	/* Marks types that were created using typedef */
+	using		/* Marks function calls thru a variable pointer */
+	val_used	/* Marks fn call that uses value */
+	variable	/* references and declarations of fields and
+			   variables */
+	w_body		/* Marks functions declarations that had a body */
+	wo_body		/* Marks functions declarations that did not have
+			   a body */
+	write		/* Marks variables referenced for write and
+			   declarations with an initializer */
+}
+
+/*
+ * The short comments for the tags have the format
+ *	pattern => symbol
+ * where the "pattern" is the C construct that generates a symbol with
+ * the tag in question and the "symbol" is the symbol from the "pattern"
+ * that gets filed.
+ *
+ * The tag "<tag>_hidden" is identical to "<tag>" except for the fact
+ * that  "<tag>_hidden" was generated from a symbol that was part of
+ * a cpp macro expansion.
+ *
+ * Declarations that are shown without enclosing {} are at the top level.
+ *
+ * Patterns that use the ++ operator should be read to include all of
+ * the following patterns "x++", "++x", "x--" and "--x".
+ * Similarily the operator += should be read as any of the ?= operators.
+ *
+ */
+tags c 130 {
+/*
+ * Tags for enum tag declarations and references
+ * Tags for enum member declarations and references
+ */
+	def_enum_tag =				/* enum tag {} => tag */
+		DEF_WEIGHT
+		( DEF c.enum c.tag c.named )
+		CPP_SECONDARY_SYMBOL
+	def_enum_tag_hidden =
+		( HIDDEN )
+
+	def_enum_tag_anonymous =		/* enum {} => enum */
+		DEF_WEIGHT
+		( DEF c.enum c.tag c.anonymous BASE.CB_MENU_TOKEN_CBCHECKCB )
+
+
+	ref_enum_tag_cast =			/* (enum tag)var => tag */
+		( REF c.enum c.tag c.cast )
+		CPP_SECONDARY_SYMBOL
+
+	ref_enum_tag_decl =			/* { enum tag var; } => tag */
+						/* enum tag var => tag */
+		( REF c.enum c.tag c.decl )
+		CPP_SECONDARY_SYMBOL
+	ref_enum_tag_decl_hidden =
+		( HIDDEN )
+
+	ref_enum_tag_sizeof =			/* sizeof(enum tag) => tag */
+		( REF c.enum c.tag c.sizeof )
+		CPP_SECONDARY_SYMBOL
+
+
+	def_enum_member =			/* enum { member } => member*/
+		DEF_WEIGHT
+		( DEF c.enum BASE.constant c.non_init )
+		CPP_SECONDARY_SYMBOL
+	def_enum_member_hidden =
+		( HIDDEN )
+
+	def_enum_member_init =			/* enum { mem = 1 } => mem */
+		DEF_WEIGHT
+		( DEF c.enum BASE.constant c.init c.write )
+		CPP_SECONDARY_SYMBOL
+	def_enum_member_init_hidden =
+		( HIDDEN )
+
+	ref_enum_member =			/* var = member => member */
+		( REF c.enum BASE.constant c.read )
+		CPP_SECONDARY_SYMBOL
+
+	ref_enum_member_sizeof =		/* sizeof(member) => member */
+		( REF c.enum BASE.constant c.sizeof )
+		CPP_SECONDARY_SYMBOL
+
+/*
+ * Tags for struct tag declarations and references
+ * Tags for struct field declarations and references
+ */
+	def_struct_tag =			/* struct tag {} => tag */
+		DEF_WEIGHT
+		( DEF c.struct c.tag c.named )
+		CPP_SECONDARY_SYMBOL
+	def_struct_tag_hidden =
+		( HIDDEN )
+
+	def_struct_tag_anonymous =		/* struct {} => struct */
+		DEF_WEIGHT
+		( DEF c.struct c.tag c.anonymous BASE.CB_MENU_TOKEN_CBCHECKCB )
+
+
+	ref_struct_tag_cast =			/* (struct tag)var => tag */
+		( REF c.struct c.tag c.cast )
+		CPP_SECONDARY_SYMBOL
+
+	ref_struct_tag_decl =			/* { struct tag var;} => tag*/
+						/* struct tag var; => tag */
+		( REF c.struct c.tag c.decl )
+		CPP_SECONDARY_SYMBOL
+	ref_struct_tag_decl_hidden =
+		( HIDDEN )
+
+	ref_struct_tag_sizeof =			/* sizeof(struct tag) => tag*/
+		( REF c.struct c.tag c.sizeof )
+		CPP_SECONDARY_SYMBOL
+
+
+	def_struct_field =			/* struct { int f; } => f */
+		DEF_WEIGHT
+		( DEF c.struct c.field c.variable c.non_bitfield )
+		CPP_SECONDARY_SYMBOL
+	def_struct_field_hidden =
+		( HIDDEN )
+
+	def_struct_field_bitfield =		/* struct { int f:1; } => f */
+		DEF_WEIGHT
+		( DEF c.struct c.field c.variable c.bitfield )
+		CPP_SECONDARY_SYMBOL
+	def_struct_field_bitfield_hidden =
+		( HIDDEN )
+
+/*
+ * Tags for struct field references
+ */
+	ref_struct_field_read =			/* v = s->f => f */
+						/* v = s->f1->f2 => f1 f2 */
+						/* v = s.f => f */
+						/* v = s.f1.f2 => f1 f2 */
+		( REF c.struct c.field c.variable c.non_bitfield c.read )
+		CPP_SECONDARY_SYMBOL
+
+	ref_struct_field_write =		/* s->f = v => f */
+						/* s->f1->f2 = v => f2 */
+						/* s.f = v => f */
+						/* s.f1.f2 = v => f1 f2 */
+		( REF c.struct c.field c.variable c.non_bitfield c.write )
+		CPP_SECONDARY_SYMBOL
+
+	ref_struct_field_read_write =		/* s->f++ => f */
+						/* s->f1->f2++ => f2 */
+						/* s.f++ => f */
+						/* s.f1.f2++ => f1 f2 */
+		( REF c.struct c.field c.variable c.non_bitfield
+						c.read c.write )
+		CPP_SECONDARY_SYMBOL
+
+	ref_struct_field_addrof =		/* & s->f => f */
+						/* & s->f1->f2 => f2 */
+						/* & s.f => f */
+						/* & s.f1.f2 => f2 */
+		( REF c.struct c.field c.variable c.non_bitfield c.addrof )
+		CPP_SECONDARY_SYMBOL
+
+	ref_struct_field_sizeof =		/* sizeof(s->f) => f */
+						/* sizeof(s->f1->f2) => f2 */
+						/* sizeof(s.f) => f */
+						/* sizeof(s.f1.f2) => f2 */
+		( REF c.struct c.field c.variable c.non_bitfield c.sizeof )
+		CPP_SECONDARY_SYMBOL
+
+/*
+ * Tags for bitfield references
+ */
+	ref_struct_bitfield_read =		/* v = s->f => f */
+						/* v = s->f1->f2 => f1 f2 */
+						/* v = s.f => f */
+						/* v = s.f1.f2 => f1 f2 */
+		( REF c.struct c.field c.variable c.bitfield c.read )
+		CPP_SECONDARY_SYMBOL
+
+	ref_struct_bitfield_write =		/* s->f = v => f */
+						/* s->f1->f2 = v => f2 */
+						/* s.f = v => f */
+						/* s.f1.f2 = v => f1 f2 */
+		( REF c.struct c.field c.variable c.bitfield c.write )
+		CPP_SECONDARY_SYMBOL
+
+	ref_struct_bitfield_read_write =	/* s->f++ => f */
+						/* s->f1->f2++ => f2 */
+						/* s.f++ => f */
+						/* s.f1.f2++ => f1 f2 */
+		( REF c.struct c.field c.variable c.bitfield
+						c.read c.write )
+		CPP_SECONDARY_SYMBOL
+
+	ref_struct_bitfield_sizeof =		/* sizeof(s->f) => f */
+						/* sizeof(s->f1->f2) => f2 */
+						/* sizeof(s.f) => f */
+						/* sizeof(s.f1.f2) => f2 */
+		( REF c.struct c.field c.variable c.bitfield c.sizeof )
+		CPP_SECONDARY_SYMBOL
+
+/*
+ * Tags for union tag declarations and references
+ * Tags for union field declarations and references
+ */
+	def_union_tag =				/* union tag {} => tag */
+		DEF_WEIGHT
+		( DEF c.union c.tag c.named )
+		CPP_SECONDARY_SYMBOL
+	def_union_tag_hidden =
+		( HIDDEN )
+
+	def_union_tag_anonymous =		/* union {} => union */
+		DEF_WEIGHT
+		( DEF c.union c.tag c.anonymous BASE.CB_MENU_TOKEN_CBCHECKCB )
+
+
+	ref_union_tag_cast =			/* (union tag)var => tag */
+		( REF c.union c.tag c.cast )
+		CPP_SECONDARY_SYMBOL
+
+	ref_union_tag_decl =			/* { union tag v; } => tag */
+						/* union tag v; => tag */
+		( REF c.union c.tag c.decl )
+		CPP_SECONDARY_SYMBOL
+	ref_union_tag_decl_hidden =
+		( HIDDEN )
+
+	ref_union_tag_sizeof =			/* sizeof(union tag) => tag */
+		( REF c.union c.tag c.sizeof )
+		CPP_SECONDARY_SYMBOL
+
+
+	def_union_field =			/* union { int f; } => f */
+		DEF_WEIGHT
+		( DEF c.union c.field c.variable )
+		CPP_SECONDARY_SYMBOL
+	def_union_field_hidden =
+		( HIDDEN )
+
+
+/*
+ * Tags for union field references
+ */
+	ref_union_field_read =			/* v = s->f => f */
+						/* v = s->f1->f2 => f1 f2 */
+						/* v = s.f => f */
+						/* v = s.f1.f2 => f1 f2 */
+		( REF c.union c.field c.variable c.read )
+		CPP_SECONDARY_SYMBOL
+
+	ref_union_field_write =			/* s->f = v => f */
+						/* s->f1->f2 = v => f2 */
+						/* s.f = v => f */
+						/* s.f1.f2 = v => f1 f2 */
+		( REF c.union c.field c.variable c.write )
+		CPP_SECONDARY_SYMBOL
+
+	ref_union_field_read_write =		/* s->f++ => f */
+						/* s->f1->f2++ => f2 */
+						/* s.f++ => f */
+						/* s.f1.f2++ => f1 f2 */
+		( REF c.union c.field c.variable c.read c.write )
+		CPP_SECONDARY_SYMBOL
+
+	ref_union_field_addrof =		/* & s->f => f */
+						/* & s->f1->f2 => f2 */
+						/* & s.f => f */
+						/* & s.f1.f2 => f2 */
+		( REF c.union c.field c.variable c.addrof )
+		CPP_SECONDARY_SYMBOL
+
+	ref_union_field_sizeof =		/* sizeof(s->f) => f */
+						/* sizeof(s->f1->f2) => f2 */
+						/* sizeof(s.f) => f */
+						/* sizeof(s.f1.f2) => f2 */
+		( REF c.union c.field c.variable c.sizeof )
+		CPP_SECONDARY_SYMBOL
+
+/*
+ * Tags for declarations and references to typedefs
+ */
+	def_typedef =				/* typedef int t => t */
+		DEF_WEIGHT
+		( DEF c.type c.user_defined )
+		CPP_SECONDARY_SYMBOL
+	def_typedef_hidden =
+		( HIDDEN )
+
+	ref_typedef_cast =			/* (t)var => t */
+		( REF c.type c.user_defined c.cast )
+		CPP_SECONDARY_SYMBOL
+
+	ref_typedef_decl =			/* { t var; } => t */
+						/* t var; => t */
+		( REF c.type c.user_defined c.decl )
+		CPP_SECONDARY_SYMBOL
+	ref_typedef_decl_hidden =
+		( HIDDEN )
+
+	ref_typedef_sizeof =			/* sizeof(t) => t */
+		( REF c.type c.user_defined c.sizeof )
+		CPP_SECONDARY_SYMBOL
+
+
+/*
+ * Tags for references to builtin types
+ */
+	ref_builtin_type_cast =			/* (int)var => int */
+		( REF c.type c.builtin c.cast )
+		CPP_SECONDARY_SYMBOL
+
+	ref_builtin_type_decl =			/* { int var; } => int */
+						/* int var; => int */
+		( REF c.type c.builtin c.decl )
+		CPP_SECONDARY_SYMBOL
+	ref_builtin_type_decl_hidden =
+		( HIDDEN )
+
+	ref_builtin_type_sizeof =		/* sizeof(int) => int */
+		( REF c.type c.builtin c.sizeof )
+		CPP_SECONDARY_SYMBOL
+
+/*
+ * Tags for variable declarations
+ */
+	def_var_global =			/* int var => var */
+		DEF_WEIGHT
+		( DEF c.variable c.non_field c.toplevel c.global c.non_init )
+		CPP_SECONDARY_SYMBOL
+	def_var_global_hidden =
+		( HIDDEN )
+
+	def_var_global_init =			/* int var = 1 => var */
+		DEF_WEIGHT
+		( DEF c.variable c.non_field c.toplevel c.global c.init
+		 c.write )
+		CPP_SECONDARY_SYMBOL
+	def_var_global_init_hidden =
+		( HIDDEN )
+
+	def_var_toplevel_static =		/* static int var => var */
+		DEF_WEIGHT
+		( DEF c.variable c.non_field c.toplevel c.static c.non_init )
+		CPP_SECONDARY_SYMBOL
+	def_var_toplevel_static_hidden =
+		( HIDDEN )
+
+	def_var_toplevel_static_init =		/* static var = 1 => var */
+		DEF_WEIGHT
+		( DEF c.variable c.non_field c.toplevel c.static c.init
+		 c.write )
+		CPP_SECONDARY_SYMBOL
+	def_var_toplevel_static_init_hidden =
+		( HIDDEN )
+
+	def_var_toplevel_extern =		/* extern int var; => var */
+		EXTERN_DEF_WEIGHT
+		( DEF c.variable c.non_field c.toplevel c.extern )
+		CPP_SECONDARY_SYMBOL
+	def_var_toplevel_extern_hidden =
+		( HIDDEN )
+
+	def_var_formal_list =			/* fn(formal) => formal */
+		DEF_WEIGHT
+		( DEF c.variable c.non_field c.formal c.auto c.list c.local
+		 c.simple_list )
+		CPP_SECONDARY_SYMBOL
+	def_var_formal_list_hidden =
+		( HIDDEN )
+
+	def_var_formal_auto =			/* fn(f) int f; => f */
+						/* fn(f) auto int f; => f */
+		DEF_WEIGHT
+		( DEF c.variable c.non_field c.formal c.auto c.decl c.local
+		 c.non_register )
+		CPP_SECONDARY_SYMBOL
+	def_var_formal_auto_hidden =
+		( HIDDEN )
+
+	def_var_formal_register =		/* fn(f) register f; => f */
+		DEF_WEIGHT
+		( DEF c.variable c.non_field c.formal c.auto c.decl c.local
+		c.register )
+		CPP_SECONDARY_SYMBOL
+	def_var_formal_register_hidden =
+		( HIDDEN )
+
+	def_var_local =				/* { int v; } => v */
+		DEF_WEIGHT
+		( DEF c.variable c.non_field c.local c.auto c.non_init
+		 c.non_register )
+		CPP_SECONDARY_SYMBOL
+	def_var_local_hidden =
+		( HIDDEN )
+
+	def_var_local_init =			/* { int v = 1; } => v */
+		DEF_WEIGHT
+		( DEF c.variable c.non_field c.local c.auto c.init c.write
+		 c.non_register )
+		CPP_SECONDARY_SYMBOL
+	def_var_local_init_hidden =
+		( HIDDEN )
+
+	def_var_local_register =		/* { int register v; } => v */
+		DEF_WEIGHT
+		( DEF c.variable c.non_field c.local c.auto c.register
+		 c.non_init )
+		CPP_SECONDARY_SYMBOL
+	def_var_local_register_hidden =
+		( HIDDEN )
+
+	def_var_local_register_init =		/* { register v = 1; } => v */
+		DEF_WEIGHT
+		( DEF c.variable c.non_field c.local c.auto c.register
+		c.init c.write )
+		CPP_SECONDARY_SYMBOL
+	def_var_local_register_init_hidden =
+		( HIDDEN )
+
+	def_var_local_static =			/* { static int v; } => v */
+		DEF_WEIGHT
+		( DEF c.variable c.non_field c.local c.static c.non_init )
+		CPP_SECONDARY_SYMBOL
+	def_var_local_static_hidden =
+		( HIDDEN )
+
+	def_var_local_static_init =		/* { static v = 1; } => v */
+		DEF_WEIGHT
+		( DEF c.variable c.non_field c.local c.static c.init c.write )
+		CPP_SECONDARY_SYMBOL
+	def_var_local_static_init_hidden =
+		( HIDDEN )
+
+	def_var_local_extern =			/* { extern int v; } => v */
+		EXTERN_DEF_WEIGHT
+		( DEF c.variable c.non_field c.local c.extern )
+		CPP_SECONDARY_SYMBOL
+	def_var_local_extern_hidden =
+		( HIDDEN )
+
+/*
+ * Tags for variable references
+ */
+	ref_var_read =				/* v = f => f */
+		( REF c.variable c.non_field c.read )
+		CPP_SECONDARY_SYMBOL
+
+	ref_var_write =				/* f = v => f */
+		( REF c.variable c.non_field c.write )
+		CPP_SECONDARY_SYMBOL
+
+	ref_var_read_write =			/* f++ => f */
+		( REF c.variable c.non_field c.read c.write )
+		CPP_SECONDARY_SYMBOL
+
+	ref_var_addrof =			/* & f => f */
+		( REF c.variable c.non_field c.addrof )
+		CPP_SECONDARY_SYMBOL
+
+	ref_var_sizeof =			/* sizeof(f) => f */
+		( REF c.variable c.non_field c.sizeof )
+		CPP_SECONDARY_SYMBOL
+
+/*
+ * Tags for function declarations
+ */
+	def_global_func_w_body =		/* fn() {} => fn */
+		DEF_WEIGHT
+		( DEF c.function c.w_body c.toplevel c.global )
+		CPP_SECONDARY_SYMBOL
+	def_global_func_w_body_hidden =
+		( HIDDEN )
+
+	def_global_func_wo_body =		/* fn(); => fn */
+		EXTERN_DEF_WEIGHT
+		( DEF c.function c.wo_body c.toplevel c.global )
+		CPP_SECONDARY_SYMBOL
+	def_global_func_wo_body_hidden =
+		( HIDDEN )
+
+	def_toplevel_static_func_w_body =	/* static fn(){} => fn */
+		DEF_WEIGHT
+		( DEF c.function c.w_body c.toplevel c.static )
+		CPP_SECONDARY_SYMBOL
+	def_toplevel_static_func_w_body_hidden =
+		( HIDDEN )
+
+	def_toplevel_static_func_wo_body =	/* static fn(); => fn */
+		EXTERN_DEF_WEIGHT
+		( DEF c.function c.wo_body c.toplevel c.static )
+		CPP_SECONDARY_SYMBOL
+	def_toplevel_static_func_wo_body_hidden =
+		( HIDDEN )
+
+	def_global_extern_func_w_body =		/* extern fn(){} => fn */
+		DEF_WEIGHT
+		( DEF c.function c.w_body c.toplevel c.extern )
+		CPP_SECONDARY_SYMBOL
+	def_global_extern_func_w_body_hidden =
+		( HIDDEN )
+
+	def_toplevel_extern_func_wo_body =	/* extern fn(); => fn */
+		EXTERN_DEF_WEIGHT
+		( DEF c.function c.wo_body c.toplevel c.extern )
+		CPP_SECONDARY_SYMBOL
+	def_toplevel_extern_func_wo_body_hidden =
+		( HIDDEN )
+
+	def_global_func_implicit =		/* x = fn(); => fn */
+		( DEF c.function c.wo_body c.toplevel c.global c.implicit
+		  c.call c.val_used )
+		CPP_SECONDARY_SYMBOL
+	def_global_func_implicit_hidden =
+		( HIDDEN )
+
+	def_global_proc_implicit =		/* fn(); => fn */
+		( DEF c.function c.wo_body c.toplevel c.global c.implicit
+		  c.call c.not_val_used )
+		CPP_SECONDARY_SYMBOL
+	def_global_proc_implicit_hidden =
+		( HIDDEN )
+
+	def_local_func =			/* { fn(); } => fn */
+		EXTERN_DEF_WEIGHT
+		( DEF c.function c.wo_body c.local )
+		CPP_SECONDARY_SYMBOL
+	def_local_func_hidden =
+		( HIDDEN )
+
+	def_local_extern_func =			/* { extern fn(); } => fn */
+		EXTERN_DEF_WEIGHT
+		( DEF c.function c.wo_body c.local c.extern )
+		CPP_SECONDARY_SYMBOL
+	def_local_extern_func_hidden =
+		( HIDDEN )
+
+	def_local_static_func =			/* { static fn(); } => fn */
+		EXTERN_DEF_WEIGHT
+		( DEF c.function c.wo_body c.local c.static )
+		CPP_SECONDARY_SYMBOL
+	def_local_static_func_hidden =
+		( HIDDEN )
+
+/*
+ * Tags for function references
+ */
+	ref_func_call =				/* x = fn(); => fn */
+		( REF c.function c.call c.plain c.val_used )
+		CPP_SECONDARY_SYMBOL
+	ref_func_call_hidden =
+		( HIDDEN )
+
+	ref_proc_call =				/* fn(); => fn */
+		( REF c.function c.call c.plain c.not_val_used )
+		CPP_SECONDARY_SYMBOL
+	ref_proc_call_hidden =
+		( HIDDEN )
+
+	ref_func_constant =			/* fn_var = fn; => fn */
+		( REF c.function BASE.constant )
+		CPP_SECONDARY_SYMBOL
+	ref_func_constant_hidden =
+		( HIDDEN )
+
+	ref_func_call_using_var =		/* x = (*fn)(); => fn */
+		( REF c.function c.call c.using c.variable c.non_field
+		 c.val_used )
+		CPP_SECONDARY_SYMBOL
+	ref_func_call_using_var_hidden =
+		( HIDDEN )
+
+	ref_proc_call_using_var =		/* (*fn)() => fn */
+		( REF c.function c.call c.using c.variable c.non_field
+		 c.not_val_used )
+		CPP_SECONDARY_SYMBOL
+	ref_proc_call_using_var_hidden =
+		( HIDDEN )
+
+/*
+ * Tags for label declarations and references
+ */
+	def_label =				/* label: => label */
+		DEF_WEIGHT
+		( DEF c.label )
+		CPP_SECONDARY_SYMBOL
+	def_label_hidden =
+		( HIDDEN )
+
+	ref_label =				/* goto label => label */
+		( REF c.label )
+		CPP_SECONDARY_SYMBOL
+
+/*
+ * Tags for strings
+ */
+	regular_string =			/* "foo" => "foo" */
+		( ALL_HITS BASE.constant BASE.string c.literal )
+		CPP_SECONDARY_STRING
+}
+
+
+menu {
+	CB_MENU_STRING_ALL_MATCHES equiv menu {
+		CB_MENU_STRING_ALL_MATCHES equiv
+			= ( ALL_HITS ) | ( CPP_ALL_HITS )
+			help "All mentions of the symbol"
+
+		"Variables" equiv menu {
+			"All Variables" equiv
+				= ( ALL_HITS c.variable )
+				help "All uses as a variable"
+			"Regular Variables" equiv
+				= ( ALL_HITS c.variable c.non_field )
+				help "All uses as a non-field variable"
+			"Field Variables" equiv menu {
+				"All Fields" equiv
+					= ( ALL_HITS c.variable c.field )
+					help "All uses as a field"
+				"Struct Fields" equiv menu {
+					"All Struct Fields" equiv
+						= ( ALL_HITS c.variable
+						   c.field c.struct )
+						help "All uses as a struct " +
+						  "field"
+					"Regular Struct Fields" equiv
+						= ( ALL_HITS c.variable
+						   c.field c.struct
+						   c.non_bitfield )
+						help "All uses as a struct " +
+						  "non bit-field"
+					"Struct Bitfields" equiv
+						= ( ALL_HITS c.variable
+						   c.field c.struct
+						   c.bitfield )
+						help "All uses as a struct " +
+						  "bit-field"
+				} help "All uses as a struct field"
+				"Union Fields" equiv
+					= ( ALL_HITS c.variable c.field
+					   c.union )
+					help "All uses as a union field"
+			} help "All uses as a field"
+		} help "All uses as a variable"
+
+		"Functions" equiv
+			= ( ALL_HITS c.function )
+			help "All uses as a function"
+
+		"Types" equiv menu {
+			"All Types" equiv
+				= ( ALL_HITS c.type )
+				help "All uses as a type"
+			"Typedefs" equiv
+				= ( ALL_HITS c.type c.user_defined )
+				help "All uses of typedef'd symbols"
+			"Builtin Types" equiv
+				= ( ALL_HITS c.type c.builtin )
+				help "All uses of builtin types"
+		} help "All uses as a type"
+
+		"Type Tags" equiv menu {
+			"All Tags" equiv
+				= ( ALL_HITS c.tag )
+				help "All uses as type tag"
+			"Struct Tags" equiv
+				= ( ALL_HITS c.tag c.struct )
+				help "All uses as struct tag"
+			"Union Tags" equiv
+				= ( ALL_HITS c.tag c.union )
+				help "All uses as union tag"
+			"Enum Tags" equiv
+				= ( ALL_HITS c.tag c.enum )
+				help "All uses as enum tag"
+		} help "All uses as type tag"
+
+		"Labels" equiv
+			= ( ALL_HITS c.label )
+			help "All uses of labels"
+
+		"Constants" equiv menu {
+			"All Constants" equiv
+				= ( ALL_HITS BASE.constant ) |
+				  ( CPP_ALL_HITS BASE.constant cpp.macro )
+				help "All uses of constants"
+			"Enum Members" equiv
+				= ( ALL_HITS BASE.constant c.enum )
+				help "All uses of enum members"
+			"Macro Constants" equiv
+				= ( CPP_ALL_HITS BASE.constant cpp.macro )
+				help "All uses of macros without formals"
+			"Function Constants" equiv
+				= ( ALL_HITS BASE.constant c.function )
+				help "Non-call references to functions"
+		} help "All uses of constants"
+
+		"cpp Symbols" equiv menu {
+			"All Symbols" equiv
+				= ( CPP_ALL_HITS )
+				help "All cpp related symbols"
+			"Macros" equiv menu {
+				"All Macros" equiv
+					= ( CPP_ALL_HITS cpp.macro )
+					help "All cpp macros"
+				"With Formals" equiv
+					= ( CPP_ALL_HITS cpp.macro
+					   cpp.w_formals )
+					help "All cpp macros defined or " +
+					  "referenced with formals"
+				"Without Formals" equiv
+					= ( CPP_ALL_HITS cpp.macro
+					   cpp.wo_formals )
+					help "All cpp macros defined or " +
+					  "referenced without formals"
+			  } help "All cpp macros"
+		} help "All cpp related symbols"
+	} help "All mentions of the symbol"	
+
+	"Declarations" equiv menu {
+		"All Declarations" equiv
+			= ( DEF ) | ( CPP_DEF )
+			help "All declarations"
+
+		"Variables" equiv menu {
+			"All Variables" equiv menu {
+				"All Variables" equiv
+					= ( DEF c.variable )
+					help "All variable declarations"
+				"Uninitialized Variables" equiv
+					= ( DEF c.variable c.non_init )
+					help "All variable declarations " +
+					  "without an initializer"
+				"Initialized Variables" equiv
+					= ( DEF c.variable c.init )
+					help "All variable declarations " +
+					  "with an initializer"
+			} help "All variable declarations"
+			"Static Variables" equiv menu {
+				"All Statics" equiv
+					= ( DEF c.variable c.static )
+					help "All declarations of static " +
+					  "variables"
+				"Uninitialized Statics" equiv
+					= ( DEF c.variable c.static
+					   c.non_init )
+					help "All declarations of static " +
+					  "variables without an initializer"
+				"Initialized Statics" equiv
+					= ( DEF c.variable c.static c.init )
+					help "All declarations of static " +
+					  "variables with an initializer"
+			} help "All declarations of static variables"
+			"Extern Variables" equiv
+				= ( DEF c.variable c.extern )
+				help "All extern variable declarations"
+			"Toplevel Variables" equiv menu {
+				"All Toplevels" equiv menu {
+					"All Variables" equiv
+						= ( DEF c.variable c.toplevel )
+						help "All variable " +
+						  "declarations not in a " +
+						    "function"
+					"Uninitialized Variables" equiv
+						= ( DEF c.variable c.toplevel
+						   c.non_init )
+						help "All variable " +
+						  "declarations not in a " +
+						    "function without an " +
+						      "initializer"
+					"Initialized Variables" equiv
+						= ( DEF c.variable c.toplevel
+						   c.init )
+						help "All variable " +
+						  "declarations not in a " +
+						    "function with an " +
+						      "initializer"
+				} help "All variable declarations not in a " +
+				  "function"
+				"Global Variables" equiv menu {
+					"All Globals" equiv
+						= ( DEF c.variable c.global )
+						help "Global scope variables"
+					"Uninitialized Globals" equiv
+						= ( DEF c.variable c.global
+						   c.non_init )
+						help "Global scope variables" +
+						  " without an intializer"
+					"Initialized Globals" equiv
+						= ( DEF c.variable c.global
+						   c.init )
+						help "Global scope variables" +
+						  " with an intializer"
+				} help "Global scope variables"
+				"Static Toplevels" equiv menu {
+					"All Statics" equiv
+						= ( DEF c.variable c.toplevel
+						   c.static )
+						help "File scope variables"
+					"Uninitialized Statics" equiv
+						= ( DEF c.variable c.toplevel
+						   c.static c.non_init )
+						help "File scope variables" +
+						  " without an intializer"
+					"Initialized Statics" equiv
+						= ( DEF c.variable c.toplevel
+						   c.static c.init )
+						help "File scope variables" +
+						  " with an intializer"
+				} help "File scope variables"
+				"Extern Toplevels" equiv
+					= ( DEF c.variable c.toplevel
+					   c.extern )
+					help "extern variable declarations " +
+					  "not in a function"
+			} help "All variable declarations not in a function"
+			"Local Variables" equiv menu {
+				"All Locals" equiv menu {
+					"All Locals" equiv
+						= ( DEF c.variable c.local )
+						help "All local variable " +
+						  "declarations"
+					"Uninitialized Locals" equiv
+						= ( DEF c.variable c.local
+						   c.non_init )
+						help "All local variable " +
+						  "declarations without an " +
+						    "initializer"
+					"Initialized Locals" equiv
+						= ( DEF c.variable c.local
+						   c.init )
+						help "All local variable " +
+						  "declarations with an " +
+						    "initializer"
+				} help "All local variable declarations"
+				"Auto Locals" equiv menu {
+					"All Autos" equiv
+						= ( DEF c.variable c.local
+						   c.auto )
+						help "On-the-stack locals"
+					"Uninitialized Autos" equiv
+						= ( DEF c.variable c.local
+						   c.auto c.non_init )
+						help "On-the-stack locals " +
+						  "without an initializer"
+					"Initialized Autos" equiv
+						= ( DEF c.variable c.local
+						   c.auto c.init )
+						help "On-the-stack locals " +
+						  "with an initializer"
+				} help "On-the-stack locals"
+				"Register Locals" equiv menu {
+					"All Registers" equiv
+						= ( DEF c.variable c.local
+						   c.auto )
+						help "In register locals"
+					"Uninitialized Registers" equiv
+						= ( DEF c.variable c.local
+						   c.auto c.non_init )
+						help "In register locals " +
+						  "without an intializer"
+					"Initialized Registers" equiv
+						= ( DEF c.variable c.local
+						   c.auto c.init )
+						help "In register locals " +
+						  "with an intializer"
+				} help "In register locals"
+				"Formals" equiv menu {
+					"All Formals" equiv
+						= ( DEF c.variable c.local
+						   c.auto c.formal )
+						help "Formal function argument"
+					"In Formals List" equiv
+						= ( DEF c.variable c.local
+						   c.auto c.list c.formal
+						   c.simple_list )
+						help "Formal argument in the "+
+						  "header list"
+					"In Formals Declaration" equiv menu {
+						"All Formal Declarations" equiv
+							= ( DEF c.variable
+							   c.local c.auto
+							   c.formal c.decl )
+							help "In the type " +
+							  "declaration section"
+						"Regular Declarations" equiv
+							= ( DEF c.variable
+							   c.local c.auto
+							   c.formal c.decl
+							   c.non_register )
+							help "In the type " +
+							 "declaration section"+
+							   ", not register"
+						"register Declarations" equiv
+							= ( DEF c.variable
+							   c.local c.auto
+							   c.formal c.decl
+							   c.register )
+							help "In the type " +
+							 "declaration section"+
+							   ", register"
+					} help "In the type declaration " +
+					  "section"
+				} help "Formal function argument"
+				"Static Locals" equiv menu {
+					"All Statics" equiv
+						= ( DEF c.variable c.local
+						   c.static )
+						help "Function scoped static "+
+						  "variable declarations"
+					"Uninitialized Statics" equiv
+						= ( DEF c.variable c.local
+						   c.static c.non_init )
+						help "Function scoped static "+
+						  "variable declarations " +
+						    "without an initializer"
+					"Initialized Statics" equiv
+						= ( DEF c.variable c.local
+						   c.static c.init )
+						help "Function scoped static "+
+						  "variable declarations " +
+						    "with an initializer"
+				} help "Function scoped static " +
+				  "variable declarations"
+				"Extern Locals" equiv
+					= ( DEF c.variable c.local c.extern)
+					help "Function scoped variable " +
+					  "extern declarations"
+			} help "All local variable declarations"
+			"Fields" equiv menu {
+				"All Fields" equiv
+					= ( DEF c.variable c.field )
+					help "All field declarations"
+				"Struct Fields" equiv menu {
+					"All Fields" equiv
+						= ( DEF c.variable c.field
+						   c.struct )
+						help "All struct field " +
+						  "declarations"
+					"Regular Fields" equiv
+						= ( DEF c.variable c.field
+						   c.struct c.non_bitfield )
+						help "All regular struct " +
+						  "field declarations"
+					"Bitfields" equiv
+						= ( DEF c.variable c.field
+						   c.struct c.bitfield )
+						help "All struct bitfield " +
+						  "declarations"
+				} help "All struct field declarations"
+				"Union Fields" equiv
+					= ( DEF c.variable c.field c.union )
+					help "All union field declarations"
+			} help "All field declarations"
+		} help "All variable declarations"
+
+		"Functions" equiv menu {
+			"All Functions" equiv menu {
+				"All Functions" equiv
+					= ( DEF c.function )
+					help "All function declarations"
+				"Functions With Code Body" equiv
+					= ( DEF c.function c.w_body )
+					help "All function declarations " +
+					  "with an associated body"
+				"Functions Without Code Body" equiv
+					= ( DEF c.function c.wo_body )
+					help "All function declarations " +
+					  "without an associated body"
+			} help "All function declarations"
+			"Static Functions" equiv menu {
+				"All Statics" equiv
+					= ( DEF c.function c.static )
+					help "All static function declarations"
+				"Statics With Code Body" equiv
+					= ( DEF c.function c.static c.w_body )
+					help "All static function " +
+					  "declarations with an " +
+					    "associated body"
+				"Statics Without Code Body" equiv
+					= ( DEF c.function c.static c.wo_body )
+					help "All static function " +
+					  "declarations without an " +
+					    "associated body"
+			} help "All static function declarations"
+			"Extern Functions" equiv menu {
+				"All Externals" equiv
+					= ( DEF c.function c.extern )
+					help "All extern function declarations"
+				"Externals With Code Body" equiv
+					= ( DEF c.function c.extern c.w_body )
+					help "All extern function " +
+					  "declarations with an " +
+					    "associated body"
+				"Externals Without Code Body" equiv
+					= ( DEF c.function c.extern c.wo_body )
+					help "All extern function " +
+					  "declarations without an " +
+					    "associated body"
+			} help "All extern function declarations"
+			"Implicit Functions" equiv menu {
+				"All Implicits" equiv
+					= ( DEF c.function c.implicit )
+					help "Functions declared as int by " +
+					  "being called before declared"
+				"Implicits Value Used" equiv
+					= ( DEF c.function c.implicit
+					   c.val_used )
+					help "Functions declared as int by " +
+					  "being called before declared, " +
+					    "value used"
+				"Implicits Value Not Used" equiv
+					= ( DEF c.function c.implicit
+					   c.not_val_used )
+					help "Functions declared as int by " +
+					  "being called before declared, " +
+					    "value ignored"
+			} help "Functions declared as int by " +
+			  "being called before declared"
+			"Top Level Functions" equiv menu {
+				"All Toplevels" equiv menu {
+					"All Functions" equiv
+						= ( DEF c.function c.toplevel )
+						help "Functions not "+
+						  "declared in another " +
+						    "function"
+					"Functions With Code Body" equiv
+						= ( DEF c.function c.toplevel
+						   c.w_body )
+						help "Functions not "+
+						  "declared in another " +
+						    "function with an " +
+						      "associated body"
+					"Functions Without Code Body" equiv
+						= ( DEF c.function c.toplevel
+						   c.wo_body )
+						help "Functions not "+
+						  "declared in another " +
+						    "function with an " +
+						      "associated body"
+				} help "Functions not declared in another " +
+				  "function"
+				"Global Functions" equiv menu {
+					"All Functions" equiv
+						= ( DEF c.function c.global )
+						help "Global scope fns not "+
+						  "declared in another " +
+						    "function"
+					"Functions With Code Body" equiv
+						= ( DEF c.function c.global
+						   c.w_body )
+						help "Global scope fns not "+
+						  "declared in another " +
+						    "function with an " +
+						      "associated body"
+					"Functions Without Code Body" equiv
+						= ( DEF c.function c.global
+						   c.wo_body )
+						help "Global scope fns not "+
+						  "declared in another " +
+						    "function without an " +
+						      "associated body"
+				} help "Global scope fns not declared in " +
+				  "another function"
+				"Static Toplevels" equiv menu {
+					"All Statics" equiv
+						= ( DEF c.function c.toplevel
+						   c.static )
+						help "File scope fns not "+
+						  "declared in another " +
+						    "function"
+					"Statics With Code Body" equiv
+						= ( DEF c.function c.toplevel
+						   c.static c.w_body )
+						help "File scope fns not "+
+						  "declared in another " +
+						    "function with an " +
+						      "associated body"
+					"Statics Without Code Body" equiv
+						= ( DEF c.function c.toplevel
+						   c.static c.wo_body )
+						help "File scope fns not "+
+						  "declared in another " +
+						    "function without an " +
+						      "associated body"
+				} help "Global scope fns not declared in " +
+				  "another function"
+				"Extern Toplevels" equiv menu {
+					"All Externals" equiv
+						= ( DEF c.function c.toplevel
+						   c.extern )
+						help "Extern fns not "+
+						  "declared in another " +
+						    "function"
+					"Externals With Code Body" equiv
+						= ( DEF c.function c.toplevel
+						   c.extern c.w_body )
+						help "Extern fns not "+
+						  "declared in another " +
+						    "function with an " +
+						      "associated body"
+					"Externals Without Code Body" equiv
+						= ( DEF c.function c.toplevel
+						   c.extern c.wo_body )
+						help "Extern fns not "+
+						  "declared in another " +
+						    "function without an " +
+						      "associated body"
+				} help "Extern fns not declared in another " +
+				  "function"
+			} help "Functions not declared in another function"
+			"Local Functions" equiv menu {
+				"All Locals" equiv
+					= ( DEF c.function c.local )
+					help "Function stubs declared" +
+					  " in a function scope"
+				"Static Locals" equiv
+					= ( DEF c.function c.local c.static )
+					help "static function stubs declared" +
+					  " in a function scope"
+				"Extern Locals" equiv
+					= ( DEF c.function c.local c.extern )
+					help "extern function stubs declared" +
+					  " in a function scope"
+			} help "Function stubs declared in a function scope"
+		} help "All function declarations"
+
+		"Typedefs" equiv
+			= ( DEF c.type )
+			help "typedef declarations"
+
+		"Type Tags" equiv menu {
+			"All Tags" equiv menu {
+				"All Tags" equiv
+					= ( DEF c.tag )
+					help "All type tag declarations"
+				"Specified Tags" equiv
+					= ( DEF c.tag c.named )
+					help "All named type tag declarations"
+				"Anonymous Tags" equiv
+					= ( DEF c.tag c.anonymous )
+					help "All anonymous type tag " +
+					  "declarations"
+			} help "All type tag declarations"
+			"Struct Tags" equiv menu {
+				"All Tags" equiv
+					= ( DEF c.tag c.struct )
+					help "All struct tag declarations"
+				"Specified Tags" equiv
+					= ( DEF c.tag c.struct c.named )
+					help "All named struct tag " +
+					  "declarations"
+				"Anonymous Tags" equiv
+					= ( DEF c.tag c.struct c.anonymous )
+					help "All anonymous struct tag " +
+					  "declarations"
+			} help "All struct tag declarations"
+			"Union Tags" equiv menu {
+				"All Tags" equiv
+					= ( DEF c.tag c.union )
+					help "All union tag declarations"
+				"Specified Tags" equiv
+					= ( DEF c.tag c.union c.named )
+					help "All named union tag declarations"
+				"Anonymous Tags" equiv
+					= ( DEF c.tag c.union c.anonymous )
+					help "All anonymous union tag " +
+					  "declarations"
+			} help "All union tag declarations"
+			"Enum Tags" equiv menu {
+				"All Tags" equiv
+					= ( DEF c.tag c.enum )
+					help "All enum tag declarations"
+				"Specified Tags" equiv
+					= ( DEF c.tag c.enum c.named )
+					help "All named enum tag declarations"
+				"Anonymous Tags" equiv
+					= ( DEF c.tag c.enum c.anonymous )
+					help "All anonymous enum tag " +
+					  "declarations"
+			} help "All enum tag declarations"
+		} help "All type tag declarations"
+
+		"Labels" equiv
+			= ( DEF c.label )
+			help "All label declarations"
+
+		"Constants" equiv menu {
+			"All Constants" equiv
+				= ( DEF BASE.constant ) |
+				  ( CPP_DEF BASE.constant cpp.macro )
+				help "All constant declarations"
+			"Enum Members" equiv menu {
+				"All Members" equiv
+					= ( DEF BASE.constant c.enum )
+					help "All enum member declarations"
+				"Uninitialized Members" equiv
+					= ( DEF BASE.constant c.enum
+					   c.non_init )
+					help "All enum member declarations " +
+					  "without a specified value"
+				"Initialized Members" equiv
+					= ( DEF BASE.constant c.enum c.init )
+					help "All enum member declarations " +
+					  "with a specified value"
+			} help "All enum member declarations"
+			"Macro Constants" equiv
+				= ( CPP_DEF BASE.constant cpp.macro )
+				help "All cpp macro declarations without " +
+				  "formals"
+		} help "All constant declarations"
+
+		"cpp Symbols" equiv menu {
+			"All Symbols" equiv
+				= ( CPP_DEF )
+				help "Declarations of cpp symbols"
+			"Macros" equiv menu {
+				"All Macros" equiv
+					= ( CPP_DEF cpp.macro ) |
+					  ( CPP_DEF cpp.from_undef )
+					help "All macro definitions"
+				"With Formals" equiv
+					= ( CPP_DEF cpp.macro cpp.w_formals )
+					help "All cpp macros defined " +
+					  "with formals"
+				"Without Formals" equiv
+					= ( CPP_DEF cpp.macro cpp.wo_formals )
+					help "All cpp macros defined " +
+					  "without formals"
+				"From #undef" equiv
+					= ( CPP_DEF cpp.from_undef )
+					help "Undeclaration of macro"
+			} help "All macro definitions"
+			"Macro Formals" equiv
+				= ( CPP_DEF cpp.formal )
+				help "Macro formal defintions"
+		} help "Declarations of cpp symbols"
+	} help "All declarations"
+
+	"References" equiv menu {
+		"All References" equiv
+			= ( REF ) | ( CPP_REF )
+			help "All references to symbols"
+
+		"Variables" equiv menu {
+			"All Variables" equiv menu {
+				"All" equiv
+					= ( REF c.variable )
+					help "All references to variables " +
+					  "or fields"
+				"Write" equiv
+					= ( REF c.variable c.write )
+					help "All references to variables " +
+					  "or fields for write"
+				"Read" equiv
+					= ( REF c.variable c.read )
+					help "All references to variables " +
+					  "or fields for read"
+				"Read/Write" equiv
+					= ( REF c.variable c.read c.write )
+					help "All references to variables " +
+					  "or fields for update"
+				"Sizeof" equiv
+					= ( REF c.variable c.sizeof )
+					help "All references to variables " +
+					  "or fields from sizeof"
+				"Address of" equiv
+					= ( REF c.variable c.addrof )
+					help "All references to variables " +
+					  "or fields to get address"
+			} help "All references to variables or fields"
+			"Non-Field Variables" equiv menu {
+				"All" equiv
+					= ( REF c.variable c.non_field )
+					help "All references to variables"
+				"Write" equiv
+					= ( REF c.variable c.non_field
+					   c.write )
+					help "All references to variables " +
+					  "for write"
+				"Read" equiv
+					= ( REF c.variable c.non_field
+					   c.read )
+					help "All references to variables " +
+					  "for read"
+				"Read/Write" equiv
+					= ( REF c.variable c.non_field
+					   c.read c.write )
+					help "All references to variables " +
+					  "for update"
+				"Sizeof" equiv
+					= ( REF c.variable c.non_field
+						c.sizeof )
+					help "All references to variables " +
+					  "from sizeof"
+				"Address of" equiv
+					= ( REF c.variable c.non_field
+						c.addrof )
+					help "All references to variables " +
+				  "to get address"
+			} help "All references to variables"
+			"Fields" equiv menu {
+				"All Fields" equiv menu {
+					"All" equiv
+						= ( REF c.variable c.field )
+						help "All references to fields"
+					"Write" equiv
+						= ( REF c.variable c.field
+						   c.write )
+						help "All references to fields"
+						  + " for write"
+					"Read" equiv
+						= ( REF c.variable c.field
+						   c.read )
+						help "All references to fields"
+						  + " for read"
+					"Read/Write" equiv
+						= ( REF c.variable c.field
+						   c.read c.write )
+						help "All references to fields"
+						  + " for update"
+					"Sizeof" equiv
+						= ( REF c.variable c.field
+							c.sizeof )
+						help "All references to " +
+						  "fields from sizeof"
+					"Address of" equiv
+						= ( REF c.variable c.field
+							c.addrof )
+						help "All references to " +
+						  "fields to get address"
+				} help "All references to fields"
+				"Struct Fields" equiv menu {
+					"All Struct Fields" equiv menu {
+						"All" equiv
+							= ( REF c.variable
+							   c.struct c.field )
+							help "All struct field"
+							  + " references"
+						"Write" equiv
+							= ( REF c.variable
+							   c.struct c.field
+							   c.write )
+							help "All struct field"
+							  + " references " +
+							    "for write"
+						"Read" equiv
+							= ( REF c.variable
+							   c.struct c.field
+							   c.read )
+							help "All struct field"
+							  + " references " +
+							    "for read"
+						"Read/Write" equiv
+							= ( REF c.variable
+							   c.struct c.field
+							   c.read c.write )
+							help "All struct field"
+							  + " references " +
+							    "for update"
+						"Sizeof" equiv
+							= ( REF c.variable
+							   c.field
+							   c.struct c.sizeof )
+							help "All references "+
+							  "to struct fields "+
+							    "from sizeof"
+						"Address of" equiv
+							= ( REF c.variable
+							   c.field
+							   c.struct c.addrof )
+							help "All references "+
+							  "to struct fields " +
+							    "to get address"
+					} help "All struct field references"
+					"Regular Struct Fields" equiv menu {
+						"All" equiv
+							= ( REF c.variable
+							   c.struct c.field
+							   c.non_bitfield )
+							help "All references "+
+							  "to regular struct "+
+							    "fields"
+						"Write" equiv
+							= ( REF c.variable
+							   c.struct c.field
+							   c.non_bitfield
+							   c.write )
+							help "Write references "+
+							  "to regular struct "+
+							    "fields"
+						"Read" equiv
+							= ( REF c.variable
+							   c.struct c.field
+							   c.non_bitfield
+							   c.read )
+							help "Read references "+
+							  "to regular struct "+
+							    "fields"
+						"Read/Write" equiv
+							= ( REF c.variable
+							   c.struct c.field
+							   c.non_bitfield
+							   c.read c.write )
+							help "Update references "+
+							  "to regular struct "+
+							    "fields"
+						"Sizeof" equiv
+							= ( REF c.variable
+							   c.field
+							   c.non_bitfield
+							   c.struct c.sizeof )
+							help "All references "+
+							  "to struct fields "+
+							    "from sizeof"
+						"Address of" equiv
+							= ( REF c.variable
+							   c.field
+							   c.non_bitfield
+							   c.struct c.addrof )
+							help "All references "+
+							  "to struct fields " +
+							    "to get address"
+					} help "All references to regular " +
+					  "struct fields"
+					"Struct Bitfields" equiv menu {
+						"All" equiv
+							= ( REF c.variable
+							   c.struct c.field
+							   c.bitfield )
+							help "References to "+
+							  "bitfields"
+						"Write" equiv
+							= ( REF c.variable
+							   c.struct c.field
+							   c.bitfield
+							   c.write )
+							help "References to "+
+							  "bitfields for " +
+							    "write"
+						"Read" equiv
+							= ( REF c.variable
+							   c.struct c.field
+							   c.bitfield
+							   c.read )
+							help "References to "+
+							  "bitfields for " +
+							    "read"
+						"Read/Write" equiv
+							= ( REF c.variable
+							   c.struct c.field
+							   c.bitfield
+							   c.read c.write )
+							help "References to "+
+							  "bitfields for " +
+							    "update"
+						"Sizeof" equiv
+							= ( REF c.variable
+							   c.field
+							   c.bitfield
+							   c.struct c.sizeof )
+							help "All references "+
+							  "to struct fields "+
+							    "from sizeof"
+					} help "References to bitfields"
+				} help "All struct field references"
+				"Union Fields" equiv menu {
+					"All" equiv
+						= ( REF c.variable c.union
+						   c.field )
+						help "All union field " +
+						  "references"
+					"Write" equiv
+						= ( REF c.variable c.union
+						   c.field c.write )
+						help "All union field " +
+						  "references for write"
+					"Read" equiv
+						= ( REF c.variable c.union
+						   c.field c.read )
+						help "All union field " +
+						  "references for read"
+					"Read/Write" equiv
+						= ( REF c.variable c.union
+						   c.field c.read c.write )
+						help "All union field " +
+						  "references for update"
+					"Sizeof" equiv
+						= ( REF c.variable c.field
+							c.union c.sizeof )
+						help "All references to " +
+						  "union fields from sizeof"
+					"Address of" equiv
+						= ( REF c.variable c.field
+							c.union c.addrof )
+						help "All references to " +
+						  "union fields to get address"
+				} help "All union field references"
+			} help "All references to fields"
+		} help "All references to variables or fields"
+
+		"Functions" equiv menu {
+			"All Functions" equiv
+				= ( REF c.function )
+				help "All function references"
+			"Regular Function Calls" equiv menu {
+				"All" equiv
+					= ( REF c.function c.call c.plain )
+					help "All calls to constant functions"
+				"Return Value Used" equiv
+					= ( REF c.function c.call c.plain
+					   c.val_used )
+					help "All calls to constant functions"
+					  + " where the value was used"
+				"Return Value Not Used" equiv
+					= ( REF c.function c.call c.plain
+					   c.not_val_used )
+					help "All calls to constant functions"
+					  + " where the value was ignored"
+			} help "All calls to constant functions"
+			"Function Calls Using Pointer" equiv menu {
+				"All" equiv
+					= ( REF c.function c.call c.using )
+					help "All calls using a function " +
+					  "pointer"
+				"Return Value Used" equiv
+					= ( REF c.function c.call c.using
+					   c.val_used )
+					help "All calls using a function " +
+					  "pointer"
+					  + " where the value was used"
+				"Return Value Not Used" equiv
+					= ( REF c.function c.call c.using
+					   c.not_val_used )
+					help "All calls using a function " +
+					  "pointer"
+					  + " where the value was ignored"
+			} help "All calls using a function pointer"
+			"Function Pointer Assignments" equiv
+				= ( REF c.function BASE.constant )
+				help "All references to function names from " +
+				  "expressions"
+		} help "All function references"
+
+		"Types" equiv menu {
+			"All Types" equiv menu {
+				"All References" equiv
+					= ( REF c.type )
+					help "All references to types"
+				"From Declaration" equiv
+					= ( REF c.type c.decl )
+					help "All references to types"
+					  + " from declarations"
+				"From Cast" equiv
+					= ( REF c.type c.cast )
+					help "All references to types"
+					  + " from casts"
+				"From Sizeof" equiv
+					= ( REF c.type c.sizeof )
+					help "All references to types"
+					  + " from sizeof operators"
+			} help "All references to types"
+			"Typedefs" equiv menu {
+				"All References" equiv
+					= ( REF c.type c.user_defined )
+					help "All references to typedefs"
+				"From Declaration" equiv
+					= ( REF c.type c.user_defined c.decl )
+					help "All references to typedefs"
+					  + " from declarations"
+				"From Cast" equiv
+					= ( REF c.type c.user_defined c.cast )
+					help "All references to typedefs"
+					  + " from casts"
+				"From Sizeof" equiv
+					= ( REF c.type c.user_defined
+					   c.sizeof )
+					help "All references to typedefs"
+					  + " from sizeof operators"
+			} help "All references to typedefs"
+			"Builtin Types" equiv menu {
+				"All References" equiv
+					= ( REF c.type c.builtin )
+					help "All references to builtin types"
+				"From Declaration" equiv
+					= ( REF c.type c.builtin c.decl )
+					help "All references to builtin types"
+					  + " from declarations"
+				"From Cast" equiv
+					= ( REF c.type c.builtin c.cast )
+					help "All references to builtin types"
+					  + " from casts"
+				"From Sizeof" equiv
+					= ( REF c.type c.builtin c.sizeof )
+					help "All references to builtin types"
+					  + " from sizeof operators"
+			} help "All references to builtin types"
+		} help "All references to types"
+
+		"Type Tags" equiv menu {
+			"All Tags" equiv menu {
+				"All References" equiv
+					= ( REF c.tag )
+					help "All references to type tags"
+				"From Declaration" equiv
+					= ( REF c.tag c.decl )
+					help "All references to type tags"
+					  + " from declarations"
+				"From Cast" equiv
+					= ( REF c.tag c.cast )
+					help "All references to type tags"
+					  + " from casts"
+				"From Sizeof" equiv
+					= ( REF c.tag c.sizeof )
+					help "All references to type tags"
+					  + " from sizeof operators"
+			} help "All references to type tags"
+			"Struct Tags" equiv menu {
+				"All References" equiv
+					= ( REF c.tag c.struct )
+					help "All references to struct tags"
+				"From Declaration" equiv
+					= ( REF c.tag c.struct c.decl )
+					help "All references to struct tags"
+					  + " from declarations"
+				"From Cast" equiv
+					= ( REF c.tag c.struct c.cast )
+					help "All references to struct tags"
+					  + " from casts"
+				"From Sizeof" equiv
+					= ( REF c.tag c.struct c.sizeof )
+					help "All references to struct tags"
+					  + " from sizeof operators"
+			} help "All references to struct tags"
+			"Union Tags" equiv menu {
+				"All References" equiv
+					= ( REF c.tag c.union )
+					help "All references to union tags"
+				"From Declaration" equiv
+					= ( REF c.tag c.union c.decl )
+					help "All references to union tags"
+					  + " from declarations"
+				"From Cast" equiv
+					= ( REF c.tag c.union c.cast )
+					help "All references to union tags"
+					  + " from casts"
+				"From Sizeof" equiv
+					= ( REF c.tag c.union c.sizeof )
+					help "All references to union tags"
+					  + " from sizeof operators"
+			} help "All references to union tags"
+			"Enum Tags" equiv menu {
+				"All References" equiv
+					= ( REF c.tag c.enum )
+					help "All references to enum tags"
+				"From Declaration" equiv
+					= ( REF c.tag c.enum c.decl )
+					help "All references to enum tags"
+					  + " from declarations"
+				"From Cast" equiv
+					= ( REF c.tag c.enum c.cast )
+					help "All references to enum tags"
+					  + " from casts"
+				"From Sizeof" equiv
+					= ( REF c.tag c.enum c.sizeof )
+					help "All references to enum tags"
+					  + " from sizeof operators"
+			} help "All references to enum tags"
+		} help "All references to type tags"
+
+		"From Declaration" equiv menu {
+			"All Declarations" equiv
+				= ( REF c.decl )
+				help "References to types and tags " +
+				  "from declarations"
+			"Types" equiv menu {
+				"All Types" equiv
+					= ( REF c.decl c.type )
+					help "References to types " +
+					  "from declarations"
+				"Builtin Types" equiv
+					= ( REF c.decl c.type c.builtin )
+					help "References to builtin types " +
+					  "from declarations"
+				"Typedefs" equiv
+					= ( REF c.decl c.type c.user_defined )
+					help "References to typedefs " +
+					  "from declarations"
+			} help "References to types from declarations"
+			"Type Tags" equiv menu {
+				"All Tags" equiv
+					= ( REF c.decl c.tag )
+					help "References to type tags " +
+					  "from declarations"
+				"Struct Tags" equiv
+					= ( REF c.decl c.tag c.struct )
+					help "References to struct tags " +
+					  "from declarations"
+				"Union Tags" equiv
+					= ( REF c.decl c.tag c.union )
+					help "References to union tags " +
+					  "from declarations"
+				"Enum Tags" equiv
+					= ( REF c.decl c.tag c.enum )
+					help "References to type tags " +
+					  "from declarations"
+			} help "References to type tags from declarations"
+		} help "References to types and tags from declarations"
+
+		"From Cast" equiv menu {
+			"All Casts" equiv
+				= ( REF c.cast )
+				help "References to types and tags " +
+				  "from casts"
+			"Types" equiv menu {
+				"All Types" equiv
+					= ( REF c.cast c.type )
+					help "References to types " +
+					  "from casts"
+				"Builtin Types" equiv
+					= ( REF c.cast c.type c.builtin )
+					help "References to builtin types " +
+					  "from casts"
+				"Typedefs" equiv
+					= ( REF c.cast c.type c.user_defined )
+					help "References to typedefs " +
+					  "from casts"
+			} help "References to types from casts"
+			"Type Tags" equiv menu {
+				"All Tags" equiv
+					= ( REF c.cast c.tag )
+					help "References to type tags " +
+					  "from casts"
+				"Struct Tags" equiv
+					= ( REF c.cast c.tag c.struct )
+					help "References to struct tags " +
+					  "from casts"
+				"Union Tags" equiv
+					= ( REF c.cast c.tag c.union )
+					help "References to union tags " +
+					  "from casts"
+				"Enum Tags" equiv
+					= ( REF c.cast c.tag c.enum )
+					help "References to type tags " +
+					  "from casts"
+			} help "References to type tags from casts"
+		} help "References to types and tags from casts"
+
+		"From Sizeof" equiv menu {
+			"All Sizeofs" equiv
+				= ( REF c.sizeof )
+				help "References to types and tags " +
+				  "from sizeof operators"
+			"Types" equiv menu {
+				"All Types" equiv
+					= ( REF c.sizeof c.type )
+					help "References to types " +
+					  "from sizeof operators"
+				"Builtin Types" equiv
+					= ( REF c.sizeof c.type c.builtin )
+					help "References to builtin types " +
+					  "from sizeof operators"
+				"Typedefs" equiv
+					= ( REF c.sizeof c.type 
+					   c.user_defined )
+					help "References to typedefs " +
+					  "from sizeof operators"
+			} help "References to types from sizeof operators"
+			"Type Tags" equiv menu {
+				"All Tags" equiv
+					= ( REF c.sizeof c.tag )
+					help "References to type tags " +
+					  "from sizeof operators"
+				"Struct Tags" equiv
+					= ( REF c.sizeof c.tag c.struct )
+					help "References to struct tags " +
+					  "from sizeof operators"
+				"Union Tags" equiv
+					= ( REF c.sizeof c.tag c.union )
+					help "References to union tags " +
+					  "from sizeof operators"
+				"Enum Tags" equiv
+					= ( REF c.sizeof c.tag c.enum )
+					help "References to type tags " +
+					  "from sizeof operators"
+			} help "References to type tags from sizeof operators"
+			"Variables" equiv menu {
+				"All Variables" equiv
+					= ( REF c.variable c.sizeof )
+					help "All references to variables " +
+						  "or fields from sizeof"
+				"Non-Field Variables" equiv
+					= ( REF c.variable c.non_field
+					   c.sizeof )
+					help "All references to variables " +
+					  "from sizeof"
+				"Fields" equiv menu {
+					"All Fields" equiv
+						= ( REF c.variable c.field
+						   c.sizeof )
+						help "All references to " +
+						  "fields from sizeof"
+					"Struct Fields" equiv menu {
+						"All Struct Fields" equiv
+							= ( REF c.variable
+							   c.struct c.field
+							   c.sizeof )
+							help "All struct field"
+							  + " references " +
+							    "from sizeof"
+						"Regular Struct Fields" equiv
+							= ( REF c.variable
+							   c.struct c.field
+							   c.non_bitfield
+							   c.sizeof )
+							help "All references "+
+							  "to regular struct "+
+							    "fields from " +
+							      "sizeof"
+						"Struct Bitfields" equiv
+							= ( REF c.variable
+							   c.struct c.field
+							   c.bitfield
+							   c.sizeof )
+							help "References to "+
+							  "bitfields from " +
+							    "sizeof"
+					} help "All struct field references"
+					"Union Fields" equiv
+						= ( REF c.variable c.union
+						   c.field c.sizeof )
+						help "All union field " +
+						  "references from sizeof"
+				} help "All references to fields from sizeof"
+			} help "All references to variables or fields " +
+			  "from sizeof"
+		} help "References to types and tags from sizeof operators"
+
+		"From Address Of" equiv menu {
+			"All Variables" equiv
+				= ( REF c.variable c.addrof )
+				help "All references to variables " +
+					  "or fields from address of"
+			"Non-Field Variables" equiv
+				= ( REF c.variable c.non_field c.addrof )
+				help "All references to variables from " +
+					"address of"
+			"Fields" equiv menu {
+				"All Fields" equiv
+					= ( REF c.variable c.field c.addrof )
+					help "All references to fields from " +
+					  "address of"
+				"Struct Fields" equiv
+					= ( REF c.variable
+					   c.struct c.field c.addrof )
+					help "All struct field"
+					  + " references from address of"
+				"Union Fields" equiv
+					= ( REF c.variable c.union
+					   c.field c.addrof )
+					help "All union field " +
+					  "references from address of"
+			} help "All references to fields from address of"
+		} help "References to variables from address of operators"
+
+		"Labels" equiv
+			= ( REF c.label )
+			help "All references to labels"
+
+		"Constants" equiv menu {
+			"All Constants" equiv
+				= ( REF BASE.constant ) |
+				  ( CPP_REF BASE.constant cpp.macro )
+				help "All references to constants"
+			"Enum Members" equiv
+				= ( REF BASE.constant c.enum )
+				help "all references to enum member constants"
+			"Macros" equiv
+				= ( CPP_REF BASE.constant cpp.macro )
+				help "All references to cpp constants"
+		} help "All references to constants"
+
+		"cpp Symbols" equiv menu {
+			"All Symbols" equiv
+				= ( CPP_REF )
+				help "All cpp symbol references"
+			"Macros" equiv menu {
+				"All Macros" equiv menu {
+					"All Macros" equiv
+						= ( CPP_REF cpp.macro )
+						help "All macro references"
+					"From The Source" equiv
+						= ( CPP_REF cpp.macro
+						   cpp.from_source )
+						help "All macros referenced " +
+						  "from the source"
+					"From #if..." equiv menu {
+						"All #if..." equiv
+							= ( CPP_REF cpp.macro
+							   cpp.if )
+							help "All macros " +
+							  "referenced from " +
+							    "some kind of " +
+							      "#if statement"
+						"From #if" equiv
+							= ( CPP_REF cpp.macro
+							   cpp.from_if )
+							help "All macros " +
+							  "referenced from " +
+							    "#if"
+						"From #ifdef" equiv
+							= ( CPP_REF cpp.macro
+							   cpp.from_ifdef )
+							help "All macros " +
+							  "referenced from " +
+							    "#ifdef"
+						"From #ifndef" equiv
+							= ( CPP_REF cpp.macro
+							   cpp.from_ifndef )
+							help "All macros " +
+							  "referenced from " +
+							    "#ifndef"
+					} help "All macros referenced from " +
+					  "some kind of #if statement"
+				} help "All macro references"
+				"With Formals" equiv
+					= ( CPP_REF cpp.macro cpp.w_formals )
+					help "All macros referenced with " +
+					  "formals"
+				"Without Formals" equiv menu {
+					"All Macros" equiv
+						= ( CPP_REF cpp.macro
+						   cpp.w_formals )
+						help "All macros referenced " +
+						  "without formals"
+					"From The Source" equiv
+						= ( CPP_REF cpp.macro
+						   cpp.w_formals
+						   cpp.from_source )
+						help "All macros referenced " +
+						  "without formals from the " +
+						    "source"
+					"From #if..." equiv menu {
+						"All #if..." equiv
+							= ( CPP_REF cpp.macro
+							   cpp.if )
+							help "All macros " +
+							  "referenced from " +
+							    "some kind of " +
+							      "#if statement"
+						"From #if" equiv
+							= ( CPP_REF cpp.macro
+							   cpp.from_if )
+							help "All macros " +
+							  "referenced from " +
+							    "#if"
+						"From #ifdef" equiv
+							= ( CPP_REF cpp.macro
+							   cpp.from_ifdef )
+							help "All macros " +
+							  "referenced from " +
+							    "#ifdef"
+						"From #ifndef" equiv
+							= ( CPP_REF cpp.macro
+							   cpp.from_ifndef )
+							help "All macros " +
+							  "referenced from " +
+							    "#ifndef"
+					} help "All macros referenced from " +
+					  "some kind of #if statement"
+				} help "All macros referenced with formals"
+
+			} help "All macro references"
+			"Macro Actuals" equiv menu {
+				"All Actuals" equiv
+					= ( CPP_REF cpp.actual )
+					help "All references to macro actuals"
+				"Regular Actuals" equiv
+					= ( CPP_REF cpp.actual cpp.regular )
+					help "All references to macro actuals"+
+					  " that are not strings"
+				"String Actuals" equiv
+					= ( CPP_REF cpp.actual BASE.string )
+					help "All references to macro actuals"+
+					  " that are strings"
+			} help "All references to macro actuals"
+			"Macro Formals" equiv
+				= ( CPP_REF cpp.formal )
+				help "All references to macro formals"
+			"From Macro Body" equiv menu {
+				"All Body References" equiv
+					= ( CPP_REF cpp.in_body )
+					help "All references to non-formals " +
+					  "and strings from macro bodies"
+				"Regular" equiv
+					= ( CPP_REF cpp.in_body cpp.regular )
+					help "All references to non-formal " +
+					  "symbols from macro bodies"
+				"Strings" equiv
+					= ( CPP_REF cpp.in_body BASE.string )
+					help "All references to " +
+					  "strings from macro bodies"
+			} help "All references to non-formals " +
+			  "and strings from macro bodies"
+		} help "All cpp symbol references"
+	} help "All references to symbols"
+
+	"cpp Flow Control" equiv menu {
+		"Active #if/#ifdef/#ifndef blocks" equiv
+			= ( CPP_DEF cpp.active )
+			help "#if/#ifdef/#ifndef statements that " +
+			  "included their code"
+		"Inactive #if/#ifdef/#ifndef blocks" equiv
+			= ( CPP_DEF cpp.inactive )
+			help "#if/#ifdef/#ifndef statements that did not " +
+			  "include their code"
+	}
+
+	"Strings" equiv menu {
+		"All Strings" equiv
+			= ( ALL_HITS BASE.string )
+			help "All references to strings"
+		"Regular Strings" equiv
+			= ( ALL_HITS BASE.string c.literal )
+			help "All strings from the regular program text"
+		"#include String" equiv menu {
+			"All #include" equiv
+				= ( ALL_HITS BASE.string cpp.included_file )
+				help "All strings used from #include " +
+				  "directives"
+			"#include <>" equiv
+				= ( ALL_HITS BASE.string cpp.included_file
+				   cpp.system )
+				help "All strings used from #include " +
+				  "directives for system files"
+			'#include ""' equiv
+				= ( ALL_HITS BASE.string cpp.included_file
+				   cpp.local )
+				help "All strings used from #include " +
+				  "directives for local files"
+		} help "All strings used from #include directives"
+		"#ident String" equiv
+			= ( ALL_HITS cpp.ident )
+	} help "All references to strings"
+
+	BASE_STANDARD_MENU_ITEMS
+}
+
+
+#undef DEF
+#undef REF

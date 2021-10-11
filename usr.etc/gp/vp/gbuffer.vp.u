@@ -1,0 +1,33 @@
+| "@(#)gbuffer.vp.u 1.1 94/10/31"
+| Copyright 1986 by Sun Microsystems, Inc.
+
+
+#define tmp16 r[16]
+
+
+
+|	movw frameptr,y;	am->shmemp;	jmap SET_ZBUF;	;
+SET_ZBUF: movw d,tmp16;		shmem->am;	cjs,go gb_board_inq;;			  | tmp16 <- fbindx for this frame
+											  | check whether gbuffer is present
+	xorw,s tmp16,acc,y;	;		cjp,neg nozbuf;	;			  | if not, goto nozbuf; else if gbuffer is
+	add2nw 8,frameptr,tmp16;am->shmemp;	cjp,zer zbuf;	;			  | associated with this frame buffer, goto
+											  | zbuf; shmemp <- addr of clipping list
+nozbuf:	addw d,cmdptr,cmdptr;	6->am;		;		;			  | SETZBUF cmd is invalid; cmdptr += 6
+	;			;		jmap getcmd;	;			  | jump to cmd loop
+
+zbuf:	movw PPSTCLIP,acc;	=wrfifo->brreg;	;		;			  | send PPSTCLIP command to PP
+	IMM;			am->fifo1;	cjs,f1f;	;
+	movw d,acc;		shmem->am;	cjs,go;		;		shp+	  | acc <- # of rectangles & send to PP
+setzb1:sub2nw,s 0,acc;		;		push,go 3;	;			  | 4 values in one rectangle.
+	;			shmem->fifo1;	cjp,f1f .;	;
+	;			;		rfct;		;		shp+
+	;			;		cjp, ~zer setzb1;;
+	movw d,acc;		PPSETBUF->am;	cjs,go;		;			  | send PPSETBUF command to PP
+	incw cmdptr,y;		am->shmemp;	push,go 4;	;			  | shmemp <- addr of command args
+	;			shmem->fifo1;	cjp,f1f .;	;			  | send 5 args to PP: 16-bit value, screen
+	;			6->am;		rfct;		;		shp+	  | X, screen Y, width, height
+	addw d,cmdptr,cmdptr;	;		jmap getcmd;	;			  | cmdptr += 6; jump to cmd loop
+
+
+
+#undef tmp16

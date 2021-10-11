@@ -1,0 +1,16 @@
+| "@(#)ack.pp.u 1.1 94/10/31 SMI"
+
+| Copyright 1985 by Sun Microsystems, Inc.
+
+|   ppack:  Acknowledgement from painting processor to outside world.
+
+
+ppack:	movw d, r[0];		fifo1->am;	cjp, f1e ppack;			| 
+	;			GPAddress->scrmemp; ;				| 
+	testw (d);		scrmem->am;	;				| 
+	;			scrmem->vhiareg; cjp, zer .;			| If GPAddress was never initialized then loop.
+	;			0x8002->vloareg; ;				| 
+ppack0:	;			;		cjp, ~vir ppack0;		| 
+	;			GPVWord->vctlreg;;				| 
+	movw r[0], y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+	;			;		cjp, go start;			| 

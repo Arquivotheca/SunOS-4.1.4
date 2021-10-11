@@ -1,0 +1,278 @@
+| @(#)zbline.vp.u 1.1 94/10/31 SMI
+
+| Copyright (c) 1988 by Sun Microsystems, Inc.
+| Written by Stuart Levy
+
+
+| Z Buffered Lines  **  Implementation steps (similar to those used in polyscan3.vp.u)
+|   			1.  Determine if x or y is major axis, for dz/dmajoraxis calculation (we will refer to dmaj for convenience).
+|   			2.  Compute dmaj from xformed, clipped values.
+|   			3.  Shift z1 and z2 up 7 bits, since start with 16 bits, and have 23 bits of precision in fix routine.
+|   			    This gives us a 7 bit fractional value.
+|   			4.  Compute 1/dmaj
+|   			5.  Compute dz from transformed, clipped values.
+|   			6.  Viewport scale and offset z values.
+|   			7.  Fix result, which gives 23 bits of precision + sign bit (format is 8.16)
+|   			8.  Rotate dz/dmaj, z1 & z2 up by 9 bits, yielding a 16.16, unsigned value 
+|   			9.  Send 32 bit z value to PP (all other parameters previously sent)
+|   
+|   			Floating point register addresses for xf_line_flt_3d & xf_line_int_3d
+|   				store pt1	stored at fpr[64] (fpdp=64)
+|   				store pt2	stored at fpr[68] (fpdp=68)
+|				xform pt1	inptr=64, outptr = 72 => w1 @ 75
+|				xform pt2	inptr=68, outptr = 76 => w2 @ 79
+|   				clip vector	inptr=72, outptr = x
+|				vwp pts 1 & 2	inptr=72, outptr = 80	(x1,y1,x2,y2) => store z1, z2 at fpr[84,85]
+|   				store xf pt2	stored at fpr[88] (this is done before we clip)
+|   
+|   			Viewport scaling parameters are stored at fpr[32] (xscl,xoff,yscl,yoff,zscl,zoff) 
+|   
+|   							       -----------------------|   
+| 			Format of floating point values:      |	S |  Exp. |  Mantissa |
+|   							       -----------------------
+|   								1    8         23
+
+#define zbdcln		r[25]
+
+#define inptr		r[15]	/* initialized to point to xformed x1, fpr[72] */
+#define outptr		r[14]	/* initialized to point to xformed,viewport scaled & fixed x1, fpr[80] */
+#define parallel	r[5]	/* this is set by 3Dfp.vp.u, and is true if a parallel projection occured */
+#define majptr		r[3]	/* register that points to either x1 or y1, for when we compute dmaj/dmajoraxis */
+#define recaddr 	r[2]
+#define temphi		r[1]
+#define tempy1		r[1]
+#define tempdy		r[1]
+#define templo		r[0]
+#define tempx1		r[0]
+#define tempdx		r[0]
+
+|   Floating point addresses where relevant values are stored
+#define W1REC		0	/* w1 and w2 recips computed by 3Dfp.vp.u */
+
+#define ZSCL		36
+#define ZOFF		37
+
+#define DMAJREC		42
+#define Z1SCL		44	/* these are used by depthcue.vp.u for color calculations */ 
+#define Z2SCL		45
+#define DZDMAJ		48
+#define DXHOLD		49	/* hold original dx, so we know which color value to send */
+
+#define Z1		84	/* used by depthcue.vp.u */
+#define Z2		85
+#define FIXZ1		86	/* fixed values are sent to pp */
+#define FIXZ2		87
+
+#define MUL128		0x380
+
+#define dcue		0
+#define zbuf 		1
+
+
+
+|   This is called from xfline3dinit, since only want to shift offset up once.
+zbshiftoff:
+	movw MUL128,acc;	ZOFF->fpap;	;		;			| 
+	IMM;			ZOFF->fpdp;	;		;			| 
+	;			fpregh->am;	;		;			| check if z-buffering enabled
+	addw d,acc,y;		am->fpregh;	crtn,go;	;			| shift z offset up 7 bits
+
+zbline:	
+|   First we compute which is the major axis, x or y, since we want to compute dz/dmajoraxis.
+|   The xformed, clipped, viewport scaled and fixed values reside at outptr.
+	movw outptr,y;		am->fpap;	;		;			| fpap <- x1 (viewport scaled & fixed)
+	movw d,tempx1;		fpregl->am;	;		;		ap+	| store x1
+	movw d,tempy1;		fpregl->am;	;		;		ap+	| store y1
+	rsubw,s d,tempx1,tempdx; fpregl->am;	;		;		ap+	| compute dx
+	rsubw,s d,tempy1,tempdy; fpregl->am;	cjp,neg .+2;	;			| compute dy
+	movw tempdx,acc;	;		cjp,go .+2;	;			| move tempdx (abs value) into acc
+	negw tempdx,acc;	;		;		;			| make dx positive
+	movw tempdy,y;		am->am;		cjp,~neg .+2;	;			| jump if dy already positive
+	negw tempdy,y;		am->am;		;		;			| 
+	;			DXHOLD->fpdp;	;		;			| will store sign of dx, so we know which 
+	movw tempdx,y;		am->fpregh;	;		;			| color value to send for depth cueing
+	subw,s d,acc,y;		DZDMAJ->fpdp;	;		;			| compute (dx - dy), if pos, x is major
+	movw 0,y;		am->fpregh;	cjp,neg zbymaj; ;			| store major axis delta at fpr[0]
+zbxmaj:	movw,s tempdx,y;	am->fpregl;	ldct zbneghigh;	;			| x is major axis
+	;			;		jrp,~neg zbdmaj; ;			| 
+|   When y is the major axis, if the sign of dx and dy differ, we negate dy (so that dz/dmaj is correct).
+zbymaj:	movw tempdy,acc;	am->fpregl;	;		;			| y is major axis
+	xorw,s tempdx,acc,y;	;		;		;			| check sign of dx & dy
+	testw (tempdy);		;		cjp,~neg .+2;	;			| 
+	negw,s tempdy,y;	am->fpregl;	;		;			| if signs differ, negate dy
+	;			;		cjp,~neg .+2;	;			| 
+zbneghigh: compw 0,y;		am->fpregh;	;		;			| need to sign extend negative numbers
+
+|   Now we convert dmaj (computed above) to floating point and take the reciprocal.
+|   We then compute the perspective projection on z1 and z2, if necessary.
+zbdmaj:	movw DZDMAJ,y;		;		;		;			| 
+	IMM;			am->fpap;	;		lmode rn,ai,flow,fast;	| fpap <- dmaj, initiate flow mode 
+	mov2nw 1,y;		am->brreg;	;		floata,la,hi;		| dmaj -> floating point
+	;			;		push,go;	;			| 
+	;			;		rfct;		;			| loop 3 times
+	;			=recip->brreg;	;		;			| 
+	movw DZDMAJ,y;		;		;		noflop,a,hi;		| 
+	IMM;			am->fpdp;	;		;			| fpdp <- dzdmajptr
+	movw DMAJREC,recaddr;	;		;		noflop,st,hi;		| store dmaj @ dzdmajptr
+	IMM;			;		cjs,go;		;			| address for reciprocal & call recip routine
+	add2nw 1,inptr,templo;	am->fpap;	;		;			| fpap <- z1 (xformed only)
+	testw (parallel);	;		;		;			| test for parallel projection
+	;			;		cjs,zer zpersp;	;			| do z perspective if necessary
+
+|   Now we shift the z values up by 7 bits, so that we have a 8.16, *signed* value, instead of a 0.16 value.  We also do this for
+|   the offset, since it is added to the shifted z values.
+|   **** Question:	  What do we do with the z value?  Do we copy it over?  Also, when we copy over the x, and y values (at least)
+|   			  in 3Dfp.vp.u, they have been perspective-ized.  Is this ok?
+	movw templo,y;		am->fpap;	;		;			| 
+	movw MUL128,acc;	Z1->fpdp;	;		;			| shift z1 up 7 bits
+	IMM;			fpregh->am;	;		;			| 
+	addw d,acc,y;		am->fpregh;	;		;			| will store shifted z values @ Z1, Z2
+	;			fpregl->fpregl;	;		;		dp+	| 
+	add2nw 2,templo;	am->fpap;	;		;			| 
+	;			fpregh->am;	;		;			| shift z2 up 7 bits
+	addw d,acc,y;		am->fpregh;	;		;			| 
+	btstw,s zbuf,zbdcln;	fpregl->fpregl;	;		;			| 
+	sub2nw 2,templo;	am->fpap;	cjp,zer zbdconly_jmap; ;		| restore fpap & jump if only depth cueing
+
+|   Next we compute dz/dmaj, and the xformed, viewport scaled, fixed z values 
+	movw ZSCL,y;		Z1->fpap;	;		;			| 
+	IMM;			am->fpbp;	;		lmode rn,ai,pipe,fast;	| fpbp <- zscale (fpap has z1 (ndc coords))
+	;			;		;		maba,lab,hi;		| (z1 * vwpzscale)
+	;			;		;		;		ap+	| 
+	mov2nw 0,y;		am->brreg;	;		maba,lab,hi;		| (z2 * vwpzscale)
+	;			;		push,go;	;			| 
+	movw Z1SCL,y;		;		;		pa,hi;			| loop twice
+	IMM;			am->fpdp;	rfct;		;			| want to store scaled only version of z values
+	movw ZOFF,y;		;		;		pa,m,hi;		| 
+	IMM;			am->fpbp;	;		;			| fpbp <- vwpzoffset
+	;			;		;		addr,lab,m,st,hi;	| (z1 * vwpzscale) + vwpzoffset, store scaled z1
+	;			;		;		;		dp+	| 
+	mov2nw 0,y;		am->brreg;	;		addr,lab,st,hi;		| (z2 * vwpzscale) + vwpzoffset, store scaled z2
+	;			;		push,go;	;			| 
+	movw Z1,y;		;		;		pa,hi;			| loop twice
+	IMM;			am->fpbp;	rfct;		;			| 
+	movw Z1,y;		;		;		pa,a,hi;		| 
+	IMM;			am->fpdp;	;		;			| fpdp <- z1 
+	movw Z2,y;		;		;		fixr,la,a,st,hi;	| store unfixed z1 (for dz) and fix (for pp)
+	IMM;			am->fpap;	;		;		dp+	| fpap <- z2 
+	;			;		;		fixr,la,st,hi;		| store unfixed z2 (for dz) and fix (for pp), pull z1
+	;			;		;		;			| 
+	;			;		;		suba,lab,hi;		| (z2 - z1)
+	;			;		;		;			| 
+	;			;		;		pa,hi;			| 
+	;			;		;		;			| 
+	movw FIXZ1,y;		;		;		pa,a,hi;		| 
+	IMM;			am->fpdp;	;		;			| fpdp <- z1 (fixed value)
+	;			;		;		pa,a,st,hi;		| store fixed z1
+	;			;		;		;		dp+	| fpdp <- z2 (fixed value)
+	movw DMAJREC,y;		;		;		pa,a,st,hi;		| store fixed z2
+	IMM;			am->fpbp;	;		;			| 
+	mov2nw 1,y;		am->brreg;	;		mabr,lab,hi;		| (z2 - z1) * 1/dmaj
+	;			;		push,go;	;			| 
+	;			;		;		pa,hi;			| loop 3 times
+	;			;		rfct;		;			| 
+	;			;		;		pa,m,hi;		| 
+	;			;		;		;			| 
+	mov2nw 1,y;		am->brreg;	;		fixr,la,hi;		| fix dz/dmaj
+	;			;		push,go;	;			| 
+	;			;		;		pa,hi;			| loop 3 times
+	;			;		rfct;		;			| 
+	movw DZDMAJ,y;		;		;		pa,a,hi;		| 
+	IMM;			am->fpdp;	;		;			| fpdp <- dz/dmajptr
+	movw =makefract,y;	;		;		noflop,st,hi;		| 
+	IMM;			am->brreg;	;		;			| 
+
+|   Now we have integers in the format 8.16, that are signed.  Therefore we shift them up by 9 to make them
+|   unsigned and 16.16.  This is done in the makefract routine.
+	;			FIXZ1->fpap;	cjs,go;		;			| fpap <- z1 for word merge
+	movw temphi,y;		am->fifo1;	cjp,f1f .;	;			| dz/dmaj high -> fifo1
+	movw templo,y;		am->fifo1;	cjp,f1f .;	;			| dz/dmaj low  -> fifo1
+	;			FIXZ2->fpap;	cjs,go;		;			| fpap <- dz/dmaj for word merge
+	movw temphi,y;		am->fifo1;	cjp,f1f .;	;			| dz/dmaj high -> fifo1
+	movw templo,y;		am->fifo1;	cjp,f1f .;	;			| dz/dmaj low  -> fifo1
+	;			DZDMAJ->fpap;	cjs,go;		;			| fpap <- dz/dmaj for word merge
+	movw temphi,y;		am->fifo1;	cjp,f1f .;	;			| dz/dmaj high -> fifo1
+	movw templo,y;		am->fifo1;	cjp,f1f .;	;			| dz/dmaj low  -> fifo1
+
+|   Now we check if depth cueing is enabled, and if so we compute the depth cueing parameters.  Otherwise,
+|   we fake them.	
+zbdctst: btstw,s dcue,zbdcln;	;		;		;			| test if depth cueing bit set
+	;			;		cjp,~zer zbdc;	;			| will compute depth cueing params if enabled
+zbdcoff: 
+	movw color,y;		am->fifo1;	cjp,f1f .;	;			| 
+|	addw frameptr,COLOR_FRMOFF,y;;		;		;
+|	IMM;			am->shmemp;	;		;			| fetch color from context
+|	;			shmem->fifo1;	cjp,f1f .;	;			| color high
+	movw 0,y;		am->fifo1;	cjp,f1f .;	;			| color low is 0
+	movw 0,y;		am->fifo1;	cjp,f1f .;	;			| fake dc high
+	movw 0,y;		am->fifo1;	cjp,f1f .;	;			| fake dc low
+	;			;		crtn,go;	;			| return to calling routine
+
+
+|   Depth cueing resides on the other bank, so we jmap there and back if necessary
+zbdc:	;			;		jmap depthcue;	;			| 
+zbdcret: ;			;		crtn,go;	;			| 
+
+
+|   We end up here if z-buffering is disabled, and depth cueing is enabled.
+zbdconly_jmap:
+	;			;		jmap dczboff;	;			| 
+
+
+|   Makefract takes fixed integers (format 8.16), and converts them into 32 bit fracts of format 16.16.
+makefract: 
+	rolw 9,d,temphi;	fpregh->am;	;		;			| 
+	romw 9,d,temphi,0x1ff;	fpregl->am;	;		;			| 
+	IMM;			;		;		;			| 
+	rolw 9,d,templo;	fpregl->am;	;		;			| 
+	andw d,templo,templo;	0xfe000->am;	crtn,go;	;			| 
+	
+
+|   Zpersp does the perspective divide on z1 & z2.  When we enter (and leave) the routine, templo = fpap <- z1 (ndc coords).
+zpersp:	movw 0,y;		am->fpbp;	;		lmode rn,ai,pipe,fast;	| fpbp <- 1/w1
+	;			;		;		maba,lab,hi;		| z1 * 1/w1
+	add2nw 2,templo;	am->fpap;	;		;		bp+	| fpap <- z2, fpbp <- 1/w2
+	mov2nw 0,y;		am->brreg;	;		maba,lab,hi;		| z2 * 1/w2
+	;			;		push,go;	;			| 
+	;			;		;		pa,hi;			| loop twice
+	;			;		rfct;		;			| 
+	movw Z1,y;		;		;		pa,a,hi;		| 
+	IMM;			am->fpdp;	;		;			| fpdp <- z1
+	;			;		;		pa,a,st,hi;		| 
+	;			;		;		;		dp+	| fpdp <- z2
+	sub2nw 2,templo;	am->fpap;	;		noflop,st,hi;		| store z2, fpap <- z1
+	;			;		crtn,go;	;			| 
+
+
+#undef zbdcln
+
+#undef inptr	
+#undef outptr	
+#undef parallel
+#undef majptr
+#undef recaddr 	
+#undef temphi		
+#undef tempy1		
+#undef tempdy		
+#undef templo		
+#undef tempx1		
+#undef tempdmaj		
+
+#undef W1REC		
+#undef DMAJREC	
+#undef DZDMAJ	
+#undef Z1SCL	
+#undef Z2SCL	
+#undef ZSCL		
+#undef ZOFF		
+#undef Z1		
+#undef Z2		
+#undef FIXZ1	
+#undef FIXZ2	
+
+#undef MUL128		
+
+#undef dcue
+#undef zbuf
+
+

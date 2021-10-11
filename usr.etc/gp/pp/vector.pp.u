@@ -1,0 +1,753 @@
+| "@(#)vector.pp.u 1.1 94/10/31 SMI"
+| Copyright 1985 by Sun Microsystems, Inc.
+
+|   vector:  Mimics the action of cg2_vec.c
+|   Please refer to cg2_vec.c and follow along.
+
+
+#define pkptr	r[25]	/* used only in GP+ */
+#define options	r[24]
+#define clip	r[23]
+#define reflect	r[22]
+#define ropmode	r[21]
+#define offsety	r[20]
+#define offsetx r[19]
+#define sizey	r[18]
+#define sizex	r[17]
+#define clipptr	r[16]
+
+#define temp0	r[4]
+
+#define x0	r[15]
+#define y0	r[14]
+#define x1	r[13]
+#define y1	r[12]
+#define dx	r[11]
+#define dy	r[10]
+#define hierr	r[9]	/* Double precision for early init error calculations.  Not needed later. */
+#define err	r[8]
+#define startx	r[7]
+#define starty	r[6]
+#define count	r[5]
+#define zbdc	r[4]	/* holds status of zbuffering and depth cueing */
+
+#define addrlo	r[0]
+#define addrhi	r[1]
+
+#define nosetup	3
+
+#define zbuf 1		/* these used only in GP+ */
+#define dcue 0
+#define pick 0		
+
+|   Vector can be called from the pixrect level (0 has been stuffed into options field), or it can
+|   be called from the xfline level, where we have solid, width 1 vectors.  In this case, a 0 has
+|   been loaded into r[24] for the first vector, but this register is not touched after that.
+
+vector:	;			SavePts->scrmemp; ;				| 
+	movw d, x0;		fifo1->am;	cjp, f1e .;			| 
+	movw d, y;		am->scrmem;	;			scrmp +	| 
+	movw d, y0;		fifo1->am;	cjp, f1e .;			| 
+	movw d, y;		am->scrmem;	;			scrmp +	| 
+	movw d, x1;		fifo1->am;	cjp, f1e .;			| 
+	movw d, y;		am->scrmem;	;			scrmp +	| 
+	rsubw d, x0, dx;	;		;				| dx
+	movw d, y1;		fifo1->am;	cjp, f1e .;			| 
+	movw d, y;		am->scrmem;	;				| 
+#ifndef GPPLUS	
+	rsubw d, y0, dy;	;		;				| dy
+#else GPPLUS	
+	rsubw d, y0, dy;	VecAtts->scrmemp; ;				| dy. NEW (scrmemp load)
+#endif	
+	movw d, op;		fifo1->am;	cjp, f1e .;			| 
+	norw,s d, op, clip;	0xfffe->am;	;				| (PIX_DONTCLIP == 1) => (clip == 0).
+#ifndef GPPLUS	
+	movw d, color;		fifo1->am;	cjp, f1e .;			| 
+vec6:	rolw 11, op, acc;	;		;				| color in op?
+#else GPPLUS	
+|   Here we test if we are drawing z-buffered vectors, & if so, we yank the relevant z values from the fifo.  It is
+|   important we do this here, as we loop through the rest of the code for each rectangle.
+	testw (d);		scrmem->am;	;				| NEW
+	movw d, color;		fifo1->am;	cjp, f1e .;			| 
+vec6:	rolw 11, op, acc;	;		cjs,~zer vec3fetch;		| color in op? Fetch z components if 3d vecs NEW
+#endif GPPLUS	
+	andw,s d, acc, acc;	0x7ff->am;	;				| 
+	sr0w op, op;		;		cjp, zer vop0;			| op >>= 1.
+	movw acc, color;	;		;				| 
+vop0:	andw d, op, op;		0xf->am;	;				| 
+	
+|   PIXOP_NEEDS_DST (op<<1)= (op^(op<<1)) & 0xa
+	movw op, acc;		;		;				| 
+	sl0w acc, acc;		;		;				| 
+	xorw op, acc, acc;	ClipList->scrmemp; ;				| Get ready to get clipping rectangle.
+	movw d, clipptr;	ClipList->am;	;				| 
+	andw,s d, acc, acc;	0xa->am;	;				| 
+#ifndef GPPLUS
+	movw 0, nodst;		;		cjp, ~zer vtr;			| 
+#else GPPLUS
+	movw 0, nodst;		;		cjp, ~zer ptvtr;		| 
+#endif GPPLUS
+	incw 0, nodst;		;		;				| 
+#ifdef GPPLUS
+
+ptvtr:	btstw,s pick,options;	Pickmaybe->scrmemp; ;				| test if picking is on
+	movw 0,y;		am->scrmem;	;				| Set pickmaybe (used for 3d) to zero
+	movw clipptr,y;		am->scrmemp;	cjp,~zer pkvtr;			| reload scrmemp
+#endif GPPLUS
+
+|   code will return to vtr (through vreset) after each clip rectangle.
+vtr:	testw (clip);		;		;				| If no clipping, return from end of module (vreset)
+	movw,s d, offsetx;	scrmem->am;	cjp, zer vtrnclip;	scrmp +	| Transform screen coords to pixrect relative.
+	subw d, x0, x0;		;		crtn, neg;			| Neg == end of clip list.
+	subw d, x1, x1;		;		;				| 
+	movw d, offsety;	scrmem->am;	;			scrmp +	| 
+	subw d, y0, y0;		;		;				| 
+	subw d, y1, y1;		;		;				| 
+	movw d, sizex;		scrmem->am;	;			scrmp +	| 
+	movw d, sizey;		scrmem->am;	;			scrmp +	| 
+#ifndef GPPLUS
+	add2nw 2, clipptr, clipptr; ;		cjp, go vtrstat;		| 
+vtrnclip: movw 0, offsetx;	;		;				| 
+	movw 0, offsety;	;		;				| 
+	movw d, sizex;		SWidth->am;	;				| 
+#else GPPLUS
+vtrpk:	add2nw 2, clipptr, clipptr; ;		cjs, go vtrstat;		| 
+vreset:	testw (clip);		SavePts->scrmemp; ;				| 
+	movw d, x0;		scrmem->am;	crtn, zer;		scrmp +	| if no clipping we are done.
+	movw d, y0;		scrmem->am;	;			scrmp +	| 
+	movw d, x1;		scrmem->am;	;			scrmp +	| 
+	rsubw d, x0, dx;	;		;				| 
+	movw d, y1;		scrmem->am;	;			scrmp +	| 
+	rsubw d, y0, dy;	;		;				| 
+	movw clipptr, y;	am->scrmemp;	cjp, go vtr;			| 
+vtrnclip: movw d, sizex;	SWidth->am;	;				| 
+#endif GPPLUS
+	movw d, sizey;		SHeight->am;	;				| 
+#ifdef GPPLUS
+	movw 0, offsetx;	;		;				| 
+	movw 0, offsety;	;		cjs,go vtrstat;			| 
+	;			;		cjp,go vreset;
+
+
+#endif GPPLUS
+vtrstat: movw d, acc;		vstreg->am;	;				| Clear vme status register.
+
+#ifdef GPPLUS	
+|   Here we test for z-buffered and/or depth cued vectors.  In this case, we don't special case short, horizontal
+|   or vertical vectors.  We set up a register here (which lasts until our first multiply), which holds the status
+|   of these attributes.
+	;			VecAtts->scrmemp; ;				| 
+	testw (d);		scrmem->am;	;				| test if zbuffering or depth cueing enabled
+	movw d,zbdc;		;		cjp, ~zer vnshrt;		| initialize gp+ register
+#endif GPPLUS	
+|   Handle vectors of length 1 or 2 by drawing endpoints.  Check first for short vector.
+	incw,s dx, acc;		=vnshrt->brreg;	;				| Compare absolute value dx with 1.
+|   Incw takes care of dx == -1.  Thus we compare with 2.
+	rsubw,s d, acc, y;	2->am;		cjp, neg;			| vector is not short.
+	incw,s dy, acc;		;		cjp, neg;			| 
+	rsubw,s d, acc, y;	2->am;		cjp, neg;			| 
+	btstw,s nosetup,options; =vropset1->brreg; cjp, neg;			| 
+	testw (nodst);		;		cjp, ~zer vsdraw;		| Jump if no rasterop setup nec.
+	movw GPVWord,y;		;		cjp, ~vir .;			| 
+	IMM;			am->vctlreg;	cjs, go vropseta;		| Set up rasterop chips.
+vsropdone: romw 8, color, acc, 0xff00; ;	;				| instruction completes on next cycle.
+	IMM;			FBAllRopPrimeSrc1->vloareg; ;			| vhiareg unchanged.
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+vsdraw:	;			;		cjp, ~vir .;			| must set rop chips after short.
+	movw,s x0, acc;		VByte->vctlreg;	;				| 
+	subw,s sizex, acc, y;	;		cjp, neg vschk2;		| if (pos0.x >= size.x) check 2nd endpoint.
+	movw,s y0, acc;		;		cjp, ~neg vschk2;		| 
+	subw,s sizey, acc, y;	;		cjp, neg vschk2;		| if (pos0.y >= size.y) 
+	movw offsety, acc;	;		cjp, ~neg vschk2;		| first endpt clipped out.
+	addw y0, acc, Multiplier; ;		cjs, go MulSWid;		| cg2_roppixel (dmd, pos0.x, pos0.y)
+	movw offsetx, acc;	;		;				| 
+	addw x0, acc, acc;	;		cjs, go vcompvme;		| 
+	movw color, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+vschk2:	movw dx, acc;		;		;				| 
+	orw,s dy,acc,y;		;		;				| 
+#ifndef GPPLUS
+vschk2a: movw,s x1, acc;	;		cjp, zer vreset;		| 
+	subw,s sizex, acc, y;	;		cjp, neg vreset;		| if (pos1.x >= size.x)2nd endpt clipped.
+	movw,s y1, acc;		;		cjp, ~neg vreset;		| 
+	subw,s sizey, acc, y;	;		cjp, neg vreset;		| if (pos1.y >= size.y)2nd endpt clipped.
+	movw offsety, acc;	;		cjp, ~neg vreset;		| 
+#else GPPLUS
+vschk2a: movw,s x1, acc;	;		crtn, zer;			| 
+	subw,s sizex, acc, y;	;		crtn, neg;			| if (pos1.x >= size.x)2nd endpt clipped.
+	movw,s y1, acc;		;		crtn, ~neg;			| 
+	subw,s sizey, acc, y;	;		crtn, neg;			| if (pos1.y >= size.y)2nd endpt clipped.
+	movw offsety, acc;	;		crtn, ~neg;			| 
+#endif GPPLUS
+	addw y1, acc, Multiplier; ;		cjs, go MulSWid;		| cg2_roppixel (dmd, pos1.x, pos1.y)
+	movw offsetx, acc;	;		;				| 
+	addw x1, acc, acc;	;		cjs, go vcompvme;		| 
+	movw color, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+#ifndef GPPLUS
+	;			;		cjp, go vreset;			| 
+#else GPPLUS
+	;			;		crtn, go;			| 
+#endif GPPLUS
+
+|   Not a short vector.  Force vector to have increasing x.
+|   Limits number of octants to 4.
+vnshrt:	testw (dx);		;		;				| Test dx.
+	movw 0, reflect;	;		cjp, ~neg vnoswap;		| reflect= 0.
+	movw x0, acc;		;		;				| 
+	movw x1, x0;		;		;				| Swap x.
+	movw acc, x1;		;		;				| 
+	movw y0, acc;		;		;				| Swap y.
+	movw y1, y0;		;		;				| 
+	movw acc, y1;		;		;				| 
+	negw dx, dx;		;		;				| dx= -dx.
+	negw dy, dy;		;		;				| dy= -dy.
+|   Clipper works with y positive going. If needed, reflect
+|   vector around the centerline.  Remember this in the reflect
+|   variable so it can be undone later.
+vnoswap:testw (dy);		;		;				| 
+	testw (y1);		;		cjp, ~neg vbound;		| Set y1 cc for vbound
+	negw dy, dy;		;		;				| 
+	subw d, sizey, acc;	1->am;		;				| size.y-1
+	subw y0, acc, y0;	;		;				| pos0.y= (size.y-1) - pos0.y.
+	subw,s y1, acc, y1;	;		;				| pos1.y= (size.y-1) - pos1.y.
+	addw d, reflect, reflect;2->am;		;				| reflect += 2
+|   Bounds check for vector ending before rectangle or starting after.
+#ifndef GPPLUS
+vbound:	testw (x1);		;		cjp, neg vreset;		| if (pos1.y < 0 || pos1.x < 0)
+	movw x0, acc;		;		cjp, neg vreset;		| 
+#else GPPLUS
+vbound:	testw (x1);		;		crtn, neg;			| if (pos1.y < 0 || pos1.x < 0)
+	movw x0, acc;		;		crtn, neg;			| 
+#endif GPPLUS
+	subw,s sizex, acc, y;	;		;				| || pos0.x >= size.x
+#ifndef GPPLUS
+	movw y0, acc;		;		cjp, ~neg vreset;		| 
+#else GPPLUS
+	movw y0, acc;		;		crtn, ~neg;			| 
+#endif GPPLUS
+	subw,s sizey, acc, y;	;		;				| || pos0.y >= size.y
+
+|   If vector horizontal use fast algorithm.
+#ifndef GPPLUS
+vhor:	testw (dy);		;		cjp, ~neg vreset;		| 
+#else GPPLUS
+vhor:	testw (dy);		;		crtn, ~neg;			| 
+#endif GPPLUS
+	movw,s dx, acc;		;		cjp, ~zer vvert;		| Set cc for vert test.
+#ifdef GPPLUS	
+	testw (zbdc);		;		;				| check if drawing zb or dc vectors
+	movw,s dx, acc;		;		cjp, ~zer vdxdy;		| don't special case if true
+#endif GPPLUS	
+	movw FBCont,y;		am->vhiareg;	cjp, ~vir .;			| Wait till vctlreg ready.
+	;			GPVWord->vctlreg; ;				| 
+	;			RRValues->scrmemp; ;				| 
+	subw,s d, op, y;	scrmem->am;	;				| 
+	movw op, y;		am->scrmem;	cjp, zer vhpatt0;	scrmp +	| 
+	;			FBAllRopRegOp->vloareg;;			| vhiareg unchanged.
+	movw op, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| cg2_setfunction (..., op).
+vhpatt0: ;			FBAllRopRegPatt->vloareg; ;			| vhiareg unch.
+	movw,s d, y;		scrmem->am;	;				| 
+	movw 0, y;		am->scrmem;	cjp, zer vhpatt1;	scrmp +	| 
+	movw 0, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+vhpatt1: testw (x0);		am->am;		;				| if (pos0.x >= 0)
+	movw sizex, acc;	;		cjp, ~neg vhx1;			| 
+	movw 0, x0;		am->am;		;				| pos0.x= 0
+vhx1:	rsubw,s x1, acc, y;	;		;				| if (pos1.x >= size.x)
+	decw acc;		;		cjp, neg vhdx;			| pos1.x= size.x - 1
+	movw acc, x1;		;		cjp, go vhdx1;			| 
+vhdx:	movw x1, acc;		;		;				| 
+vhdx1:	subw d, x1, dx;		;		;				| dx= pos1.x - pos0.x
+	movw d, r[0];		scrmem->am;	;				| 
+	addw offsetx, acc, acc;	FBAllRopRegMask2->vloareg;;			| cg2_prd_skew (dmd, pos1.x). vhiareg unchanged.
+	andw d, acc, count;	0xf->am;	;				| count= cg2_prd_skew
+	addw d, count, acc;	RMaskTable->am;	;				| rmasktable [count]
+	movw acc, y;		am->scrmemp;	;				| 
+	subw,s d, r[0], y ;	scrmem->am;	;				| 
+	movw x0, acc;		;		cjp, zer vhm1;			| 
+	movw d, r[0];		scrmem->am;	;				| 
+	;			RRValm2->scrmemp; ;				| 
+	movw r[0], y;		am->scrmem;	;				| 
+	movw r[0], y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+vhm1:	addw offsetx, acc, acc;	FBAllRopRegMask1->vloareg; ;			| cg2_prd_skew (dmd, pos0.x) vhiareg unchanged.
+	andw d, acc, count;	0xf->am;	;				| count= cg2_prd_skew
+	addw d, count, acc;	LMaskTable->am;	;				| 
+	movw acc, y;		am->scrmemp;	;				| 
+	movw d, r[0];		scrmem->am;	;				| 
+	;			RRValm1->scrmemp; ;				| 
+	subw,s d, r[0], y;	scrmem->am;	;				| 
+	movw r[0], y;		am->scrmem;	cjp, zer vhrm;		scrmp +	| 
+	movw r[0], y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+vhrm:	testw (nodst);		PRRWRD->am;	;				| 
+	movw d, ropmode;	;		cjp, ~zer vhropmode;		| if (nodst) ropmode= PRRWRD
+	movw d, ropmode;	PWRWRD->am;	;				| else ropmode= PWRWRD
+vhropmode:movw d, acc;		PWRWRD->am;	;				| 
+	;			;		cjs, go vropmode;		| 
+	movw dx, acc;		;		;				| count= (dx+count)>>4.  (>>4 == <<12).
+	addw count, acc, count;	0xfff->am;	;				| 
+	rolw 12, count, count;	FBAllRopRegWidth->vloareg;;			| vhiareg unchanged.  mask off high bits of rotate.
+	andw d, count, count;	;		;				| 
+	subw,s d, count, y;	scrmem->am;	;				| 
+	movw count, y;		am->scrmem;	cjp, zer vhcnt;		scrmp +	| 
+	movw count, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 1st 1/2 cg2_setwidth (..., count, count).
+vhcnt:	;			FBAllRopRegOpCnt->vloareg; ;			| vhiareg unchanged.
+	subw,s d, count, y;	scrmem->am;	;				| 
+	movw count, y;		am->scrmem;	cjp, zer vhsh;		scrmp +	| 
+	movw count, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 2nd 1/2 cg2_setwidth (..., count, count).
+vhsh:	;			FBAllRopRegShift->vloareg; ;			| vhiareg unchanged.
+	sub2nw,s 8, d, y;	scrmem->am;	;				| 
+	mov2nw 8, y;		am->scrmem;	cjp, zer vhsrc2a;	scrmp +	| 
+	mov2nw 8, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| cg2_setshift (..., 0, 1).
+vhsrc2a: movw color, acc;	;		;				| 
+	romw 8, color, acc, 0xff00;;		;				| instruction completes on next cycle.
+	IMM;			FBAllRopPrimeSrc2->vloareg;;			| vhiareg unchanged.
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+	movw offsety, acc;	;		;				| 
+	addw y0, acc, Multiplier;;		cjs, go MulSWWid;		| cg2_ropword (dmd, 0, pos0.x, pos0.x)
+	movw offsetx, acc;	;		;				| 
+	addw x0, acc, x0;	;		;				| 
+	rolw 13, x0, acc;	;		;				| cg2_ropword: (x>>4)*(sizeof(short))
+	andw d, acc, acc;	0x1fff->am;	;				| a5_adr= cg2_ropword	
+	addw addrlo, acc, addrlo;am->vloareg;	;				| 
+	addcw d, FBHi, acc;	RopFB->am;	;				| 
+	addw addrhi, acc, addrhi;am->vhiareg;	;				| 
+|   switch (d5_count) unwrapped.  nodst part separated out.
+vhcolor:testw (nodst);		;		;				| 
+	movw count, y;		am->brreg;	cjp, ~zer vhnodst;		| 
+	;			;		push, go;			| 
+	movw color, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| value written is immaterial.
+	;			;		;			varegs +| 
+	;			;		rfct;			varegs +| 
+#ifndef GPPLUS
+	bclrw nosetup,options;	;		cjp, go vreset;			| Must setup rop chips after hor.
+#else GPPLUS
+	bclrw nosetup,options;	;		crtn, go;			| Must setup rop chips after hor.
+#endif GPPLUS
+vhnodst:subw,s d, count, y;	2->am;		;				| 
+	testw (count);		;		cjp, ~neg vh2;			| 
+	movw color, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+#ifndef GPPLUS
+	bclrw nosetup,options;	;		cjp, zer vreset;	varegs +| Must setup rop chips after hor.
+#else GPPLUS
+	bclrw nosetup,options;	;		crtn, zer;		varegs +| Must setup rop chips after hor.
+#endif GPPLUS
+	;			;		;			varegs +| 
+	;			;		cjp, ~vir .;		vmewr	| 
+#ifndef GPPLUS
+	;			;		cjp, go vreset;			| 
+#else GPPLUS
+	;			;		crtn, go;			| 
+#endif GPPLUS
+vh2:	movw FBCont, y;		am->vhiareg;	;				| 
+	mov2nw 1, acc;		FBAllRopRegWidth->vloareg; ;			| 
+	;			RRValWid->scrmemp; ;				| 
+	sub2nw,s 1, d, y;	scrmem->am;	;				| 
+	mov2nw 1, y;		am->scrmem;	cjp, zer vhcnt1;	scrmp +	| 
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 1st 1/2 cg2_setwidth (..., 2, 2).
+vhcnt1:	;			FBAllRopRegOpCnt->vloareg; ;			| vhiareg unchanged.
+	sub2nw,s 1, d, y;	scrmem->am;	;				| 
+	mov2nw 1, y;		am->scrmem;	cjp, zer vhcol0;	scrmp +	| 
+vhcount1:movw acc, y;		am->vwdreg;	cjp, ~vir vhcount1;	vmewr	| 2nd 1/2 cg2_setwidth (..., 2, 2).
+vhcol0:	movw addrlo, y;		am->vloareg;	;				| 
+	movw addrhi, y;		am->vhiareg;	;				| 
+vhcol1:	movw color, y;		am->vwdreg;	cjp, ~vir vhcol1;	vmewr	| *(a5_adr)++= d3_color (value is immaterial)
+	;			;		;			varegs +| 
+	;			;		;			varegs +| 
+vhcol2:;			;		cjp, ~vir vhcol2;	vmewr	| *(a5_adr)++= d3_color (value is immaterial)
+	subw,s d, count, count;	3->am;		;			varegs +| count less 3 so "fastloop" right num
+	;			;		cjp, neg vhvmewr3;	varegs +| 
+	movw ropmode, acc;	;		cjs, go vropmode;		| 
+	addw,s d, addrlo, addrlo;4->am;		;				| Sync addrlo with vme addr counter.
+	movw addrlo, y;		am->vloareg;	cjp, ~cry vhncry1;		| 
+	incw addrhi, addrhi;	;		;				| Sync addrhi with vme addr counter.
+vhncry1:movw count, y;		am->brreg;	;				| Get ready to load counter.
+	movw addrhi, y;		am->vhiareg;	push, go;			| 
+	movw color, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| (value is immaterial)
+	;			;		;			varegs +| 
+	;			PWRWRD->am;	rfct;			varegs +| 
+	movw d, acc;		;		cjs, go vropmode;		| 
+	sl0w count, temp0;	;		;				| 
+	addw,s d, temp0, acc;	2->am;		;				| 
+	addw,s addrlo, acc, addrlo;am->vloareg;	cjp, ~cry vhvmewr2;		| 
+	incw addrhi, y;		;		;				| 
+vhvmewr2:movw addrhi, y;	am->vhiareg;	cjp, ~cry vhvmewr3;		| 
+	incw addrhi, y;		am->vhiareg;	;				| 
+vhvmewr3: movw 0, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| (value is immaterial)
+#ifndef GPPLUS
+	bclrw nosetup,options;	;		cjp, go vreset;			| 
+#else GPPLUS
+	bclrw nosetup,options;	;		crtn, go;			| 
+#endif GPPLUS
+	
+|   If vector is vertical use fast algorithm.
+#ifndef GPPLUS
+vvert:	btstw,s nosetup,options; ;		cjp, ~zer vdxdy;		| Jump if dx != 0 (cc set earlier).
+#else GPPLUS
+vvert:	testw (zbdc);		;		cjp,~zer vdxdy;			| check if drawing zb or dc vectors
+	btstw,s nosetup,options; ;		cjp,~zer vdxdy;			| don't special case if true
+#endif GPPLUS	
+	;			;		cjp, ~zer vvclip;		| Jump if no rasterop chip setup nec.
+	;			;		cjs, go vropset;		| Set up rasterop chips.
+vvropdone: romw 8, color, acc, 0xff00; ;	;				| instruction completes on next cycle.
+	IMM;			FBAllRopPrimeSrc1->vloareg;;			| vhiareg unchanged.
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+vvclip:	testw (y0);		;		;				| Test (pos0.y < 0)
+	movw y1, acc;		;		cjp, ~neg vvclip1;		| 
+	movw 0, y0;		;		;				| if (pos0.y < 0) pos0.y= 0.
+vvclip1: subw,s sizey, acc, y;	1->am;		;				| if (pos1.y >= size.y)
+	subw d, sizey, acc;	;		cjp, neg vvclip2;		| pos1.y= size.y - 1.
+	movw acc, y1;		;		cjp, go vvclip3;		| 
+vvclip2:movw y1, acc;		;		;				| 
+vvclip3: subw y0, acc, dy;	=vvnorefl->brreg; ;				| dy= pos1.y - pos0.y
+	andw,s d, reflect, y;	2->am;		;				| if (reflect & 2)
+	subw d, sizey, acc;	1->am;		cjp, zer;			| size.y - 1
+	subw y1, acc, y0;	;		;				| pos0.y= size.y - 1 - pos1.y.
+vvnorefl:movw offsety, acc;	;		cjp, ~vir vvnorefl;		| 
+	addw y0, acc, Multiplier;;		cjs, go MulSWid;		| cg2_roppixel (dmd, pos0.x, pos0.y)
+	movw offsetx, acc;	VByte->vctlreg;	;				| 
+	addw x0, acc, acc;	;		cjs, go vcompvme;		| cg2_roppixel
+	movw dy, y;		am->brreg;	;				| Prepare to load counter.
+	movw d, acc;		SWidth->am;	;				|  SWidth= cg2_linebytes.
+	movw 0, y;		am->am;		push, go;			| Push loop, ld cntr.
+vvvmewr:movw color, y;		am->vwdreg;	cjp, ~vir vvvmewr;	vmewr	| cg2_vertln ().
+	addw addrlo, acc, addrlo;am->vloareg;	;				| 
+	addcw d, addrhi, addrhi;am->vhiareg;	rfct;				| 
+#ifndef GPPLUS
+	;			;		cjp, go vreset;			| 
+#else GPPLUS
+	;			;		crtn, go;			| 
+#endif GPPLUS
+	
+|   One more reflection. Note that dx in acc from horizontal test.
+#ifndef GPPLUS
+vdxdy:	subw,s dy, acc, y;	;		;				| 
+#else GPPLUS
+vdxdy:	movw d,pkptr;		=vclipdraw->am;	;
+vvdxdy:	subw,s dy, acc, y;	;		;				| 
+#endif GPPLUS
+	movw x0, acc;		;		cjp, ~neg viniterr;		| if (dx < dy) swap (x0, y0)
+	movw y0, x0;		;		;				| 
+	movw acc, y0;		;		;				| 
+	movw x1, acc;		;		;				| Swap (x1, y1)
+	movw y1, x1;		;		;				| 
+	movw acc, y1;		;		;				| 
+	movw dy, dx;		;		;				| dy = dx
+	subw y0, acc, dy;	;		;				| Recompute dy (saves a cycle).
+	movw sizex, acc;	;		;				| Swap (size.x, size.y).
+	movw sizey, sizex;	;		;				| 
+	movw acc, sizey;	;		;				| Swap complete.
+	incw reflect, reflect;	;		;				| reflect += 1.
+viniterr:sr0w dx, err;		;		;				| initerror= -(dx >> 1).
+	negw,s err, err;	;		;				| 
+	compw 0, hierr;		;		cjp, ~cry vierr1;		| 
+	incw hierr, hierr;	;		;				| 
+vierr1:	movw,s x0, startx;	;		;				| start= pos0. 
+	movw y0, starty;	;		;				| 
+	negw startx, Mulcand;	;		cjp, ~neg vadvy;		| initerr += -start.x * dy.
+	movw dy, Multiplier;	;		cjs, go multiply;		| pr_product
+	movw HiRslt, acc;	;		;				| double precision add.
+	movw LoRslt, y;		am->am;		;				| 
+	addw d, err, err;	;		;				| 
+	addcw hierr, acc, hierr;;		;				| 
+	movw 0, startx;		;		;				| start.x= 0.
+	decw dx, temp0;		am->am;		;				| count= (initerr + (dx-1)) / dx.
+	addw d, err, DLow;	;		;				| double precision add.
+	addcw d, hierr, DHigh;	0->am;		;				| 
+	movw dx, Dvsr;		;		cjs, go divlong;		| 
+	movw QLow, count;	;		;				| 
+	movw starty, acc;	;		;				| 
+	addw count, acc, starty;;		;				| start.y += count.
+	movw count, Mulcand;	;		;				| initerr -= count * dx.
+	movw dx, Multiplier;	;		cjs, go multiply;		| pr_product
+	movw HiRslt, y;		am->am;		;				| 
+	movw LoRslt, acc;	;		;				| 
+	rsubw err, acc, err;	;		;				| 
+	subcw d, hierr, hierr;	;		;				| 
+vadvy:	movw starty, acc;	;		;				| 
+	subw,s sizey, acc, y;	;		;				| if (start.y >= size.y)
+#ifndef GPPLUS
+	movw,s starty, Multiplier; ;		cjp, ~neg vreset;		| if (start.y < 0)...
+#else GPPLUS
+	movw,s starty, Multiplier; ;		crtn, ~neg;			| if (start.y < 0)...
+#endif GPPLUS
+	movw x1, acc;		;		cjp, ~neg vcliprt;		| initerr += start.y * dx.
+	movw dx, Mulcand;	;		cjs, go multiply;		| pr_product
+	movw LoRslt, acc;	;		;				| double precision add.
+	movw HiRslt, y;		am->am;		;				| 
+	addw err, acc, err;	;		;				| 
+	addcw d, hierr, hierr;	;		;				| 
+vadvy1:	movw 0, starty;		;		;				| start.y= 0.
+	movw dy, acc;		;		;				| 
+	subw,s dx, acc, acc;	;		;				| count= ((dy-dx)-initerr) / dy.
+	movw 0, y;		am->am;		cjp, ~neg vadvy1a;		| d and acc (low) form (dy-dx).
+	compw 0, y;		am->am;		;				| 
+vadvy1a:subw err, acc, DLow;	;		;				| double precision subtract.
+	rsubcw d, hierr, DHigh;	;		;				| 
+	movw dy, Dvsr;		;		cjs, go divlong;		| 
+	movw QLow, count;	am->am;		;				| 
+	addw d, startx, startx;	;		;				| start.x += count.
+	movw dy, Mulcand;	;		;				| initerr += count * dy.
+	movw count, Multiplier;	;		cjs, go multiply;		| pr_product
+	movw LoRslt, acc;	;		;				| double precision add.
+	movw HiRslt, y;		am->am;		;				| 
+	addw err, acc, err;	;		;				| 
+	addcw d, hierr, hierr;	;		;				| 
+vadvy3:	movw startx, acc;	;		;				| 
+	subw,s sizex, acc, y;	;		;				| if (startx >= size.x)...
+#ifndef GPPLUS
+	movw x1, acc;		;		cjp, ~neg vreset;		| 
+#else GPPLUS
+	movw x1, acc;		;		crtn, ~neg;			| 
+#endif GPPLUS
+vcliprt: subw,s sizex, acc, y;	1->am;		;				| if (pos1.x >= size.x)...
+	subw d, sizex, acc;	;		cjp, neg vlasty;		| pos1.x= size.x - 1.
+	movw acc, x1;		;		;				| 
+	subw x0, acc, Mulcand;	;		;				| (size.x-1) - pos0.x
+	movw dy, Multiplier;	;		cjs, go multiply;		| pr_product (..., dy).
+	sr0w dx, temp0;		am->am;		;				| acc= (dx - dx>>1 - 1).  temp0 is junk.
+	subw d, dx, acc;	;		;				| 
+	decw acc;		;		;				| dx > 0 so that acc >= 0, and high acc = 0.
+	addw LoRslt, acc, DLow;	;		;				| double precision add:  prod + (dx - dx>>1 - 1).
+	addcw d, HiRslt, DHigh;	0->am;		;				| 
+vcliprt2:movw dx, Dvsr;		;		cjs, go divlong;		| / dx
+	movw y0, acc;		;		;				| 
+	addw QLow, acc, y1;	;		;				| pos1.y= pos0.y + (...) / dx.
+vlasty:	movw y1, acc;		;		;				| 
+	subw,s sizey, acc, y;	;		;				| if (pos1.y >= size.y)...
+	decw sizey, ropmode;	am->am;		cjp, neg vclipdone;		| pos1.y= size.y - 1.  ropmode junk reg for am->am.
+	movw d, y1;		;		;				| 
+	rsubw d, y0, Mulcand;	;		;				| (size.y-1) - pos0.y
+	movw dx, Multiplier;	;		cjs, go multiply;		| pr_product (..., dx).
+	sr0w dx, temp0;		am->am;		;				| dx>>1.  temp0 junk (can't use acc).
+	addw d, LoRslt, DLow;	;		;				| + (dx>>1).  double precision add.
+	addcw d, HiRslt, DHigh;	0->am;		;				| 
+vlasty0:movw dy, Dvsr;		;		cjs, go divlong;		| / dy.
+	movw x0, acc;		;		;				| 
+	addw QLow, acc, x1;	;		;				| pos1.x= pos0.x + (...) / dy.
+#ifndef GPPLUS
+vclipdone: btstw,s nosetup,options; ;		;				| 
+	movw x1, acc;		=vropset1->brreg; ;				| Test if rop chips need setup.
+#else GPPLUS
+vclipdone: movw pkptr,y;	am->brreg;	;				| resulting vector will be drawn
+	btstw,s nosetup,options; ;		cjp,go;				| continue or return to pick routine
+vclipdraw: movw x1, acc;	=vropset1->brreg; ;				| Test if rop chips need setup.
+#endif GPPLUS
+	subw startx, acc, count; ;		cjp, ~zer vcolor;		| count= pos1.x-start.x. Jump if chips rop chips ok.
+#ifdef GPPLUS
+	;			VecAtts->scrmemp; ;				| 
+	testw (d);		scrmem->am;	ldct v3dummy;			| test if z buffering enabled
+	testw (nodst);		;		jsrp,zer vropseta;		| call subroutine if z buf disabled
+#else	
+	testw (nodst);		;		cjs, go vropseta;		| Set up rasterop chips.
+#endif GPPLUS	
+vropdone: romw 8, color, acc, 0xff00; ;		;				| instruction completes on next cycle.
+	IMM;			FBAllRopPrimeSrc1->vloareg;;			| vhiareg unchanged.
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+vcolor:	movw color, y;		am->vwdreg;	cjp, ~vir .;			| load vwdreg for bresenham loop but don't write.
+	btstw,s 0, reflect;	VByte->vctlreg;	;				| if (reflect & 1), 3d returns to here
+vcdumret: btstw,s 1, reflect;	;		cjp, zer vmajx;			| if (reflect & 2)
+	movw sizex, acc;	;		cjp, zer vmajy;			| 
+	decw acc;		;		;				| 
+	subw startx, acc, startx;;		;				| start.x= ((size.x-1) - start.x).
+vmajy:	movw offsety, acc;	;		;				| 
+	addw startx, acc, Multiplier;;		cjs, go MulSWid;		| cg2_roppixel (..., start.x).
+	movw offsetx, acc;	;		;				| 
+	addw starty, acc, acc;	;		cjs, go vcompvme;		| cg2_roppixel (..., start.y, ...).
+|   Bump error so that test in octant is as if it were done after adding dy.
+#ifdef GPPLUS
+|   Test for Z buffered lines.  If necessary, we will have to advance the z values based on
+|   our clipping results.  
+	;			VecAtts->scrmemp; ;				| 
+	testw (d);		scrmem->am;	;				| NEW, CHECK NEXT LINE !!!
+	;			;		cjs,~zer vec3yjmap;		| haven't reflected back y, jump if z buffering is on NEW
+#endif GPPLUS	
+	subw d, err, acc;	1->am;		;				| 
+	addw dy, acc, acc;	;		;				| We can only directly test err >= 0 not err > 0.
+	movw dy, r[3];		am->am;		;				| 
+	rsubw d, dx, r[4];	;		;				| 
+#ifndef GPPLUS
+	movw count, r[2];	;		;				| 
+	movw reflect, y;	am->am;		;				| 
+	movw d, r[5];		;		cjs, go octant;			| 
+	;			;		cjp, go vreset;			| 
+#else GPPLUS
+	movw count, r[2];	VecAtts->scrmemp; ;				| 
+	testw (d);		scrmem->am;	;				| test if zbuf, depth cueing or both on
+	movw reflect, y;	am->am;		ldct zbdcjmap;			| 
+	movw d,r[5];		;		jrp,zer octant;			| octant if off, z buff octant if on
+#endif GPPLUS
+vmajx:	movw sizey, acc;	;		cjp, zer vmajx1;		| 
+	decw acc;		;		;				| 
+	subw starty, acc, starty;;		;				| start.x= ((size.x-1) - start.x).
+vmajx1:	movw offsety, acc;	;		;				| 
+	addw starty, acc, Multiplier;;		cjs, go MulSWid;		| cg2_roppixel (..., start.x).
+	movw offsetx, acc;	;		;				| 
+	addw startx, acc, acc;	;		cjs, go vcompvme;		| cg2_roppixel (..., start.y, ...).
+#ifdef GPPLUS	
+|   Test for Z buffered lines.  If necessary, we will have to advance the z values based on
+|   our clipping results. 
+	;			VecAtts->scrmemp; ;				| 
+	testw (d);		scrmem->am;	;				| NEW
+	;			;		cjs,~zer vec3xjmap;		| jump if z buffering is on NEW
+#endif GPPLUS	
+	subw d, err, acc;	1->am;		;				| Subtract 2 from error.
+	addw dy, acc, acc;	;		;				| We can only directly test err >= 0 not err > 0.
+	movw dy, r[3];		am->am;		;				| 
+	rsubw d, dx, r[4];	;		;				| 
+#ifndef GPPLUS
+|   Bump error so that test in octant is as if it were done after adding dy.
+	movw count, r[2];	;		;				| 
+	movw reflect, y;	am->am;		;				| 
+	movw d, r[5];		;		cjs, go octant;			| 
+#else GPPLUS
+	movw count, r[2];	VecAtts->scrmemp; ;				| 
+	testw (d);		scrmem->am;	;				| test if zbuf, depth cueing or both on
+	movw reflect, y;	am->am;		ldct zbdcjmap;			| 
+	movw d,r[5];		;		jrp,zer octant;			| octant if off, z buff octant if on
+#endif GPPLUS
+
+#ifndef GPPLUS
+vreset:	testw (clip);		SavePts->scrmemp; ;				| 
+	movw d, x0;		scrmem->am;	crtn, zer;		scrmp +	| if no clipping we are done.
+	movw d, y0;		scrmem->am;	;			scrmp +	| 
+	movw d, x1;		scrmem->am;	;			scrmp +	| 
+	rsubw d, x0, dx;	;		;				| 
+	movw d, y1;		scrmem->am;	;			scrmp +	| 
+	rsubw d, y0, dy;	;		;				| 
+	movw clipptr, y;	am->scrmemp;	cjp, go vtr;			| 
+#endif GPPLUS
+
+#ifdef GPPLUS
+
+|   vec3fetch grabs the z0hi,z0lo,z1hi,z1lo,dzhi, and dzlo components from the fifo, and stores them in scrmem, in a location
+|   with the same function as SavePts has in the vector code.
+vec3fetch:
+	movw ZSavePts,y;	;		;				| load scrmemp with address for z parameters
+	IMM;			am->scrmemp;	ldct 9;				| will loop 6 times
+	;			fifo1->am;	cjp,f1e .;			| z0hi,z0lo,z1hi,z1lo,dzhi,dzlo,chi,clo,dchi,dclo 
+	movw d,y;		am->scrmem;	rpct .-1;		scrmp+	| 
+	;			;		crtn,go;			| 
+	
+
+zbdcjmap: 
+	btstw,s zbuf,d;		scrmem->am;	;				| 
+	;			;		cjp,zer dcjmap;			| 
+zbjmap:	;			;		jmap zboctant;			| zbuffer, depth cue code resides on 2nd bank
+dcjmap:	;			;		jmap dcoctant;			| 
+zbquit_pp: ;			;		crtn,go;			| 
+
+
+vec3xjmap: 
+	;			;		jmap vec3majx;			| 3d vector clipping code is on other bank
+vec3yjmap: 
+	;			;		jmap vec3majy;			| 3d vector clipping code is on other bank
+v3quit_pp: ;			;		crtn,go;			| 
+
+
+v3dummy: ;			;		cjp,~vir .;			| 
+	btstw,s 0,reflect;	VByte->vctlreg;	;				| 
+	;			;		cjpp,go vcdumret;		| 
+#endif GPPLUS	
+
+
+|   Vropset does the rasterop chip initialization for single pixel fb accesses.  It is called by all but
+|   the horizontal case for the vector code, and is called in all cases by the textured vector code.
+|   We return from here with the color in the accumulator.  Note also that the code for vropmode has
+|   been folded in here to save 2 cycles.  
+
+vropset: testw (nodst);		=vropset1->brreg; ;				| 
+vropseta: movw d, acc;		SWWPIX->am;	cjp, zer;			| if PIXOP_NEEDS_DST (op<<1)
+	movw d, acc;		SRWPIX->am;	;				| 
+vropset1: rolw 3, acc, acc;	FBStatus->vloareg; ;				| Rotate is 3 bits.
+	movw FBCont, y;		am->vhiareg;	cjp, ~vir .;			| wait until vme interface idle
+	;			GPVWord->vctlreg; ;				| 
+vropset2: ;			;		cjp, ~vir .;		vmerd	| read status word.
+	movw d, r[2];		vrdreg->am;	cjp, ~vir .;			| 
+	andw d, r[2], r[2];	0xffc7->am;	;				| 0x38 is mask to cover 3 bits.
+	orw r[2], acc, r[2];	am->vwdreg;	cjp, ~vir .;		vmewr	| write status word.
+	bsetw nosetup,options;	RRValues->scrmemp; ;				| 
+	subw,s d, op, y;	scrmem->am;	;				| 
+	movw op, y;		am->scrmem;	cjp, zer vrpatt;	scrmp +	| 
+	;			FBAllRopRegOp->vloareg;;			| 
+	movw op, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| cg2_setfunction (..., op).
+vrpatt:	;			FBAllRopRegPatt->vloareg; ;			| vhiareg unch.  Acc used 2 cycles later
+	testw (d);		scrmem->am;	;				| 
+	movw 0, y;		am->scrmem;	cjp, zer vrmask2;	scrmp +	| 
+	movw 0, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+vrmask2: ;			FBAllRopRegMask2->vloareg; ;			| vhiareg unchanged.
+	testw (d);		scrmem->am;	;				| 
+	movw 0, y;		am->scrmem;	cjp, zer vrmask1;	scrmp +	| 
+	movw 0, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+vrmask1: ;			FBAllRopRegMask1->vloareg; ;			| vhiareg unchanged.
+	testw (d);		scrmem->am;	;				| 
+	movw 0, y;		am->scrmem;	cjp, zer vrwidth;	scrmp +	| 
+	movw 0, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+vrwidth: ;			FBAllRopRegWidth->vloareg; ;			| vhiareg unchanged.
+	testw (d);		scrmem->am;	;				| 
+	movw 0, y;		am->scrmem;	cjp, zer vropcnt;	scrmp +	| 
+	movw 0, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| half of cg2_setwidth (..., 0, 0).
+vropcnt: ;			FBAllRopRegOpCnt->vloareg; ;			| vhiareg unchanged.
+	testw (d);		scrmem->am;	;				| 
+	movw 0, y;		am->scrmem;	cjp, zer vrshft;	scrmp +	| 
+	movw 0, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| other half of cg2_setwidth (..., 0, 0).
+vrshft:	;			FBAllRopRegShift->vloareg; ;			| vhiareg unchanged.
+	sub2nw,s 8, d, y;	scrmem->am;	;				| 
+	mov2nw 8, y;		am->scrmem;	cjp, zer vrret;		scrmp +	| 
+	mov2nw 8, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| cg2_setshift (..., 0, 1).
+vrret:	movw color,acc;		;		crtn, go;			| 
+
+
+|   vropmode subroutine:  fb->status.reg.ropmode= acc.  Uses r[2].  Assumes that high 13 bits of acc are zero.
+|   Assumes that the vme control word has been set to Word Mode (GPVWord->vctlreg).
+vropmode: rolw 3, acc, acc;	FBStatus->vloareg; ;				| Rotate is 3 bits.
+	movw FBCont, y;		am->vhiareg;	;				| 
+	;			;		cjp, ~vir .;		vmerd	| read status word.
+	movw d, r[2];		vrdreg->am;	cjp, ~vir .;			| 
+	andw d, r[2], r[2];	0xffc7->am;	;				| 0x38 is mask to cover 3 bits.
+	orw r[2], acc, r[2];	am->vwdreg;	cjp, ~vir .;		vmewr	| write status word.
+	;			;		crtn, go;			| 
+
+
+|   vcompvme:  completes vme address calculation:  addr + acc + FBHi + RopFB.
+|   Input:	addrlo	low address.
+|   		addrhi	high address.
+|   		acc	value such as x to be added in.
+|   Uses no other registers.
+|   Output:	addrlo	low address.
+|   		addrhi	high address.
+|   		vloareg
+|   		vhiareg
+
+vcompvme:addw,s addrlo, acc, addrlo;am->vloareg;;				| 
+vcompv:	addw d, FBHi, acc;	RopFB->am;	;				| 
+	addw addrhi, acc, addrhi;am->vhiareg;	crtn, ~cry;			| 
+	incw addrhi, addrhi;	am->vhiareg;	crtn, go;			| 
+
+#undef options
+#undef clip
+#undef reflect
+#undef offsetx
+#undef offsety
+#undef ropmode
+
+#undef x0
+#undef y0
+#undef x1
+#undef y1
+#undef dx
+#undef dy
+#undef hierr
+#undef err
+#undef starty
+#undef startx
+#undef sizey
+#undef sizex
+#undef count
+#undef addrlo
+#undef addrhi
+#undef clipptr
+#undef pkptr
+
+#undef temp0
+#undef nosetup
+#undef zbuf
+#undef dcue
+#undef pick

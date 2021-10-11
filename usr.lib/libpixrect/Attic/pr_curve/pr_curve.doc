@@ -1,0 +1,63 @@
+@(#)pr_curve.doc 1.1 94/10/31 SMI
+
+pr_curve(dstpr, initx, inity, cu, n, op, color)
+	struct pixrect *dstpr;
+	int initx, inity;
+	struct pr_curve cu[];
+	int n, op, color;
+
+The first 3 and last 2 arguments are as for pr_vector, and mean the same
+thing: dstpr is the destination pixrect, initx,inity is where the
+drawing starts, op is the usual pixrect op, and color is the color of
+what is drawn.
+
+Argument n is the number of elements of the argument array cu[] to
+render.  pr_curve proceeds by processing cu[i] for 0 <= i < n.  Each
+cu[i] has two effects: from 0 to 15 pixels of dstpr are updated, and the
+current position curpos (initially initx, inity for cu[0]) is updated.
+
+cu[i] is an object of the following form:
+
+struct pr_curve {
+	char    x, y;
+	short   bits;
+} cu[];
+
+cu[i].bits is decomposed as
+
+	penup  = cu[i].bits & 0x8000;
+	moves  = cu[i].bits & 0x7fff;
+
+The effect of penup==1 is the same as op == PIX_DST for this particular
+cu[i].  That is, no pixels are updated although curpos is updated.  The
+effect of penup==1 is confined to cu[i] and does not affect cu[i+1].
+
+If the magnitudes of cu[i].x is greater than that of cu[i].y then the
+major axis is the X-axis, otherwise it is the Y-axis (???).  Only major
+moves -- moves along the major axis -- are rendered.
+
+cu[i] is rendered as follows:
+
+A tour in a pixrect is a sequence of one-pixel horizontal and vertical
+moves, monotone in each axis (i.e. not reversing either vertical or
+horizontal direction during the tour).  In general there are many tours
+between any two points, any one of which is uniquely determined by
+specifying for each move whether it is horizontal or vertical.
+
+cu[i] is rendered as a tour from curpos to dstpos, the latter being
+defined as
+
+	dstpos.x = curpos.x+cu[i].x, dstpos.y = curpos.y+cu[i].y.
+
+At the conclusion of rendering curpos is updated to dstpos.
+
+The move directions of the tour for cu[i] are determined by the
+low-order 15 bits of cu[i].bits, starting from the most significant bit
+(0x4000).  Each bit distinguishes between the choice of a horizontal or
+vertical move: 0 denotes vertical and 1 horizontal.
+
+The rendered bits are those *arrived at* by a major move.  However, the
+point cu[n].x, cu[n].y is also rendered if it would not be rendered as
+the final rendered pixel of cu[n-1].  The initial position initx,inity
+is not rendered; separate provision must be made outside pr_curve for
+rendering the initial position if this is desired.

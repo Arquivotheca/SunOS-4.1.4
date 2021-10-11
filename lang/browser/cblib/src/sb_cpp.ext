@@ -1,0 +1,209 @@
+/* @(#)sb_cpp.ext 1.1 94/10/31 SMI */
+
+/*
+ *	Copyright (c) 1989, Sun Microsystems, Inc.  All Rights Reserved.
+ *	Sun considers its source code as an unpublished, proprietary
+ *	trade secret, and it is available only under strict license
+ *	provisions.  This copyright notice is placed here only to protect
+ *	Sun in the event the source is deemed a published work.  Dissassembly,
+ *	decompilation, or other means of reducing the object code to human
+ *	readable form is prohibited by the license agreement under which
+ *	this code is provided to the user or company in possession of this
+ *	copy.
+ *	RESTRICTED RIGHTS LEGEND: Use, duplication, or disclosure by the
+ *	Government is subject to restrictions as set forth in subparagraph
+ *	(c)(1)(ii) of the Rights in Technical Data and Computer Software
+ *	clause at DFARS 52.227-7013 and in similar clauses in the FAR and
+ *	NASA FAR Supplement.
+ */
+
+
+/*
+ *	This file contains definitions that should be shared by all languages
+ *	that use cpp.
+ */
+
+properties cpp {
+	CB_MENU_TOKEN_ALL_MATCHES	/* all cpp tags */
+	active		/* active #if[[n]def] block */
+	actual		/* macro actual arguments */
+	def		/* all symbol declarations */
+	defd		/* reference to defined macro */
+	formal		/* macro formal arguments */
+	from_if		/* macros refd from #if statements */
+	from_ifdef	/* macros refd from #ifdef statements */
+	from_ifndef	/* macros refd from #ifndef statements */
+	from_source	/* macros refd from the source */
+	from_undef	/* macros refd from #undef */
+	ident		/* the #ident string */
+	if		/* reference from #if/#ifdef/#ifndef */
+	in_body		/* symbols/strings refd from macro definitions*/
+	inactive	/* inactive #if[[n]def] block */
+	included_file	/* filename from #include statements */
+	local		/* #include "local.h" */
+	macro		/* refs and defs of macros */
+	regular		/* references to macro names */
+	ref		/* references to symbols */
+	system		/* #include <system.h> */
+	w_formals	/* macros with formals */
+	wo_formals	/* macros without formals */
+	undefd		/* reference to undefined macro */
+}
+
+/*
+ * This macro marks all cpp tags
+ */
+#define CPP_ALL_HITS ALL_HITS cpp.CB_MENU_TOKEN_ALL_MATCHES
+
+/*
+ * This macro defines the properties that should mark a declaration tag
+ */
+#define CPP_DEF CPP_ALL_HITS cpp.def
+
+/*
+ * This macro defines the properties that should mark a reference tag
+ */
+#define CPP_REF CPP_ALL_HITS cpp.ref
+
+
+#ifndef NO_CPP_SECONDARIES
+/*
+ * This macro defines the "secondary" construct that should be used
+ * for tags that deal with symbols in languages that use cpp.
+ */
+#define CPP_SECONDARY_SYMBOL secondary	( \
+			cpp_ref_from_macro_body \
+			cpp_ref_macro_actual \
+				)
+
+/*
+ * This macro defines the "secondary" construct that should be used
+ * for tags that deal with strings in languages that use cpp.
+ */
+#define CPP_SECONDARY_STRING secondary	( \
+			cpp_ref_string_from_macro_body \
+			cpp_ref_string_macro_actual \
+				)
+#else
+#define CPP_SECONDARY_SYMBOL
+#define CPP_SECONDARY_STRING
+#endif
+
+/*
+ * The short comments for the tags have the format
+ *	pattern => symbol
+ * where the "pattern" is the cpp construct that generates a symbol with
+ * the tag in question and the "symbol" is the symbol from the "pattern"
+ * that gets filed.
+ */
+tags cpp 25 {
+/*
+ * Tags for macro declarations
+ */
+	def_macro_w_formal =		/* #define macro(x) => macro */
+		DEF_WEIGHT
+		( CPP_DEF cpp.macro cpp.w_formals )
+
+	def_macro_wo_formal =		/* #define CONST => CONST */
+		DEF_WEIGHT
+		( CPP_DEF cpp.macro cpp.wo_formals BASE.constant )
+
+	def_macro_undef =		/* #undef macro => macro */
+		DEF_WEIGHT
+		( CPP_DEF cpp.macro cpp.from_undef )
+
+/*
+ * Tags for referencing macros from #if family statements
+ */
+	ref_macro_from_if_defd =	/* #if macro (macro defd)=> macro */
+		( CPP_REF cpp.macro cpp.if cpp.from_if cpp.defd )
+	ref_macro_from_if_undefd =	/* #if macro (macro not defd)
+							=> macro */
+		( CPP_REF cpp.macro cpp.if cpp.from_if cpp.undefd )
+
+	ref_macro_from_ifdef_defd =	/* #ifdef macro => macro */
+		( CPP_REF cpp.macro cpp.if cpp.from_ifdef cpp.defd
+		  cpp.active )
+	ref_macro_from_ifdef_undefd =	/* #ifdef macro => macro */
+		( CPP_REF cpp.macro cpp.if cpp.from_ifdef cpp.undefd
+		  cpp.inactive )
+
+	ref_macro_from_ifndef_defd =	/* #ifndef macro => macro */
+		( CPP_REF cpp.macro cpp.if cpp.from_ifndef cpp.defd
+		  cpp.inactive )
+	ref_macro_from_ifndef_undefd =	/* #ifndef macro => macro */
+		( CPP_REF cpp.macro cpp.if cpp.from_ifndef cpp.undefd
+		 cpp.active )
+
+/*
+ * Tags for referencing macros from the source text
+ */
+	ref_macro_w_formal_from_source = /* macro(x) => macro */
+		( CPP_REF cpp.macro cpp.w_formals cpp.from_source )
+		CPP_SECONDARY_SYMBOL
+
+	ref_macro_wo_formal_from_source = /* CONST => CONST */
+		( CPP_REF cpp.macro cpp.wo_formals cpp.from_source
+		  BASE.constant )
+		CPP_SECONDARY_SYMBOL
+
+/*
+ * Tags for marking active/inactive #if blocks
+ */
+	if_block_active =		/* #if true => #if */
+		( CPP_DEF cpp.active BASE.CB_MENU_TOKEN_CBCHECKCB )
+	if_block_inactive =		/* #if false => #if */
+		( CPP_DEF cpp.inactive BASE.CB_MENU_TOKEN_CBCHECKCB )
+/*
+ * Tags for declaring and referencing macro formals
+ */
+	def_macro_formal =		/* #define macro(x) => x */
+		DEF_WEIGHT
+		( CPP_DEF cpp.formal )
+
+	ref_macro_formal =		/* #define macro (x) x => 2nd x */
+		( CPP_REF cpp.formal )
+		CPP_SECONDARY_SYMBOL
+
+/*
+ * Tags for referencing symbols from macro actuals lists
+ */
+	ref_macro_actual =		/* macro(x) => x */
+		( CPP_REF cpp.actual cpp.regular )
+
+	ref_string_macro_actual =	/* macro("x") => "x" */
+		( CPP_REF cpp.actual BASE.string BASE.constant )
+
+/*
+ * Tags for referencing symbols from the body of macro declarations
+ */
+	ref_from_macro_body =		/* #define macro(x) y => y */
+		( CPP_REF cpp.in_body cpp.regular )
+
+	ref_string_from_macro_body =	/* #define macro(x) "y" => "y" */
+		( CPP_REF cpp.in_body BASE.string BASE.constant )
+
+/* 
+ * Tags for referencing #include filenames
+ */
+	included_file_name_local =	/* #include "filename" => "filename"*/
+		( CPP_ALL_HITS cpp.included_file cpp.local
+		  BASE.string BASE.constant )
+
+	included_file_name_system =	/* #include <filename> => <filename>*/
+		( CPP_ALL_HITS cpp.included_file cpp.system
+		  BASE.string BASE.constant )
+
+/*
+ * Tag for referencing #ident strings
+ */
+	ident =				/* #ident "id" => "id" */
+		( CPP_ALL_HITS cpp.ident BASE.string BASE.constant )
+}
+
+#undef equiv
+
+#ifdef NO_CPP_SECONDARIES
+#undef CPP_SECONDARY_SYMBOL
+#undef CPP_SECONDARY_STRING
+#endif

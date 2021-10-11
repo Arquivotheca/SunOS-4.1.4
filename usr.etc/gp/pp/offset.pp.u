@@ -1,0 +1,187 @@
+| "@(#)offset.pp.u 1.1 94/10/31"
+
+| Copyright 1986 by Sun Microsystems, Inc.
+| Written by Stuart Levy
+
+|   Expects the following registers to be loaded:
+|   		segaddr,stoff,majax,patln,givpatln,cloff.
+|   Loads the following registers for future use.
+|   		seg,offset,polyoff(stored in scrmem).
+
+#define err acc
+#define addrlo 		r[0]	
+#define addrhi 		r[1]
+#define cnt		r[2]
+#define minax 		r[3]
+#define majax 		r[4]
+#define reflect		r[5]
+#define segaddr 	r[6]
+#define options		r[7]
+#define stoff		r[8]
+#define cloff		r[9]
+#define patln		r[10]
+#define offset		r[11]		/* NEW, used to be r[13] */
+#define seg		r[14]
+#define numsegs		r[15]
+
+#define dvsr		acc
+#define result		r[0]
+#define dvdnd		r[0]
+#define modoff		r[1]
+#define quot		r[2]
+#define mod		r[2]		/* NEW, used to be r[12] */
+#define polyoff		r[11]
+
+#define zbuf 		1
+#define right		8
+#define balance		13
+
+
+|   majax and minax go into scrmem, so don't get stepped on in divide routine.
+
+#define savpolyoff	0x133
+#define savtemp 	0x140
+
+offinit: ;			savtemp->scrmemp; ;				| 	
+	movw err,y;		am->scrmem;	;			scrmp+	| 	Error
+	movw addrlo,y;		am->scrmem;	;			scrmp+	| 	Addrlo
+	movw addrhi,y;		am->scrmem;	;			scrmp+	| 	Addrhi
+	movw cnt,y;		am->scrmem;	;			scrmp+	| 	Cnt
+	movw minax,y;		am->scrmem;	;			scrmp+	| 	Minax
+	movw majax,y;		am->scrmem;	;				| 	Majax
+
+
+	
+offstart: negw majax,r[0];	;		;				| Majax is really (-majax)!
+	incw r[0],dvdnd;	;		;				| Move (majax + 1) -> dividend.
+	movw patln,dvsr;	;		cjs, go divide;			| Move pattern length into divisor, call divide.
+	movw acc,mod;		;		;				| modulus is left in accumulator
+	btstw,s right,options;	savpolyoff->scrmemp; ;				| This is testing if on right side.
+	addw stoff,acc,modoff;	am->am;		cjp, ~zer offrt;		| modoff = mod + stoff, jump if on right side.
+offlft:	incw modoff,polyoff;	am->scrmem;	;				| LEFT SIDE. polyoff = modoff + 1.
+	subw d,patln,acc;	;		;				| stoff = cloff + patln - (mod + stoff).
+	btstw,s balance,options; ;		;				| Testing balanced field of options.
+	addw,s cloff,acc,stoff;	am->am;		cjp, zer offlt0;		| 
+	sub2nw 0,numsegs,r[0];	am->am;		;				| if (balanced), stoff += mod>>1 - seg[numsegs-1]>>1.
+	subw d,segaddr,y;	am->scrmemp;	;				| 
+	sr0w d,acc;		scrmem->am;	;				| seg[numsegs-1]>>1 -> acc.
+	sr0w mod,r[0];		am->am;		;				| Note: seg[numsegs-1] is at segaddr-(numsegs-1)
+	rsubw d,acc,acc;	;		;				| mod>>1 - seg[numsegs-1]>>1 in d-latch.
+	addw,s stoff,acc,stoff;	am->am;		;				| 
+offlt0:	addw d,patln,acc;	;		cjp, ~neg offsoff;		| Jump if stoff >= 0.
+offlt1:	movw,s acc,stoff;	am->am;		ldct offsoff;			| Load new stoff & put in d-latch.
+	addw patln,acc,acc;	;		jrp, neg offlt1;		| while(stoff<0), stoff += patln, when fails=offsoff.
+offrt:	decw modoff,polyoff;	am->scrmem;	;				| RIGHT SIDE.  polyoff = modoff - 1.
+	movw stoff,acc;		;		;				| 
+	addw cloff,acc,stoff;	am->am;		;				| stoff += cloff.
+	btstw,s balance,options; ;		;				| Testing balanced field of options.
+	movw segaddr,y;		am->scrmemp;	cjp, zer offsoff;		| stoff += [patln - mod>>1] + segment[0]>>1
+	sr0w d,acc;		scrmem->am;	;				| 	segment[0]>>1 in accumulator
+	sr0w mod,r[0];		am->am;		;				| 	mod>>1 in d-latch
+	subw d,patln,r[0];	;		;				| 	patln - mod>>1
+	addw r[0],acc,acc;	;		;				| 	[patln - mod>>1] + segment[0]>>1
+	addw stoff,acc,stoff;	am->am;		;				| 
+offsoff: rsubw,s d,patln,y;	;		;				| Note: stoff in d-latch!.
+	movw,s stoff,acc;	;		cjp, neg offpoff;		| Jump if (stoff < patln).
+	subw,s patln,acc,acc;	;		cjp, ~neg .;			| Loop until stoff < patln.
+	addw patln,acc,acc;	;		;				| This gets done twice more than it should.
+	addw,s patln,acc,stoff;	;		;				| 
+offpoff: movw polyoff,y;	am->am;		;				| 
+	rsubw,s d,patln,y;	;		;				| 
+	movw,s polyoff,acc;	;		cjp, neg offseg0;		| Jump if (polyoff < patln).
+	subw,s patln,acc,acc;	;		cjp, ~neg .;			| Loop until polyoff < patln.
+	addw patln,acc,acc;	savpolyoff->scrmemp; ;				| This gets done twice more than it should.
+	addw patln,acc,polyoff; am->scrmem;	;				| Store polyoff in scrmem.
+offseg0: testw (stoff);		;		;				| 
+	movw d,seg;		0x1->am;	;				| 
+	movw segaddr,y;		am->scrmemp;	;				| Load starting address.
+	btstw,s right,options;	;		cjp, ~zer offloop;		| Jump if stoff != 0.
+	movw d,offset;		scrmem->am;	cjp, go offres;			| Check order of operations! Inc pointer for next fetch.
+offloop: ;			;		cjp, zer offloopL;		| Jump if on left side.
+offloopR: rsubw,s d,stoff,acc;	scrmem->am;	;				| Compute (offset - stoff)
+	incw seg,seg;		;		cjp, ~neg offgtR;		| Jump if >= 0, therfore stoff < offset
+	negw acc,stoff;		;		cjp, go offloopR;	scrmp+	| stoff -= offset.
+offgtR:	movw,s acc,offset;	;		;				| offset -= stoff.
+	sub2nw 0,seg,seg;	am->am;		cjp, ~zer offres;		| Return if offset != 0. Inc pointer for next fetch.
+	subw,s d,numsegs,y;	;		;				| Check if (seg >= numsegs).
+	addw d,segaddr,y;	am->scrmemp;	cjp, zer offirst;		| 
+	movw d,offset;		scrmem->am;	;				| Return if (seg != numsegs).
+	incw seg,seg;		;		cjp, go offres;			| Increment seg and restore.
+offloopL: decw seg ;		;		;				| 
+offloopLa: rsubw,s d,stoff,acc;	scrmem->am;	;				| Compute (offset - stoff)
+	incw seg,seg;		am->am;		cjp, ~neg offgtL;		| Jump if >= 0, therfore stoff < offset
+	subw d,segaddr,y;	am->scrmemp;	;				| scrmemp = segaddr - seg.
+	negw acc,stoff;		;		cjp, go offloopLa;		| stoff -= offset.
+offgtL:	movw acc,offset;	;		cjp, ~zer offres;		| offset -= stoff.
+	subw,s d,numsegs,y;	;		;				| Check if (seg >= numsegs).
+	subw d,segaddr,y;	am->scrmemp;	cjp, zer offirst;		| 
+	movw d,offset;		scrmem->am;	;				| Return if (seg != numsegs). Inc pointer for next fetch.
+	incw seg,seg;		;		cjp, go offres;			| Increment seg and restore.
+offirst: movw segaddr,y;	am->scrmemp;	;				| Load in first segment.
+	movw d,offset;		scrmem->am;	;				| 
+	movw d,seg;		0x1->am;	;				| Zero out seg, offset=1st, Inc pointer for next fetch.
+
+offres:	;			savtemp->scrmemp; ;				| 	
+	movw d,err;		scrmem->am;	;			scrmp+	| 	Error
+	movw d,addrlo;		scrmem->am;	;			scrmp+	| 	Addrlo
+	movw d,addrhi;		scrmem->am;	;			scrmp+	| 	Addrhi
+	movw d,cnt;		scrmem->am;	;			scrmp+	| 	Cnt
+	movw d,minax;		scrmem->am;	;			scrmp+	| 	Minax
+	movw d,majax;		scrmem->am;	;				| 	Majax 
+#ifdef GPPLUS
+|   Check if z-buffering or depth cueing is enabled, and if so, we jmap to the appropriate routine from here.	
+	;			VecAtts->scrmemp; ;				| 
+	testw (d);		scrmem->am;	;				| test if z-buffering or depth cueing is enabled
+	btstw,s right,options;	;		cjp,~zer offdczb;		| 
+#endif GPPLUS	
+	btstw,s right,options;	;		;				| Check if right or left side.
+	movw segaddr,y;		am->am;		cjp, zer offresL;		| Reset scrmemp for either side.
+offresR: addw d,seg,y;		am->scrmemp;	cjp, go toctdrw;		| Jump back to texvec.
+offresL: rsubw d,seg,y;		am->scrmemp;	cjp, go toctdrw;		| 
+
+#ifdef GPPLUS
+|   Here we do some final initialization & then we call the dc textured drawing routines.  The initialization
+|   must be done here, as we can't touch the scrmemp after this point.
+offdczb: btstw,s zbuf,d;	;		;				| 
+	btstw,s right,options;	;		cjp, ~zer offzb;		| jump if z buffering enabled
+offdc:	movw segaddr,y;		am->am;		cjp, zer .+2;			| Reset scrmemp for either side.
+	addw d,seg,y;		am->scrmemp;	jmap dctoctdrw;			| Jmap to other bank, depth cueing routine
+	rsubw d,seg,y;		am->scrmemp;	jmap dctoctdrw;			| 
+offzb:	movw segaddr,y;		am->am;		cjp, zer .+2;			| Reset scrmemp for either side.
+	addw d,seg,y;		am->scrmemp;	jmap zbtoctdrw;			| Jmap to other bank, depth cueing routine
+	rsubw d,seg,y;		am->scrmemp;	jmap zbtoctdrw;			| 
+#endif GPPLUS
+
+	
+#undef err
+#undef addrlo
+#undef addrhi
+#undef cnt	
+#undef minax 	
+#undef majax 	
+#undef reflect	
+#undef segaddr 	
+#undef options	
+#undef stoff	
+#undef cloff	
+#undef patln	
+#undef offset	
+#undef seg	
+#undef numsegs
+	
+#undef clo
+#undef chi
+
+#undef dvsr	
+#undef result	
+#undef dvdnd	
+#undef quot	
+#undef polyoff	
+#undef mod
+
+#undef zbuf
+#undef right
+#undef balance		
+
+#undef savpolyoff
+#undef savtemp

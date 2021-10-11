@@ -1,0 +1,553 @@
+| "@(#)polyscan.vp.u 1.1 94/10/31 SMI"
+| Copyright (c) 1985 by Sun Microsystems, Inc.
+
+
+|   Polygon scan conversion.  Polygon may have multiple holes.
+|   Based on pr_polygon2.c which is derived from Foley and Van Dam pg. 459.
+
+|   includes polyscan3.vp.u at end (which see).
+
+|   Input:
+|   	r[15]	colorop	PIX_OP | PIX_COLOR (color)
+|   	r[14]	pet	pointer to edge table in FP register memory.  First edge is a dummy.
+
+|   Edges are received in the form of EdgeIn and are converted internally to the Edge structure (structures are same size).
+
+|   typedef struct EdgeIn {	(Edge for polygon fill)
+|	int ymn, ymx;		(16 bit integers, value in the hi 16 bits)
+|	float dx, xmn;		(dx is xmax initially.)
+|	Edge *nxt;		(int in low 16 bits.)
+|   } EdgeIn;
+
+|   typedef struct Edge {	(Edge for polygon fill) (16 bit integers, values in the hi and lo 16 bits respectively)
+|	short error, ymn;	(bresenham error accumulator, ymn.).
+|	short errx, erry;	(incrementers).
+|	short dx, xmn;
+|	short ymx, dxerry;	(ymx, dx * erry).
+|	Edge *nxt;		(int in low 16 bits.)
+|   } Edge;
+
+#define VECSDRAWTORIGHT
+
+#define NxtOff	4	/* offset in data structure to *nxt. */
+
+/* Address in floating point registers. */
+#define PDeltaY	0	/* Address in fp regs of temporary storage. Change with care. 0 is hardwired into code for efficiency. */
+#define PDeltaY1 1	/* Address in fp regs of temporary storage. */
+#define PET	2	/* Save input pointer to edge table. */
+#define AET	2000	/* Active edge table near end of floating point registers. */
+
+#define colorop	r[15]	/* PIX_OP | PIX_COLOR (color) */
+#define pet	r[14]
+#define cury	r[13]
+#define xmn	r[12]	/* same as xmnhi */
+#define dx	r[11]	/* initially xmx */
+#define ymn	r[10]
+#define ymx	r[9]
+#define erry	r[8]	/* dy. */
+#define errx	r[7]	/* xmx - xmn. */
+#define error	r[6]
+#define dxerry	r[5]
+#define swap	r[4]
+#define dxdiv2	r[3]
+
+#define TexDepth r[16]	/* depth 0 mean no texture. */
+/* Has to be common with polyscan.vp.u */
+#define paet	r[17]
+#define nxt	r[18]
+#define p2	r[19]
+#define p1	r[20]
+#define sx	r[21]
+#define sy	r[22]
+
+#define temp	r[0]
+#define junk	r[0]
+#define temphi	r[0]
+#define templo	r[1]
+
+#define temp1	r[23]
+#define junk1	r[23]
+
+polyscan: ;			;		cjs,go oldpolyscan; ;			| save pointer to edge table.
+	movw cmdptr,y;		am->shmemp;	jmap getcmd2;	;			| 
+#ifdef GPPLUS
+markerpolyscan: movw 0,TexDepth; ;		cjs,go oldpolyscan; ;			| 
+	;			;		jmap retfrompolyscan; ;			| 
+#endif
+oldpolyscan:
+	;			PET->fpdp;	;		;			| 
+	movw pet, y;		am->fpregl;	;		;			| 
+	;			NxtOff->am;	;		;			| p1= et [0].nxt.  Skip dummy first edge
+	addw d, pet, y;		am->fpap;	;		;			| 
+|   Initialize the edge values:  For all edges ymin must be lowest.
+psinit:	movw,s d, p1;		fpregl->am;	;		;			| while (p1)
+	;			fpregl->fpap;	cjp, zer pssort; ;			| for all edges, ymin must be < ymx.
+	movw p1, y;		am->fpdp;	;		;			| adp 0 0 with respect to p1.
+	movw d, ymn;		fpregh->am;	;		;		adp+	| adp 1 1
+	rsubw,s d, ymn, erry;	fpregh->am;	;		;			| 
+	movw d, ymx;		;		cjp, ~neg psnoswap; ;		adp+	| adp 2 2.  if (ymx < ymn) ...
+	negw erry, erry;	;		;		;			| 
+	movw ymn, swap;		;		;		;			| swap y's
+	movw ymx, ymn;		;		;		;			| 
+	movw swap, ymx;		;		;		;			| 
+	movw d, dx;		fpregh->am;	;		;			| swap x's
+	movw d, swap;		fpregl->am;	;		;		ap+	| adp 3 2
+	;			fpregh->fpregh;	;		;			| 
+	;			fpregl->fpregl;	;		;		dp+	| adp 3 3
+	movw dx, y;		am->fpregh;	;		;			| 
+	movw swap, y;		am->fpregl;	;		;			| 
+psnoswap: movw PDeltaY, y;	am->fpdp;	;		;			| Stash erry in fpregs.
+	movw erry, y;		am->fpregl;	;		;			| 
+	;			0->fpregh;	;		;			| 
+	add2nw 1, p1, junk1;	am->fpap;	;		lmode rn, ai, pipe, fast;| 
+	incw junk1, y;		am->fpbp;	;		;			| 
+	;			;		;		suba, lab, hi;		| errx= dx - xmn, prepare to float erry
+	;			;		;		;		ap+	| 
+	;			;		;		fixa, la, a, hi;	| fix xmn
+	movw PDeltaY, y;	am->fpap;	;		;			| 
+	;			;		;		floata, la, a, hi;	| float erry
+	;			;		;		;			| 
+	;			;		;		pa, hi;			| 
+	;			;		;		;			| 
+	;			;		;		pa, a, hi;		| 
+	movw junk1, y;		am->fpdp;	;		;			| 
+	;			;		;		fixr, la, a, st, hi;	| fix errx.  store errx float in dx.
+	;			;		;		;		dp+	| 
+	incw junk1, y;		am->fpap;	;		pa, a, st, hi;		| store xmn fix in fpreg
+	movw PDeltaY, y;	am->fpdp;	;		;			| 
+	;			;		;		pa, st, hi;		| store erry float.  get xmn from fpreg.
+	movw d, xmn;		fpregl->am;	;		;			| 
+	;			;		;		pa, hi;			| 
+#ifndef GPPLUS
+	movw =recip, y;		;		;		;			| 
+#else
+	movw =strecip,y;	;		;		;			| 
+#endif GPPLUS	
+	IMM;			am->brreg;	;		pa, a, hi;		| 
+	incw p1, y;		am->fpdp;	;		;			| 
+	incw PDeltaY, r[2];	;		;		pa, st, hi;		| store fixed errx in what was ymx
+	movw 0, y;		am->fpap;	cjs, go;	;			| Calculate reciprocal.
+	incw PDeltaY, y;	am->fpap;	;		lmode rz, ai, flow, fast;| recip may have changed mode.
+	add2nw 1, p1, junk1;	am->fpbp;	ldct 3;		;			| 
+|   errx / erry == -((-errx) / erry) for octants 2 and 3.
+	;			;		;		maba, lab, hi;		| dx= errx / erry. (mul by recip.)
+	;			;		push, ~go;	;			| 
+	;			3->brreg;	rfct;		;			| 
+	;			;		;		noflop, m, hi;		| 
+	;			;		;		;			| 
+	;			;		;		fixr, la, hi;		| fix dx.
+	;			;		push, go;	;			| 
+	;			;		rfct;		;			| 
+	;			;		;		noflop, a, hi;		| 
+	incw junk1, y;		am->fpdp;	;		;			| store dx fix in old xmn location.
+	movw erry, acc;		;		;		noflop, st, hi;		| set acc for mult.
+	incw junk1, y;		am->fpap;	;		;			| 
+	movw d, dx;		fpregl->am;	;		;			| 
+#ifndef GPPLUS
+	movw d, r[2];		;		cjs, go multiply; ;			| compute dx*erry.  MAKE FLOAT (FIX) MUL
+#else	
+	movw d, r[2];		;		cjs, go stmultiply; ;			| compute dx*erry.  MAKE FLOAT (FIX) MUL
+#endif GPPLUS
+	movw r[0], dxerry;	;		;		;			| 
+	incw p1, y;		am->fpap;	;		;			| 
+	movw,s d, errx;		fpregl->am;	;		;			| if (errx >= 0)....
+	subw,s d, erry, y;	;		cjp, neg psi23;	;			| if (erry < errx)....
+	sr0w dx, dxdiv2;	;		cjp, ~neg psi1;	;			| dx/2
+psi0:	movw dxdiv2, r[2];	;		;		;			| OCTANT 0.  set r[2] for mult.
+#ifndef GPPLUS
+	movw erry, acc;		;		cjs, go multiply; ;			| 
+#else	
+	movw erry, acc;		;		cjs, go stmultiply; ;			| 
+#endif GPPLUS
+	movw errx, acc;		;		;		;			| 
+	sr0w acc, acc;		;		;		;			| errx >> 1
+	rsubw,s r[0], acc, error; ;		;		;			| error= -(errx >> 1) + (dx/2) * erry.
+	movw erry, acc;		;		cjp, neg psi0jog; ;			| if (error <= 0)....
+	;			;		cjp, ~zer psi0njog; ;			| 
+psi0jog: addw error, acc, error; ;		;		;			| error += erry
+	incw xmn, xmn;		;		;		;			| xmn++
+psi0njog: movw errx, acc;	;		;		;			| 
+	rsubw error, acc, error; ;		;		;			| error -= errx
+	sr0w dx, dxdiv2;	am->am;		;		;			| 
+	addw d, xmn, xmn;	;		cjp, go psinxt;	;			| xmn += dx/2
+psi1:	movw erry, acc;		;		;		;			| OCTANT 1.
+	sr0w acc, acc;		;		;		;			| erry >> 1.
+	negw acc, error;	;		cjp, go psinxt;	;			| error = - (erry >> 1)
+|   OCTANTS 2 and 3.
+psi23:	negw d, acc;		;		;		;			| -errx
+	rsubw,s erry, acc, y;	;		;		;			| 
+	negw dx, acc;		;		cjp, ~neg psi2;	;			| OCTANT 3.  (-dx)
+	sr0w acc, acc;		;		;		;			| (-dx) / 2.  set for multiplication.
+	movw acc, r[2];		;		;		;			| 
+#ifndef GPPLUS
+	movw erry, acc;		;		cjs, go multiply; ;			| ((-dx) / 2) * erry
+#else
+	movw erry, acc;		;		cjs, go stmultiply; ;			| ((-dx) / 2) * erry
+#endif GPPLUS
+	negw errx, acc;		;		;		;			| -errx
+	sr0w acc, acc;		;		;		;			| (-errx) >> 1
+	rsubw,s r[0], acc, error; ;		;		;			| error= -((-errx) >> 1) + ((-dx)/2) * erry
+	movw erry, acc;		;		cjp, neg psi3jog; ;			| 
+	;			;		cjp, ~zer psi3njog; ;			| 
+psi3jog: addw error, acc, error; ;		;		;			| error += erry
+	sub2nw 0, xmn, xmn;	;		;		;			| xmn--
+psi3njog: movw errx, acc;	;		;		;			| 
+	addw error, acc, error;	;		;		;			| error += errx
+	negw dx, acc;		;		;		;			| 
+	sr0w acc, acc;		;		;		;			| dx / 2
+	negw acc, acc;		;		;		;			| >> 2 is not symmetric about zero.
+	incw acc, acc;		;		;		;			| dx / 2 + 1
+#ifdef VECSDRAWTORIGHT
+	addw xmn, acc, xmn;	;		;		;			| xmn += dx / 2 + 1
+	movw error, acc;	;		;		;			| 
+	rsubw dxerry, acc, acc;	;		;		;			| dx * erry - error
+	addw errx, acc, error;	;		;		;			| error= errx + dx * erry - error
+	btstw,s 0, erry, junk;	;		;		;			| if (erry & 1) ....
+	;			;		cjp, zer psinxt; ;			| 
+	incw error, error;	;		cjp, go psinxt;	;			| 
+#else
+	addw xmn, acc, xmn;	;		cjp, go psinxt;	;			| xmn += dx / 2 + 1
+#endif
+psi2:	movw erry, acc;		;		;		;			| OCTANT 2.
+	sr0w acc, acc;		;		;		;			| erry >> 1
+#ifdef VECSDRAWTORIGHT
+	negw acc, error;	;		;		;			| error= -(erry >> 1)
+	negw erry, acc;		;		;		;			| -erry
+	subw,s error, acc, y;	;		;		;			| if (error <= -erry)
+	movw erry, acc;		;		cjp, neg psinxt; ;			| 
+	sub2nw 0, xmn, xmn;	;		;		;			| xmn--
+	addw error, acc, error;	;		cjp, go psinxt;	;			| error += erry
+#else
+	negw acc, error;	;		cjp, go psinxt;	;			| error= -(erry >> 1)
+#endif
+
+psinxt:	movw p1, y;		am->fpdp;	;		;			| 
+	movw error, y;		am->fpregh;	;		;			| 
+	movw ymn, y;		am->fpregl;	;		;		dp+	| 
+	movw errx, y;		am->fpregh;	;		;			| 
+	movw erry, y;		am->fpregl;	;		;		dp+	| 
+	movw dx, y;		am->fpregh;	;		;			| 
+	movw xmn, y;		am->fpregl;	;		;		dp+	| 
+	movw ymx, y;		am->fpregh;	;		;			| 
+	movw dxerry, y;		am->fpregl;	;		;		dp+	| 
+	addw d, p1, junk1;	NxtOff->am;	;		;			| 
+	movw junk1, y;		am->fpap;	cjp, go psinit; ;			| 
+
+
+
+|   Sort edge table on ymn and on xmn secondarily.
+|   Bubble sort (?) for now.
+|   From here on acc stores NxtOff.
+pssort:	movw 0, swap;		PET->fpap;	;		;			| Assume non-empty edge table.  do {
+	movw d, pet;		fpregl->am;	;		;			| 
+	movw d, acc;		NxtOff->am;	;		;			| 
+	addw pet, acc, y;	am->fpap;	;		;			| p1= pet->nxt
+	movw d, p1;		fpregl->am;	;		;			| 
+pssort0: addw p1, acc, y;	am->fpap;	;		;			| while (p1->nxt) {
+	movw,s d, nxt;		fpregl->am;	;		;			| 
+	movw p1, y;		am->fpap;	cjp, zer psdowhile; ;			| 
+	movw d, ymn;		fpregl->am;	;		;			| if (p1->ymn > p1->nxt->ymn) {
+	addw p1, acc, y;	am->fpap;	;		;			| &p1->nxt
+	movw d, paet;		fpregl->am;	;		;			| paet= p1->nxt
+	;			fpregl->fpap;	;		;			| &p1->next->ymn
+	rsubw,s d, ymn, y;	fpregl->am;	;		;			| p1->ymn > p1->nxt->ymn
+	add2nw 1, p1, junk1;	am->fpap;	cjp, ~neg pssortx; ;			| p1->xmn
+psswaps: addw paet, acc, y;	am->fpap;	;		;			| p1->nxt= p1->nxt->nxt
+	addw p1, acc, y;	am->fpdp;	;		;			| 
+	;			fpregl->fpregl;	;		;			| 
+	addw pet, acc, y;	am->fpap;	;		;			| paet->nxt= pet->nxt
+	addw paet, acc, y;	am->fpdp;	;		;			| 
+	incw 0, swap;		fpregl->fpregl;	;		;			| swap= 1
+	addw pet, acc, y;	am->fpdp;	;		;			| pet->nxt= paet
+	movw paet, y;		am->fpregl;	cjp, go pssort1; ;			| 
+pssortx: movw d, xmn;		fpregl->am;	cjp, ~zer pssort1; ;			| p1->xmn
+	add2nw 1, paet, junk1;	am->fpap;	;		;			| p1->nxt->xmn
+	subw,s d, xmn, y;	fpregl->am;	;		;			| if (p1->xmn > p1->nxt->xmn) {
+	;			;		cjp, zer pssort1; ;			| 
+	;			;		cjp, ~neg psswaps; ;			| swap }
+
+pssort1: addw pet, acc, y;	am->fpap;	;		;			| pet= pet->nxt
+	movw d, pet;		fpregl->am;	;		;			| 
+	addw pet, acc, y;	am->fpap;	;		;			| p1= pet->nxt
+	movw,s d, p1;		fpregl->am;	cjp, go pssort0; ;			| 
+
+psdowhile: movw,s swap, y;	;		;		;			| } while (swap)
+	;			;		cjp, ~zer pssort; ;			| 
+
+
+|   Ready to draw segments.
+psrdy:	movw,s TexDepth, y;	;		;		;			| 
+	;			;		cjp, zer psrdy1; ;			| 
+psinipp: ;			PPSHINIT->am;	;		;			|
+	movw d, y;		am->fifo1;	cjp, f1f .;	;			| Send plhinit command (#19) to pp.
+	sr0w colorop, temp;	;		;		;			| 
+	andw d, temp, temp;	0xf->am;	;		;			| 
+| PIXOP_NEEDS_DST (op << 1)= (op^(op << 1)) & 0xa
+	movw temp, acc;		;		;		;			| 
+	sl0w acc, acc;		;		;		;			| 
+	xorw temp, acc, acc;	;		;		;			| 
+	andw,s d, acc, acc;	0xa->am;	;		;			| 
+	;			;		cjp, zer psnodst; ;			| 
+	;			3->am;		;		;			| SWWPIX
+	;			;		cjp, go psropreg; ;			| 
+psnodst: ;			1->am;		;		;			| SRWPIX
+psropreg: movw d, y;		am->fifo1;	cjp, f1f .;	;			| RopMode
+	movw temp, y;		am->fifo1;	cjp, f1f .;	;			| Op
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| Patt
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| Mask2
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| Mask1
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| Width
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| OpCnt
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| Shift
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| PrimeSrc2
+	movw d, acc;		NxtOff->am;	;		;			| 
+
+psrdy1:	;			PET->fpap;	;		;			| pet= et[0].nxt
+	;			fpregl->am;	;		;			| 
+	addw d, acc, y;		am->fpap;	;		;			| 
+	movw d, pet;		fpregl->am;	;		;			| 
+	movw d, paet;		AET->am;	;		;			| paet= aet
+	movw pet, y;		am->fpap;	;		;			| cury= pet->ymn
+	movw d, cury;		fpregl->am;	;		;			| 
+	addw paet, acc, y;	am->fpdp;	;		;			| paet->nxt= 0
+	;			0->fpregl;	;		;			| 
+
+|   Repeat until aet and et are empty.
+|   Get current edges out of edge table (et) and put in active edge table.
+psdo:	movw paet, p1;		=pspaint->brreg; ;		;			| p1= paet
+pswhily: movw,s pet, y;		am->fpap;	;		;			| while (pet && (pet->ymn <= cury)) {
+	subw,s d, cury, y;	fpregl->am;	cjp, zer;	;			| (pet->ymn <= cury)
+	add2nw 1, pet, junk;	am->fpap;	cjp, neg;	;			| save pet->xmn
+	movw d, xmn;		fpregl->am;	;		;			| 
+pswhilx: addw p1, acc, y;	am->fpap;	;		;			| while (p1->nxt && (
+	movw,s d, nxt;		fpregl->am;	;		;			| test p1->nxt for 0
+	;			;		cjp, zer psetaet; ;			| 
+	add2nw 1, nxt, junk1;	am->fpap;	;		;			| p1->nxt->xmn
+	rsubw,s d, xmn, y;	fpregl->am;	;		;			| while( &&(p1->nxt->xmn(a) < pet->xmn(b)))
+	;			;		cjp, ~neg psetaet; ;			| 
+	movw nxt, p1;		;		cjp, go pswhilx; ;			| { p1= p1->nxt }
+psetaet: movw nxt, p2;		;		;		;			| p2= p1->nxt
+	addw p1, acc, y;	am->fpdp;	;		;			| p1->nxt= pet
+	movw pet, y;		am->fpregl;	;		;			| 
+	movw pet, y;		am->am;		;		;			| 
+	movw d, nxt;		;		;		;			| 
+	addw pet, acc, y;	am->fpap;	;		;			| pet= pet->nxt
+	movw d, pet;		fpregl->am;	;		;			| 
+	addw nxt, acc, y;	am->fpdp;	;		;			| p1->nxt->nxt= p2
+	movw p2, y;		am->fpregl;	cjp, go pswhily; ;			| }
+
+|   Paint the current scanline segments.  We are guaranteed that the edges come in pairs.
+pspaint: addw paet, acc, y;	am->fpap;	;		;			| p1= paet->nxt
+	movw,s d, p1;		fpregl->am;	;		;			| 
+pswhp1:	addw p1, acc, y;	am->fpap;	cjp, zer psremactive; ;			| while (p1) {  There are more edges
+	movw d, p2;		fpregl->am;	ldct 3;		;			| 
+|   First pixel x1= trunc (x + .4999 + dx/2)
+	movw,s TexDepth, y;	=psppcmd->brreg; ;		;			| 
+	btstw,s 0, TexDepth, junk1; PPPLGFILL->am; cjp, zer;	;			| PPFill2DSeg (plgfill)
+	;			PPPLGTEX1->am;	cjp, ~zer;	;			| 
+	;			PPPLGTEX8->am;	;		;			| 
+psppcmd:movw d, y;		am->fifo1;	cjp, f1f .;	;			| 
+|   Args to plgfill:  cury, x1, x2, color, op
+|   Args to plgtex1:  cury, x1, x2, color, color0, op, sx, sy
+|   Args to plgtex8:  cury, x1, x2, op, sx, sy
+	movw cury, y;		am->fifo1;	cjp, f1f .;	;			| 
+	add2nw 1, p1, junk1;	am->fpap;	;		;			| p1->xmn
+	movw d, xmn;		fpregl->am;	;		;			| 
+	;			fpregl->fifo1;	cjp, f1f .;	;			| 
+	add2nw 1, p2, junk1;	am->fpap;	;		;			| p2->xmn
+	;			fpregl->fifo1;	cjp, f1f .;	;			| 
+	movw,s TexDepth, y;	;		;		;			| 
+	btstw,s 0, TexDepth, junk1; ;		cjp, zer pstex0; ;			| 
+	;			;		cjp, zer pstex8; ;			| 
+|   pstex1:
+	rolw 11, colorop, temp;	;		;		;			| Color in op
+	andw,s d, temp, temp;	0x7ff->am;	;		;			| if (color == 0) color= all ones.
+	;			;		cjp, ~zer .+2;	;			| 
+	movw d, temp;		0xffff->am;	;		;			| 
+	movw temp, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| Color0
+	andw d, colorop, temp;	0x1f->am;	;		;			| Op
+	movw temp, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw,s xmn, y;		am->am;		;		;			| 
+	addw d, sx, temp1;	;		;		;			| 
+	movw temp1, y;		am->fifo1;	cjp, f1f .;	;			| sx
+	movw cury, y;		am->am;		;		;			| 
+	addw d, sy, temp1;	;		;		;			| 
+	movw temp1, y;		am->fifo1;	cjp, f1f .;	;			| sy
+	;			;		cjp, go psnxtseg; ;			| 
+pstex8:	andw d, colorop, temp;	0x1f->am;	;		;			| Op
+	movw temp, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw,s xmn, y;		am->am;		;		;			| 
+	addw d, sx, temp1;	;		;		;			| 
+	movw temp1, y;		am->fifo1;	cjp, f1f .;	;			| sx
+	movw cury, y;		am->am;		;		;			| 
+	addw d, sy, temp1;	;		;		;			| 
+	movw temp1, y;		am->fifo1;	cjp, f1f .;	;			| sy
+	;			;		cjp, go psnxtseg; ;			| 
+pstex0:	rolw 11, colorop, temp;	;		;		;			| Color in op
+	andw d, temp, temp;	0x7ff->am;	;		;			| 
+	movw temp, y;		am->fifo1;	cjp, f1f .;	;			| 
+	andw d, colorop, temp;	0x1f->am;	;		;			| Op
+	movw temp, y;		am->fifo1;	cjp, f1f .;	;			| 
+psnxtseg:addw p2, acc, y;	am->fpap;	;		;			| p1= p2->nxt
+	movw,s d, p1;		fpregl->am;	;		;			| 
+	addw p1, acc, y;	am->fpap;	cjp, zer psremactive; ;			| if (p1) p2= p1->nxt.  NB while (p1)
+	movw d, p2;		fpregl->am;	cjp, go pswhp1;	;			| 
+
+|   Remove active edges whose ymax <= cury
+psremactive: incw cury, cury;	;		;		;			| cury++.  Step to next scanline
+	movw paet, p1;		;		;		;			| p1= paet
+	addw p1, acc, y;	am->fpap;	;		;			| while (p1->nxt) {
+psremwh: movw,s d, nxt;		fpregl->am;	;		;			| 
+	;			3->am;		;		;			| 
+	addw d, nxt, y;		am->fpap;	cjp, zer psupx;	;			| if (p1->nxt->ymx <= cury)
+	subw,s d, cury, y;	fpregh->am;	;		;			| 
+	addw nxt, acc, y;	am->fpap;	cjp, neg psstep; ;			| p1->nxt= p1->nxt->nxt
+	addw p1, acc, y;	am->fpdp;	;		;			| 
+	;			fpregl->fpregl;	cjp, go psremwh; ;			| 
+psstep:	movw nxt, p1;		;		;		;			| else p1= p1->nxt
+	addw p1, acc, y;	am->fpap;	cjp, go psremwh; ;			| 
+
+|   Update x values in aet
+psupx:	movw paet, p1;		;		;		;			| p1= paet
+psupxwhile: addw p1, acc, y;	am->fpap;	;		;			| while (p1->nxt) {
+	movw,s d, nxt;		fpregl->am;	;		;			| 
+	movw nxt, p1;		;		cjp, zer psresort; ;			| p1= p1->nxt
+	incw p1, y;		am->fpap;	;		;			| 
+	movw,s d, errx;		fpregh->am;	;		;			| if (errx >= 0) ....
+	movw d, erry;		fpregl->am;	cjp, neg psupx23; ;			| 
+psupx01: rsubw,s d, errx, y;	;		;		;		ap+	| if (erry < errx) ....
+	movw d, xmn;		fpregl->am;	cjp, ~neg psupx1; ;			| 
+psupx0:	addw d, xmn, xmn;	fpregh->am;	;		;			| OCTANT 0.  xmn += dx
+	movw p1, y;		am->fpap;	;		;			| 
+	movw d, error;		fpregh->am;	;		;			| 
+	;			3->am;		;		;			| 
+	addw d, p1, y;		am->fpap;	;		;			| 
+	addw,s d, error, error;	fpregl->am;	;		;			| error += dx * erry.  if (error <= 0)....
+	movw errx, y;		am->am;		;		;			| 
+	subw d, error, error;	;		cjp, neg psupx0if; ;			| error -= errx.
+	;			;		cjp, ~zer psupxdo; ;			| Save xmn & error, and loopback.
+psupx0if: movw erry, y;		am->am;		;		;			| 
+	addw d, error, error;	;		;		;			| error += erry.
+psupx0xmn: incw xmn, xmn;	;		cjp, go psupxdo; ;			| xmn++.
+psupx1:	movw p1, y;		am->fpap;	;		;			| OCTANT 1
+	addw,s d, errx, error;	fpregh->am;	;		;			| error += errx
+	;			;		cjp, neg psupxdo; ;			| 
+	movw erry, y;		am->am;		cjp, zer psupxdo; ;			| 
+	subw d, error, error;	;		;		;			| error -= erry
+	incw xmn, xmn;		;		cjp, go psupxdo; ;			| 
+psupx23: negw errx, junk;	;		;		;			| 
+	rsubw,s d, junk, y;	;		;		;		ap+	| if (erry < -errx)
+	movw d, xmn;		fpregl->am;	cjp, ~neg psupx2; ;			| 
+psupx3:	addw d, xmn, xmn;	fpregh->am;	;		;			| OCTANT 3.  xmn += dx
+#ifdef VECSDRAWTORIGHT
+	movw p1, y;		am->fpap;	;		;			| 
+	rsubw,s d, errx, error;	fpregh->am;	;		;			| error -= errx
+	add2nw 1, p1, junk1;	am->fpap;	cjp, neg psupx3a; ;			| prepare to access dx * erry (p1 +3)
+	movw erry, y;		am->am;		cjp, zer psupx3a; ;			| if (error > 0) ...
+	subw d, error, error;	;		;		;			| 
+	sub2nw 0, xmn, xmn;	;		;		;			| 
+psupx3a: ;			;		;		;		ap+	| 
+	addw d, error, error;	fpregl->am;	cjp, go psupxdo; ;			| error += dx * erry
+#else
+|   Write code for vectors drawn downwards.
+#endif
+
+#ifdef VECSDRAWTORIGHT
+psupx2:	movw p1, y;		am->fpap;	;		;			| OCTANT 2.
+	addw d, errx, error;	fpregh->am;	;		;			| error += errx
+	negw erry, y;		am->am;		;		;			| 
+	rsubw,s d, error, y;	;		;		;			| 
+	movw erry, y;		am->am;		cjp, neg psupxdo; ;			| 
+	addw d, error, error;	;		;		;			| 
+	sub2nw 0, xmn, xmn;	;		cjp, go psupxdo; ;			| 
+#else
+psupx2:	;			;		;		;			| OCTANT 2.
+|   Write code for vectors drawn downwards.
+#endif
+
+
+psupxdo: movw p1, y;		am->fpdp;	;		;			| Save xmn & error, and loopback.
+	movw error, y;		am->fpregh;	;		;			| 
+	add2nw 1, p1, junk1;	am->fpdp;	;		;			| 
+	movw xmn, y;		am->fpregl;	cjp, go psupxwhile; ;			| 
+	
+	
+
+|   Resort on > xmn because previous step may have crossed edges.
+psresort: movw paet, p1;	;		;		;			| p1= paet
+	addw p1, acc, y;	am->fpap;	;		;			| if (p1->nxt)
+	movw,s d, nxt;		fpregl->am;	;		;			| 
+	;			;		cjp, zer pswhend; ;			| 
+psrsdo:	movw paet, p1;		;		;		;			| do { p1= paet
+	movw nxt, p2;		;		;		;			| p2= p1->nxt
+	movw 0, swap;		;		;		;			| swap= 0
+pswhp2nxt: addw p2, acc, y;	am->fpap;	;		;			| while (p2->nxt)
+	movw,s d, temp;		fpregl->am;	;		;			| 
+	;			;		cjp, zer psdoswap; ;			| if (p2->xmn > p2->nxt->xmn)
+	add2nw 1, temp, templo;	am->fpap;	;		;			| p2->nxt->xmn
+	movw d, xmn;		fpregl->am;	;		;			| 
+	add2nw 1, p2, junk1;	am->fpap;	;		;			| 
+	rsubw,s d, xmn, y;	fpregl->am;	;		;			| 
+	;			;		cjp, zer psrselse; ;			| 
+	;			;		cjp, neg psrselse; ;			| 
+psrsthen: addw p1, acc, y;	am->fpdp;	;		;			| p1->nxt= p2->nxt
+	movw temp, y;		am->fpregl;	;		;			| 
+	addw p2, acc, y;	am->fpdp;	;		;			| p2->nxt= p2->nxt->nxt
+	addw temp, acc, y;	am->fpap;	;		;			| 
+	;			fpregl->fpregl;	;		;			| 
+	addw p1, acc, y;	am->fpap;	;		;			| p1->nxt->nxt= p2
+	movw d, nxt;		fpregl->am;	;		;			| 
+	addw nxt, acc, y;	am->fpdp;	;		;			| 
+	movw p2, y;		am->fpregl;	;		;			| 
+	movw nxt, p1;		;		;		;			| p1= p1->nxt
+	incw 0, swap;		;		cjp, go pswhp2nxt; ;			| swap= 1
+
+psrselse: addw p1, acc, y;	am->fpap;	;		;			| p1= p1->nxt
+	movw d, p1;		fpregl->am;	;		;			| 
+	addw p1, acc, y;	am->fpap;	;		;			| p2= p1->nxt
+	movw d, p2;		fpregl->am;	cjp, go pswhp2nxt; ;			| 
+
+psdoswap: movw,s swap, y;	;		;		;			| } while (swap)
+	;			;		cjp, ~zer psrsdo; ;			| 
+
+pswhend: addw paet, acc, y;	am->fpap;	;		;			| } while (paet->nxt || pet)
+	movw,s d, y;		fpregl->am;	;		;			| paet->nxt
+	movw,s pet, y;		;		cjp, ~zer psdo;	;			| 
+	;			;		cjp, ~zer psdo;	;			| 
+	;			;		crtn,go;	;			| 
+
+
+#undef NxtOff
+
+#undef colorop
+#undef pet
+#undef cury
+#undef xmn
+#undef dx
+#undef ymn
+#undef ymx
+#undef erry
+#undef errx
+#undef error
+#undef dxerry
+#undef swap
+#undef dxdiv2
+
+#undef paet
+#undef nxt
+#undef p2
+#undef p1
+#undef sx
+#undef sy
+
+#undef TexDepth
+#undef temp
+#undef junk
+#undef temphi
+#undef templo
+
+#undef temp1
+#undef junk1
+
+#include "polyscan3.vp.u"

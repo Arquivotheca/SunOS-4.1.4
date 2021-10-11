@@ -1,0 +1,33 @@
+| "@(#)m1152.pp.u 1.1 94/10/31 SMI"
+
+| Copyright 1985 by Sun Microsystems, Inc.
+
+|   Multiply by 1152.  Number comes in r[2] (Multiplier as in mul.pp.u)
+|   and goes out in r[0] (low) and r[1] (high).
+|   Must save accumulator.
+
+#define data r[0]
+#define high r[1]
+#define m10 acc
+
+|   y * 1152 = y * 1024 + y * 128 = y << 10 + y << 7 = (y << 3 + y) << 7
+|   y < (1 << 10).
+|   y << 3 needs no masking because y is < 1024.
+MulSWid:rolw 3, Multiplier, m10;;		;				| y << 3.  Highbits 0.
+	addw Multiplier, m10, m10;;		;				| y << 3 + y.
+	rolw 7, m10, high;	;		;				| (y << 3 + y) << 7.
+	andw d, high, data;	0xff80->am;	;				| 
+	andw d, high, high;	0x7f->am;	crtn, go;			| 
+
+|   y * 144 = y * 128 + y * 16 = y << 7 + y << 4 = (y << 3 + y) << 4
+|   y < (1 << 10).
+|   y << 3 needs no masking because y is < 1024.
+MulSWWid:rolw 3, Multiplier, m10;;		;				| y << 3.  Highbits 0.
+	addw Multiplier, m10, m10;;		;				| y << 3 + y.
+	rolw 4, m10, high;	;		;				| (y << 3 + y) << 4.
+	andw d, high, data;	0xfff0->am;	;				| 
+	andw d, high, high;	0xf->am;	crtn, go;			| 
+
+#undef data
+#undef high
+#undef m10

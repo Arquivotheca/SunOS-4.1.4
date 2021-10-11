@@ -1,0 +1,215 @@
+| "@(#)zboctant.pp.u 1.1 94/10/31 SMI"
+| Copyright 1988 by Sun Microsystems, Inc.
+
+| Written by Stuart Levy
+
+
+|   Z Buffered Lines:  chooses octant (one of four) to draw in
+|   and generates the points.
+|   Expects the following registers to be loaded:
+|   vwrdreg:		color.
+|   vctlreg:		byte mode.
+|   acc:		initial error.
+|   r[0], vloareg:	low address.
+|   r[1], vhiareg:	high address.
+|   r[2]:		number of pixels to draw.
+|   r[3]:		incr0 (added to error if error is negative).
+|   r[4]:		incr1 (added to error if error is positive).
+|   r[5]:		reflect (determines which octant:  0 => 0, 1 => 1, 2 => 7, 3 => 6).
+|   scrmem[0]		dzlo
+|   scrmem[1]		dzhi
+
+
+#define err acc
+#define addrlo 	r[0]
+#define addrhi 	r[1]
+#define count	r[2]
+#define incr0 	r[3]
+#define incr1 	r[4]
+#define zlo	r[12]
+#define zhi	r[13]
+#define clo	r[14]
+#define chi	r[15]
+#define glo	r[17]
+#define ghi	r[18]
+
+
+|   testing (-acc) < 0 is equivalent to testing (acc) > 0.
+|   Main z-buffered vector drawing loop.  Octant 0.
+zboctant: ;			Pickmaybe->scrmemp; ;				| first test if pickmaybe is true
+	testw (d);		scrmem->am;	;				| 
+	;			;		cjp,~zer pkzboctant;		| 
+	;			=zb0176->am;	;				| 
+	addw d,r[5],y;		am->brreg;	;				| jump if need to enter picking code
+	;			;		cjp,go;				| choose correct octant
+zb0176:movw count,y;		am->brreg;	cjp,go zboct0;			| Get ready to ld cntr.
+	movw count,y;		am->brreg;	cjp,go zboct1;			| Get ready to ld cntr. (dx swapped w/ dy).
+	movw count,y;		am->brreg;	cjp,go zboct7;			| Get ready to ld cntr.
+	movw count,y;		am->brreg;	cjp,go zboct6;			| Get ready to ld cntr. (dx swapped w/ dy).
+
+
+|   Octant 0.		
+zboct0:	
+	;			=zb0pos->brreg;	ldct;				| ldct sets up rpct
+zb0loop: subw,s d,zhi,y;	gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	;			;		cjp,~cry .+2;		scrmp 0	| zlo += dz/dx lo, jump if < value in buffer
+	testw (acc);		;		cjp,~zer zb0wrtdn;		| jump if = value in buffer
+zb0wrt:	movw zhi,y;		am->gbwdreg;	cjp,~gbr .;			| write new z value into buffer
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| write color
+	testw (acc);		;		;				| 
+zb0wrtdn: addw d,zlo,zlo;	scrmem->am;	;			scrmp+	| jump if error positive, update zlo
+	addcw d,zhi,zhi;	scrmem->am;	cjp,~neg;		scrmp+	| 
+
+zb0neg:	incw glo,glo;		;		;				| increment low graphics buffer pointer
+	addcw d,ghi,ghi;	0->am;		;				| 
+	movw ghi,y;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw glo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| Start read, takes 4 cycles to complete
+	incw addrlo,addrlo;	am->vloareg;	;				| 
+	addcw d,addrhi,addrhi;	am->vhiareg;	;				| 
+	addw d,clo,clo;		scrmem->am;	;			scrmp+	| update clo
+	addcw d,chi,chi;	scrmem->am;	;				| update chi
+	addw incr0,acc,acc;	;		rpct zb0loop;			| error += major axis increment
+	;			;		cjp,go zbquit;			| 
+
+zb0pos:	addw d,glo,glo;		IncXY->am;	;				| update graphics buffer pointers
+	addcw d,ghi,ghi;	0->am;		;				| 
+	movw ghi,y;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw glo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| start read, takes 4 cycles to complete
+	addw incr1,acc,acc;	IncXY->am;	;				| increment x and y. (SWidth + 1).
+	addw d,addrlo,addrlo;	am->vloareg;	;				| update vme address pointers
+	addcw d,addrhi,addrhi;	0->am;		;				| 
+	movw addrhi,y;		am->vhiareg;	;				| 
+	addw d,clo,clo;		scrmem->am;	;			scrmp+	| update clo
+	addcw d,chi,chi;	scrmem->am;	rpct zb0loop;				| update chi
+	;			;		cjp,go zbquit;			| 
+
+|   Octant 1.		
+zboct1:	
+	;			=zb1pos->brreg;	ldct;				| ldct sets up rpct
+zb1loop: subw,s d,zhi,y;	gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	;			;		cjp,~cry .+2;		scrmp 0	| zlo += dz/dx lo, jump if < value in buffer
+	testw (acc);		;		cjp,~zer zb1wrtdn;		| jump if = value in buffer
+zb1wrt:	movw zhi,y;		am->gbwdreg;	cjp,~gbr .;			| write new z value into buffer
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| write pixel, check sign of error term
+	testw (acc);		;		;				| 
+zb1wrtdn: addw d,zlo,zlo;	scrmem->am;	;			scrmp+	| update zlo
+	addcw d,zhi,zhi;	scrmem->am;	cjp,~neg;		scrmp+	| jump if error negative, update zhi
+
+zb1neg:	addw d,glo,glo;		SWidth->am;	;				| update low graphics buffer pointer
+	addcw d,ghi,ghi;	0->am;		;				| 
+	movw ghi,y;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw glo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| Start read, takes 4 cycles to complete
+	addw d,clo,clo;		scrmem->am;	;			scrmp+	| update clo
+	addcw d,chi,chi;	scrmem->am;	;				| update chi
+	;			SWidth->am;	;				| 
+	addw,s d,addrlo,addrlo;	am->vloareg;	;				| 
+	addw incr0,acc,acc;	;		cjp,~cry .+3;			| 
+	incw addrhi,addrhi;	am->vhiareg;	rpct zb1loop;			| 
+	;			;		cjp,go zbquit;			| 
+	;			;		rpct zb1loop;			| error += major axis increment
+	;			;		cjp,go zbquit;			| 
+	
+zb1pos:	addw d,glo,glo;		IncXY->am;	;				| update graphics buffer pointers
+	addcw d,ghi,ghi;	0->am;		;				| 
+	movw ghi,y;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw glo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| start read, takes 4 cycles to complete
+	addw incr1,acc,acc;	IncXY->am;	;				| increment x and y. (SWidth + 1).
+	addw,s d,addrlo,addrlo;	am->vloareg;	;				| update vme address pointers
+	addcw d,addrhi,addrhi;	0->am;		;				| 
+	movw addrhi,y;		am->vhiareg;	;				| 
+	addw d,clo,clo;		scrmem->am;	;			scrmp+	| update clo
+	addcw d,chi,chi;	scrmem->am;	rpct zb1loop;			| update chi
+	;			;		cjp,go zbquit;			| 
+
+	
+|   Octant 7.		
+zboct7:	
+	;			=zb7pos->brreg;	ldct;				| ldct sets up rpct
+zb7loop: subw,s d,zhi,y;	gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	;			;		cjp,~cry .+2;		scrmp 0	| zlo += dz/dx lo, jump if < value in buffer
+	testw (acc);		;		cjp,~zer zb7wrtdn;		| jump if = value in buffer
+zb7wrt:	movw zhi,y;		am->gbwdreg;	cjp,~gbr .;			| write new z value into buffer
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| write pixel, check sign of error term
+	testw (acc);		;		;				| 
+zb7wrtdn: addw d,zlo,zlo;	scrmem->am;	;			scrmp+	| update zlo
+	addcw d,zhi,zhi;	scrmem->am;	cjp,~neg; 		scrmp+	| jump if error positive, update zhi
+
+zb7neg:	incw,s glo,glo;		0->am;		;				| update low graphics buffer pointer
+	addcw d,ghi,ghi;	;		cjp,~cry .+2;			| 
+	movw ghi,y;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw glo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| Start read, takes 4 cycles to complete
+	addw d,clo,clo;		scrmem->am;	;			scrmp+	| update clo
+	addcw d,chi,chi;	scrmem->am;	;				| update chi
+	incw,s addrlo,addrlo;	am->vloareg;	;				| 
+	addw incr0,acc,acc;	;		cjp,~cry .+3;			| 
+	incw addrhi,addrhi;	am->vhiareg;	rpct zb7loop;			| 
+	;			;		cjp,go zbquit;			| 
+	;			;		rpct zb7loop;			| error += major axis increment
+	;			;		cjp,go zbquit;			| 
+	
+zb7pos:	addw,s d,glo,glo;	IncXDecY->am;	;				| update graphics buffer pointers
+	addw,s d,addrlo,addrlo;	am->vloareg;	cjp,cry .+3;			| update vme address pointers
+	decw ghi,ghi;		;		;				| 
+	movw ghi,y;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw glo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| start read, takes 4 cycles to complete
+	addw d,clo,clo;		scrmem->am;	;			scrmp+	| update clo
+	addcw d,chi,chi;	scrmem->am;	;				| update chi
+	addw incr1,acc,acc;	;		cjp,cry .+3;			| 
+	decw addrhi,addrhi;	am->vhiareg;	rpct zb7loop;			| 
+	;			;		cjp,go zbquit;			| 
+	;			;		rpct zb7loop;			| 
+	;			;		cjp,go zbquit;			| 
+
+	
+|   Octant 6.		
+zboct6:	
+	;			=zb6pos->brreg;	ldct;				| ldct sets up rpct
+zb6loop: subw,s d,zhi,y;	gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	;			;		cjp,~cry .+2;		scrmp 0	| zlo += dz/dx lo, jump if < value in buffer
+	testw (acc);		;		cjp,~zer zb6wrtdn;		| jump if = value in buffer
+zb6wrt:	movw zhi,y;		am->gbwdreg;	cjp,~gbr .;			| write new z value into buffer
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| write pixel, check sign of error term
+	testw (acc);		;		;				| 
+zb6wrtdn: addw d,zlo,zlo;	scrmem->am;	;			scrmp+	| update zlo
+	addcw d,zhi,zhi;	scrmem->am;	cjp,~neg;		scrmp+	| jump if error positive, update zhi
+
+zb6neg:	subw,s d,glo,glo;	SWidth->am;	;				| update low graphics buffer pointer
+	subw,s d,addrlo,addrlo;	am->vloareg;	cjp,cry .+3;			| 
+	decw ghi,ghi;		;		;				| 
+	movw ghi,y;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw glo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| start read, takes 4 cycles to complete
+	addw d,clo,clo;		scrmem->am;	;			scrmp+	| update clo
+	addcw d,chi,chi;	scrmem->am;	;				| update chi
+	addw incr0,acc,acc;	;		cjp,cry .+3;			| 
+	decw addrhi,addrhi;	am->vhiareg;	rpct zb6loop;			| 
+	;			;		cjp,go zbquit;			| 
+	;			;		rpct zb6loop;			| error += major axis increment
+	;			;		cjp,go zbquit;			| 
+	
+zb6pos:	addw,s d,glo,glo;	IncXDecY->am;	;				| update graphics buffer pointers
+	addw,s d,addrlo,addrlo;	am->vloareg;	cjp,cry .+3;			| update vme address pointers
+	decw ghi,ghi;		;		;				| 
+	movw ghi,y;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw glo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| start read, takes 4 cycles to complete
+	addw d,clo,clo;		scrmem->am;	;			scrmp+	| update clo
+	addcw d,chi,chi;	scrmem->am;	;				| update chi
+	addw incr1,acc,acc;	;		cjp,cry .+3;			| 
+	decw addrhi,addrhi;	am->vhiareg;	rpct zb6loop;			| 
+	;			;		cjp,go zbquit;			| 
+	;			;		rpct zb6loop;			| 
+	;			;		cjp,go zbquit;			| 
+	
+zbquit:	;			;		jmap zbquit_pp;			| end read modify write, so gbuffer released
+
+
+#undef err
+#undef addrlo
+#undef addrhi
+#undef incr0
+#undef incr1
+#undef glo
+#undef ghi
+#undef clo	
+#undef chi	
+#undef zlo
+#undef zhi

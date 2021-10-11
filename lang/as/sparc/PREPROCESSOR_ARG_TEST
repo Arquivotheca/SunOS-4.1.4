@@ -1,0 +1,64 @@
+#! /bin/sh
+#	@(#)PREPROCESSOR_ARG_TEST	1.1	10/31/94
+
+# rough test of assembler's ability to pass arguments to preprocessor
+# correctly, and in large quantity (we'll go for 104 of 'em!).
+
+CLEANUP="rm -f PTEST.in  PTEST.out  PTEST.out.correct"
+
+${CLEANUP}
+
+cat <<'!EOF'  >PTEST.in
+	.word A+B+C+D+E+F+G+H+I+J+K+L+M+N+O+P+Q+R+S+T+U+V+W+X+Y+Z
+	.word a+b+c+d+e+f+g+h+i+j+k+l+m+n+o+p+q+r+s+t+u+v+w+x+y+z
+!EOF
+
+cat <<'!EOF'  >PTEST.out.correct.-Q	# (no longer used)
+	.word	26
+	.word	26
+!EOF
+
+cat <<'!EOF'  >PTEST.out.correct.+Q
+	.seg	"text"			! [internal]
+	.word	26
+	.word	26
+!EOF
+
+cat <<'!EOF'  >PTEST.out.correct.+Q.DEBUG	# output from DEBUG version
+	.seg	"text"			! [marker node]
+	.word	26
+	.word	26
+!EOF
+
+# do the assembly, with 104 preprocessor args.
+./as -o /dev/null -P                              \
+	-UAA  -UBB  -UCC  -UDD  -UEE  -UFF        \
+	-UGG  -UHH  -UII  -UJJ  -UKK  -ULL  -UMM  \
+	-UNN  -UOO  -UPP  -UQQ  -URR  -USS        \
+	-UTT  -UUU  -UVV  -UWW  -UXX  -UYY  -UZZ  \
+	-Uaa  -Ubb  -Ucc  -Udd  -Uee  -Uff        \
+	-Ugg  -Uhh  -Uii  -Ujj  -Ukk  -Ull  -Umm  \
+	-Unn  -Uoo  -Upp  -Uqq  -Urr  -Uss        \
+	-Utt  -Uuu  -Uvv  -Uww  -Uxx  -Uyy  -Uzz  \
+	-DA=1 -DB=1 -DC=1 -DD=1 -DE=1 -DF=1       \
+	-DG=1 -DH=1 -DI=1 -DJ=1 -DK=1 -DL=1 -DM=1 \
+	-DN=1 -DO=1 -DP=1 -DQ=1 -DR=1 -DS=1       \
+	-DT=1 -DU=1 -DV=1 -DW=1 -DX=1 -DY=1 -DZ=1 \
+	-Da=1 -Db=1 -Dc=1 -Dd=1 -De=1 -Df=1       \
+	-Dg=1 -Dh=1 -Di=1 -Dj=1 -Dk=1 -Dl=1 -Dm=1 \
+	-Dn=1 -Do=1 -Dp=1 -Dq=1 -Dr=1 -Ds=1       \
+	-Dt=1 -Du=1 -Dv=1 -Dw=1 -Dx=1 -Dy=1 -Dz=1 \
+	-S PTEST.in >PTEST.out
+
+if cmp -s PTEST.out PTEST.out.correct.+Q       || \
+   cmp -s PTEST.out PTEST.out.correct.+Q.DEBUG
+then	: # they compared equal
+	echo "****** SUCCESS:  PREPROCESSOR ARG-PASSING SEEMS OK."
+	${CLEANUP}
+	exit 0
+else
+	echo "FAILURE:"
+	diff -h PTEST.out PTEST.out.correct.+Q
+	${CLEANUP}
+	exit 1
+fi

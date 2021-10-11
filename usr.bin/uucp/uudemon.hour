@@ -1,0 +1,6 @@
+#!/bin/sh
+#
+#ident  "@(#)uudemon.hour 1.1 94/10/31"	/* from SVR3.2 uucp:uudemon.hour 2.2 */
+#
+/usr/lib/uucp/uusched &
+/usr/lib/uucp/uuxqt &

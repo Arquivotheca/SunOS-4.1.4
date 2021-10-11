@@ -1,0 +1,206 @@
+| Copyright (c) 1985 by Sun Microsystems, Inc.
+| @(#)attributes.vp.u 1.1 94/10/31 SMI
+
+| vector attributes
+#define veccmd r[17]
+#define op r[13]
+#define color r[12]
+#define clipplanes r[11]
+#define matrixptr r[9]
+#define pkon r[0]
+
+| polygon attributes
+#define polyclpplns r[12]
+#define polycolorop r[13]
+#define polyshadestyle r[24]
+
+#define PIX_SRC	24
+#define poly	0	/* polygon hidden surface bit */
+#define mark	2	/* marker hidden surface bit */
+
+
+
+|	tvec_attr -- setup attributes for drawing fat and textured vectors
+|
+|	Input Parameters:	shmemp -- points at frame's texture
+
+tvec_attr: movw,s d,y;		shmem->am;	jmap tvec_attr_pp; ;			| Test first segment of pattern.
+
+
+|	vec_attr -- setup attributes for drawing vectors
+|
+|	Input Parameters:	shmemp -- points at beginning of attribute frame
+
+|   Entrance point from statatts for solid, width 1 vectors
+#ifndef GPPLUS
+vec_attr: movw d,veccmd;	PPVECXF->am;	push, ~go;	;			| will send solid vec cmd to fifo
+#else GPPLUS
+vec_attr: addw frameptr,PICK_FRMOFF,y; =vat->brreg; ;		;			| get latest pick count
+	IMM;			am->shmemp;	;		;			 
+	movw d,pkon;		shmem->am;	;		;		shp+	| pkon holds picking status
+	movw d,acc;		PPSETPICKMODE->am; ;		;			| 
+	movw acc,y;		am->fifo1;	cjp,f1f .;	;			| set_pick_mode command ->  PP
+	movw,s pkon,y;		am->fifo1;	cjp,f1f .;	;			| pick mode -> PP
+	movw d,veccmd;		PPVECXF->am;	cjp,zer;	;			| jump if picking is off
+	movw d,veccmd;		PKVECTOR->am;	;		;			| set special pick op
+	movw d,pkcnthi;		shmem->am;	;		;		shp+	| restore pkcnthi
+	movw d,pkcntlo;		shmem->am;	;		;			| restore pkcntlo
+vat:	movw frameptr,y;	am->shmemp;	push,~go;	;			| will send solid vec cmd to fifo
+#endif GPPLUS
+	;			PPVECXFINIT->fifo1; loop, f1nf;	;			| initialization for solid xf vectors
+	subw,s d,fbindx,y;	shmem->am;	;		;			| tst oldfbindx - newfbindx
+|   Entrance point for vectors of width or texture (or both) - ie, ALL vectors pass through this code	
+vecatt2: movw d,acc;		shmem->am;	cjs,~zer getfbaddr; ;		shp+	| if oldfbindx != newfbindx, send to PP
+	movw PPMASK,acc;	=wrfifo->brreg;	;		;			| send PPMASK command to PP
+	IMM;			am->fifo1;	cjs,f1f;	;			 
+	movw d,acc;		shmem->am;	cjs,go;		;		shp+	| send bit plane mask
+	movw d,op;		shmem->am;	;		;		shp+	| save op
+	movw d,color;		shmem->am;	;		;		shp+	| save color
+	movw d,clipplanes;	shmem->am;	;		;		shp+	| save clipplanes
+	movw d,matrixptr;	shmem->am;	push,~go;	;		shp+	| save matrixptr
+	mov2nw 8,acc;		PPSTCLIP->fifo1;loop,f1nf;	;			| send Rectlist
+	addw frameptr,acc,y;	am->shmemp;	;		;			| starts at frame offset 0x100
+	movw d,acc;		shmem->am;	cjs,go;		;		shp+	| Number of rectangles.
+vecatt1:sub2nw,s 0,acc;		;		push,go 3;	;			| 4 values in one rectangle
+	;			shmem->fifo1;	cjp,f1f .;	;
+	;			;		rfct;		;		shp+
+#ifndef GPPLUS
+	;			;		cjp, ~zer vecatt1;;
+	;			;		crtn,go;	;
+#else GPPLUS
+	testw (pkon);		;		cjp,~zer vecatt1; ;			| 
+	;			;		crtn,zer;	;			| return if picking is off
+	;			;		cjp,go sendpick; ;			| send picking info to pp (return from here)
+#endif GPPLUS
+
+
+
+polygon_attr_3D:
+|   Low byte of arg passed in acc indicates shading style:
+|   constant: 0, Gouraud: 1, textured: 2 (high byte assumed to be 0).  After
+|   setting up regular 2-D polygon attributes, check hidden surface
+|   flag.  Return if no hidden surface removal (HSR) else check whether
+|   gbuffer is present.  If not, return; else test if gbuffer is
+|   associated with the current frame buffer; if not, return; else
+|   set bit 8 of shade style register and return.  Upper byte of
+|   polyshadestyle indicates hidden surface method: none: 0,
+|   zbuffer: 1.
+#ifdef GPPLUS
+ 	mov2nw 0,r[1];		;		;		;			| ~markers
+polygon_attr_3D_orig:
+	movw acc, polyshadestyle; ;		cjs,go polygon_attr_2D_orig; ;		| Move low byte of command to style.
+#else
+	movw acc, polyshadestyle; ;		cjs,go polygon_attr_2D; ;		| Move low byte of command to style.
+#endif
+	addw d,frameptr,acc;	HIDDENSURF_FRMOFF->am;;		;			| 
+	movw acc,y;		am->shmemp;	;		;			| 
+	movw d, acc;		shmem->am;	;		;		shp+	| 
+	btstw,s 1, polyshadestyle; ;		;		;			| if (shadestyle & 2) textured.
+	btstw,s 3,d;		shmem->am;	cjp, zer pa3hsr; ;			| if (depth == 8)
+	bclrw 1, polyshadestyle; ;		cjp, zer pa3tex1; ;			| 
+	bsetw 10, polyshadestyle; ;		cjp, go pa3hsr;	;			| 
+pa3tex1: bsetw 9, polyshadestyle; ;		;		;			| else (depth == 1)
+#ifndef GPPLUS
+pa3hsr:	btstw,s 0,polyshadestyle; ;		;		;			| test if gouraud shading, pix_src is 24
+	btstw,s poly,acc;	;		cjp,zer pa3hsr2; ;			| jump if shading off, test if hsr on
+pa3src:	andw d,polycolorop,polycolorop; 0xFFE1->am; ;		;			| mask off op, preserving pixdontclip flag
+	orw d,polycolorop,polycolorop; PIX_SRC->am; ;		;			| set op = pix_srx for gouraud
+pa3hsr2: ;			;		crtn,zer;	;			| return if no hidden surface removal
+	;			;		cjs,go gb_board_inq;;			  
+	xorw,s fbindx,acc,y;	;		crtn,neg;	;			  
+	;			;		crtn,~zer;	;			  
+	bsetw 8,polyshadestyle;	;		crtn,go;	;			  
+#else GPPLUS
+pa3hsr:	testw (r[1]);		;		;		;			| test if doing markers or not
+	btstw,s poly,acc;	;		cjp,~zer .+2;	;			| Test acc for HSR. (jump if not markers)
+	btstw,s mark,acc;	;		;		;			| test if zbuffering markers
+	;			;		crtn,zer;	;			| return if no hidden surface removal
+	;			;		cjs,go gb_board_inq;;			| 
+	xorw,s fbindx,acc,y;	;		crtn,neg;	;			| 
+	;			;		crtn,~zer;	;			| 
+	bsetw 8,polyshadestyle;	;		crtn,go;	;			| 
+#endif GPPLUS
+
+
+polygon_attr_2D:
+#ifdef GPPLUS
+ 	mov2nw 0,r[1];		;		;		;			| ~markers
+polygon_attr_2D_orig:	
+	addw frameptr,PICK_FRMOFF,y; PPSETPICKMODE->am; ;	;			| send picking status to PP
+	IMM;			am->shmemp;	;		;		
+	movw d,y;		am->fifo1;	cjp,f1f .;	;			| set_pick_mode command -> fifo1
+	;			shmem->am;	;		;		shp+	| 
+	movw,s d,pkon;		am->fifo1;	cjp,f1f .;	;			| pick status -> fifo1 and test if picking on
+	movw d,pkcnthi;		shmem->am;	cjp,zer pa2nopk; ;		shp+	| jump if picking is off, store pick count high
+pa2pkon: testw(r[1]);		;		;		;			| 
+ 	movw d,pkcntlo;		shmem->am;	cjp,zer .+3;	;			| if r[1]==0 then don't inc pkcnt (for markers)
+ 	incw d,pkcntlo;		shmem->am;	;		;			| increment pick count
+ 	addcw d,pkcnthi,pkcnthi; 0->am;		;		;			| add carry to pick count high
+	movw PPSETPICKCNT,acc;	;		;		;			| 
+	IMM;			am->fifo1;	cjs,f1f wrfifo;	;			| set pick count command -> fifo1
+	incw,s d,pkcntlo;	shmem->am;	;		;			| increment pick count
+	addcw d,pkcnthi,pkcnthi; 0->am;		;		;			| add carry to pick count high
+	movw pkcnthi,y;		am->fifo1;	cjp,f1f .;	;			| pick count high -> fifo1
+	movw pkcntlo,y;		am->fifo1;	cjp,f1f .;	;			| pick count low ->fifo1
+	movw pkcntlo,y;		am->shmem;	;		;		shp-	| new pick count low -> context
+	movw pkcnthi,y;		am->shmem;	cjs,go sendpick; ;			| new pick count high -> context, picking atts -> PP
+
+pa2nopk: movw frameptr,y;	am->shmemp;	;		;			
+#endif GPPLUS
+	subw,s d,fbindx,y;	shmem->am;	;		;			| tst oldfbindx - newfbindx
+	movw d,acc;		shmem->am;	cjs,~zer getfbaddr;;		shp+	| if oldfbindx != newfbindx, send to PP
+	movw PPMASK,acc;	=wrfifo->brreg;	;		;			| send PPMASK command to PP
+	;			am->fifo1;	cjs,f1f;	;
+	movw d,acc;		shmem->am;	cjs,go;		;		shp+	| send bit plane mask
+	movw d,acc;		shmem->am;	;		;		shp+	| get op
+	andw d,acc,acc;		0x1F->am;	;		;			| mask off upper 11 bits
+	rolw 5,d,polycolorop;	shmem->am;	;		;		shp+	| get color
+	andw d,polycolorop,polycolorop; 0x1FE0->am;;		;			| mask out noncolor bits
+	orw polycolorop,acc,polycolorop;;	;		;			| combine color and op into polycolorop
+	movw d,polyclpplns;	shmem->am;	;		;		shp+	| save clipplanes
+	movw d,matrixptr;	shmem->am;	push,~go;	;		shp+	| save matrixptr
+	mov2nw 8,acc;		PPSTCLIP->fifo1;loop,f1nf;	;			| send Rectlist
+	addw frameptr,acc,y;	am->shmemp;	;		;			| starts at frame offset 0x100
+	movw d,acc;		shmem->am;	cjs,go;		;		shp+	| acc <- # of rectangles & send to PP
+plyatt1:sub2nw,s 0,acc;		;		push,go 3;	;			| 4 values in one rectangle.
+	;			shmem->fifo1;	cjp,f1f .;	;
+	;			;		rfct;		;		shp+
+	;			;		cjp, ~zer plyatt1;;
+	;			;		crtn,go;	;
+
+
+
+#ifdef GPPLUS
+|   Sendpick does inititalization necessary for picking.  It sends the window and pickid to the PP.	
+sendpick:
+	movw PPSETPICKID,acc;	=wrfifo->brreg;	;		;		
+	IMM;			am->fifo1;	cjs,f1f;	;			| set_pick_id command -> fifo1
+	addw frameptr,PICKID_FRMOFF,y; ;	;		;		
+	IMM;			am->shmemp;	ldct 3;		;			| send 2 32 bit pickids to PP
+	;			shmem->fifo1;	cjp,f1f .;	;			| 
+	;			;		rpct .-1;	;		shp+	| 
+	movw PPSETPICKWIN,acc;	;		;		;			| 
+	IMM;			;		;		;			| 
+	movw acc,y;		am->fifo1;	cjp,f1f .;	;			| set_pick_window command -> fifo1
+	;			;		ldct 3;		;		
+	;			shmem->fifo1;	cjp,f1f .;	;			| send pick window (4 coords) to PP
+	;			;		rpct .-1;	;		shp+	
+	;			;		crtn,go;	;			| 
+
+
+
+#endif GPPLUS
+#undef veccmd
+#undef op 
+#undef color 
+#undef clipplanes 
+#undef matrixptr 
+
+#undef polyclpplns
+#undef polycolorop
+#undef polyshadestyle
+
+#undef PIX_SRC
+#undef pkon
+#undef poly
+#undef mark

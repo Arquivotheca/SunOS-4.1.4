@@ -1,0 +1,229 @@
+#
+# @(#)Makefile_v4 1.1 94/10/31 SMI
+#
+# Makefile for pixrect library
+#
+
+# object library name
+TARGET= libpixrect.a
+
+# lint library name
+LINTLIB= llib-lpixrect
+
+# list of fonts to be compiled into pf_defdata.o
+FONTLIST= pf_fontlist
+
+# include files which are installed in /usr/include
+INS_INCL= bw1reg.h bw1var.h bw2var.h cg1reg.h cg1var.h cg2reg.h cg2var.h \
+	cg4var.h gp1reg.h gp1var.h gp1cmds.h \
+	memreg.h memvar.h pixfont.h pixrect.h pixrect_hs.h \
+	pr_dblbuf.h pr_io.h pr_line.h pr_planegroups.h pr_util.h \
+	traprop.h
+
+# implementation include files
+# currently installed in /usr/include, may not be later
+IMPL_INCL= mem_rop_impl_ops.h mem_rop_impl_util.h \
+	pr_impl_make.h pr_impl_util.h 
+
+# include files which are *not* installed in /usr/include
+PRIV_INCL= pr_texmacs.h 
+
+# all include files
+INCL=	$(INS_INCL) $(IMPL_INCL) $(PRIV_INCL)
+
+# C source files
+CNORM=	pr_open.c pr_make.c \
+	pr_clip.c pr_dblbuf.c pr_reverse.c pr_plngrp.c \
+	pr_line.c pr_polygon2.c \
+	pr_polyline.c pr_polypoint.c pr_replrop.c \
+	pr_texpat.c pr_texvec.c pr_traprop.c \
+	pr_io.c \
+	pf.c pf_default.c pf_text.c pf_ttext.c pr_text.c \
+	mem.c mem_batch.c mem_colormap.c \
+	mem_getput.c mem_polypoint.c mem_region.c mem_rop.c \
+	mem_stencil.c  mem_vec.c \
+	mem_prs.c \
+	bw2.c \
+	cg2.c cg2_batch.c cg2_colormap.c \
+	cg2_getput.c cg2_polypoint.c cg2_region.c cg2_rop.c \
+	cg2_stencil.c cg2_vec.c \
+	cg4.c cg4_colormap.c cg4_region.c \
+	gp1.c \
+	gp1_vec.c \
+	gp1_line.c gp1_polyline.c \
+	gp1_loadtex.c gp1_polygon2.c gp1_replrop.c \
+	gp1_shmem.c gp1_util.c \
+	bw1.c bw1_batch.c bw1_colormap.c \
+	bw1_getput.c bw1_polypoint.c bw1_region.c bw1_rop.c \
+	cg1.c cg1_batch.c cg1_colormap.c \
+	cg1_getput.c cg1_polypoint.c cg1_region.c cg1_rop.c \
+	cg1_stencil.c
+
+CDATA=	pr_makefun.c \
+	mem_ops.c bw2_ops.c cg2_ops.c cg4_ops.c gp1_ops.c bw1_ops.c cg1_ops.c
+
+CNOOPT=	bw1_vec.c cg1_vec.c
+
+CSRC=	$(CDATA) $(CNORM) $(CNOOPT)
+COBJ=	$(CDATA:.c=.o) $(CNORM:.c=.o) gp1_rop.o $(CNOOPT:.c=.o)
+
+# assembly language source files
+ASRC=	bw1_vecbres.S cg1_vecbres.S
+
+# kernel only source files
+CKERN=	mem_kern.c
+
+# boot PROM and standalone source files
+CPROM=	prom_batch.c
+CSTAND=	bw1_stand.c bw2_stand.c
+
+# misc. source files
+MISC=	$(FONTLIST) pf_makedef.c gp1_shmem.IL $(LINTLIB)
+
+# all source files
+SRC=	$(MISC) $(INCL) $(CSRC) $(ASRC) $(CKERN) $(CPROM) $(CSTAND)
+
+# stuff to be tagged and linted
+TAGSRC=	$(INCL) $(CSRC) $(CKERN) $(CPROM) $(CSTAND) pf_makedef.c
+LINTSRC= $(CSRC)
+
+# library object files
+OBJ=	$(COBJ) $(ASRC:.S=.o) pf_defdata.o $(CPROM:.c=.o) $(CSTAND:.c=.o)
+
+# all non-source files
+NOTSRC=	$(OBJ) $(TARGET) $(LINTLIB).ln pf_makedef pf_defdata.c gp1_shmem.il
+
+# compilation flags
+DEBUG=
+FLOAT= -fsoft
+INC= -I../../include
+OPTIM= -O
+READONLY= -R
+TARGET_ARCH=
+
+CFBASE=	$(INC) $(FLOAT) $(DEBUG)
+CFNOOPT= $(CFBASE) $(READONLY)
+CFDATA=	$(CFBASE)
+CFLAGS= $(CFBASE) $(OPTIM) $(READONLY)
+
+# commands
+CHMOD=	chmod -f
+CHOWN=	chown -f
+CPP=	/lib/cpp -E
+CTAGS=	ctags -t -w -f
+INSTALL= install -c
+LINT=	lint
+NATIVE_CC= /bin/cc
+RANLIB=	ranlib
+RM=	rm -f
+
+# installation directories
+INCDIR=	/usr/include/pixrect
+LIBDIR=	/usr/lib
+LINTDIR= $(LIBDIR)/lint
+
+# owner of files installed in $(DESTDIR)
+OWNER= bin
+
+# silent gets
+GFLAGS= -s
+
+# rules
+.SUFFIXES: .S .S~ .IL .IL~
+
+.S~.S:	; $(GET) -G$@ $(GFLAGS) $<
+.S.o:	; $(CC) -o $@ -c $<
+.S~.o:	; $(GET) -G$@ $(GFLAGS) $< ; $(CC) -o $*.o -c $*.S
+.IL~.IL: ; $(GET) -G$@ $(GFLAGS) $<
+
+.DEFAULT: ; $(GET) -G$@ $(GFLAGS) SCCS/s.$<
+
+
+# targets
+default: $(TARGET) $(LINTLIB).ln $(SRC)
+
+$(TARGET): $(INCL) $(OBJ)
+	@$(RM) $@
+	ar rc $@ $(OBJ)
+	$(RANLIB) $@
+
+lintlib: $(LINTLIB) $(LINTLIB).ln
+
+# lint library 
+# (=.c is a bug workaround)
+$(LINTLIB).ln: $(LINTLIB) $(INCL)
+	$(LINT) -Cpixrect $(INC) $(LINTLIB)=.c
+
+
+install: install_h lintlib $(TARGET) 
+	$(INSTALL) -m 644 -o $(OWNER) $(LINTLIB) \
+		$(DESTDIR)$(LINTDIR)/$(LINTLIB)
+	$(INSTALL) -m 644 -o $(OWNER) $(LINTLIB).ln \
+		$(DESTDIR)$(LINTDIR)/$(LINTLIB).ln
+	$(INSTALL) -m 644 $(TARGET) $(DESTDIR)$(LIBDIR)/$(TARGET)
+	$(RANLIB) $(DESTDIR)$(LIBDIR)/$(TARGET)
+	$(CHOWN) $(OWNER) $(DESTDIR)$(LIBDIR)/$(TARGET)
+
+install_h: $(INCL)
+	test -d $(DESTDIR)$(INCDIR) || mkdir $(DESTDIR)$(INCDIR)
+	$(CHMOD) 755 $(DESTDIR)$(INCDIR)
+	$(CHOWN) $(OWNER) $(DESTDIR)$(INCDIR)
+	@set -x; \
+	for i in $(INS_INCL) $(IMPL_INCL); do \
+		$(INSTALL) -m 644 -o $(OWNER) $$i $(DESTDIR)$(INCDIR)/$$i ; \
+	done
+
+
+# pixfont data stuff
+
+# don't use $(CC) since we may be cross-compiling
+pf_makedef: pf_makedef.c
+	$(NATIVE_CC) $(DEBUG) -o $@ pf_makedef.c
+
+# remove output file on error
+pf_defdata.c: pf_makedef $(FONTLIST)
+	@$(RM) $@
+	pf_makedef < $(FONTLIST) > $@ || { $(RM) $@; exit 1; }
+
+pf_defdata.o: pf_defdata.c
+	$(CC) $(CFNOOPT) -c $*.c
+
+# special treatment
+
+# impure data
+$(CDATA:.c=.o) $(CSTAND:.c=.o):
+	$(CC) $(CFDATA) -c $*.c
+
+# non-optimizable
+$(CNOOPT:.c=.o):
+	$(CC) $(CFNOOPT) -c $*.c
+
+# gp1_rop and cg2_rop share a source file
+gp1_rop.o: cg2_rop.c
+	$(CC) $(CFLAGS) -DGP1_ROP -o $@ -c cg2_rop.c
+
+# gp1_shmem has an inline file
+gp1_shmem.o: gp1_shmem.il
+	$(CC) $(CFLAGS) -c gp1_shmem.c gp1_shmem.il
+
+gp1_shmem.il: gp1_shmem.IL
+	@$(RM) $@
+	$(CPP) $(INC) gp1_shmem.IL > $@
+
+# misc. targets
+clean:
+	$(RM) *.o *.ln *.il *.a a.out core pf_makedef pf_defdata.c
+
+lint: $(LINTLIB).ln
+	$(LINT) $(INC) $(LINTLIB).ln $(LINTSRC)
+
+notsrc:	; @echo "$(NOTSRC)"
+obj:	; @echo "$(OBJ)"
+src:	; @echo "$(SRC)"
+
+tags: $(TAGSRC)
+	$(CTAGS) $@ $(TAGSRC)
+
+# dependencies on local include files
+mem_polypoint.o: mem_rop_impl_ops.h
+pr_texvec.o:	pr_texmacs.h

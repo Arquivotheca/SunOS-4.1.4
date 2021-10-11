@@ -1,0 +1,966 @@
+| @(#)roptex.pp.u 1.1 94/10/31 SMI
+| Copyright (c) 1986 by Sun Microsystems,Inc.
+
+|   Support for textured polygons and replrop.
+
+|   ldtex:  #27.  Args: Width,Height,Depth,Pixels.
+|   8 bit pixels are loaded 2 per 16 bit word.
+|   Also used to load 1 bit deep textures,in which case the Width (in Pixels)
+|   will not be directly used for transfer.
+
+#define Width	r[15]
+#define Height	r[14]
+#define Depth	r[13]
+#define NumPixels	r[12]
+
+
+ldtex:	movw d,acc;		fifo1->am;	cjp,f1e .;			| Width -> acc for multiply.
+	;			TexWidth->scrmemp; ;				 
+	movw acc,Width;		am->scrmem;	;				 
+	movw d,Height;		fifo1->am;	cjp,f1e .;			| Height
+	;			;		;			scrmp+	| Take advantage of 3 cycle fifo turnaround.
+	movw Height,y;		am->scrmem;	;				 
+	movw d,Depth;		fifo1->am;	cjp,f1e .;			 
+	btstw,s 3,Depth;	;		;				| if (Depth != 8)
+	rolw 12,Width,r[1];	;		cjp,~zer ldt8;			| Convert Width to number of 16 bit words.
+	andw,s d,r[1],y;	0xf000->am;	;				| if (Width % 16) last word is padded.
+	andw d,r[1],acc;	0xfff->am;	;				 
+	;			;		cjp,zer ldtcol;			| Reload accumulator for multiply.
+	incw acc,acc;		;		cjp,go ldtcol;			 
+ldt8:	incw Width,acc;		;		;				| Width= (Width + 1) >> 1
+	sr0w acc,acc;		;		;				 
+ldtcol:	movw Height,r[2];	;		cjs,go multiply;		| Width * Height
+	sub2nw 0,r[0];		am->brreg;	;				| NumPixels--
+	;			Texture->scrmemp; push,go;			 
+
+	movw d,acc;		fifo1->am;	cjp,f1e .;			 
+	movw acc,y;		am->scrmem;	rfct;			scrmp+	 
+
+	;			;		cjp,go start;			 
+
+#undef Width
+#undef Height
+#undef Depth
+#undef NumPixels
+
+
+#define RT1
+#ifdef RT1
+
+
+#define junk	r[0]	
+#define junkhi	r[22]	/* DEBUG */
+
+#define dst0lo	r[3]	/* by in cg2rop.c */
+#define dst0hi	r[4]
+#define src	r[5]
+#define src0	r[6]
+#define dstlo	r[7]	/* bx in cg2rop.c */
+#define dsthi	r[8]
+/* Need to increment dstlo and hi,and load varegs instead of
+merely increment varegs,because rt1texword routine has to be able to load and
+prime ropchips.
+*/
+
+#define w	r[9]
+#define ropmode	r[10]
+#define recht	r[11]
+#define prime	r[12]
+#define texword	r[13]
+#define texwordwidth r[14]
+#define texheight r[15]
+
+#define totalwords r[16]
+#define RemRecHt r[17]
+
+
+roptex1: ;			;		cjs,go ropreg;			 
+	movw d,texwordwidth;	fifo1->am;	cjp,f1e .;			 
+	movw texwordwidth,r[2]; ;		;				 
+	movw d,texheight;	fifo1->am;	cjp,f1e .;			 
+	movw d,ropmode;		fifo1->am;	cjp,f1e .;			 
+	movw texheight,acc;	;		cjs,go multiply;		 
+	movw d,recht;		fifo1->am;	cjp,f1e .;			 
+	movw d,RemRecHt;	;		;				 
+	movw d,nodst;		fifo1->am;	cjp,f1e .;			 
+	movw r[0],acc;		;		;				| From multiply
+	movw acc,totalwords;	;		;				 
+	movw d,color;		fifo1->am;	cjp,f1e .;			 
+	movw d,w;		fifo1->am;	cjp,f1e .;			 
+	movw d,op;		fifo1->am;	cjp,f1e .;			| DEBUG
+
+|   We set different values in the Op register of the rasterop chips for planes where the color is '1'
+|   and those for which the color is '0'.  Here we check if for any of the active planes,the color
+|   bit is '0',and if so,we change the Op for these planes.
+rt1op0:	compw color,acc;	RRValues->scrmemp; ;				| 
+	andw,s planes,acc,y;	FBPPMask->vloareg; ;				| if (~color & planes)
+	rolw 2,op,junkhi;	;		cjp,zer rt1strip;		| jump if planes are off for '0' bits of color DEBUG
+	movw FBCont,y;		am->vhiareg;	;				| DEBUG
+	compw color,y;		am->vwdreg;	cjp,~vir .;		vmewr	| Following commands only affect planes where color is '0'
+	andw d,op,acc;		3->am;		;				| DEBUG
+	;			FBAllRopRegOp->vloareg; ;			 
+	orw junkhi,acc,y;	am->vwdreg;	cjp,~vir .;		vmewr	| cg2_setfunction(fb,cg2allrop,rop<<2 | rop & 3)
+	;			FBPPMask->vloareg; ;				| restore proper mask register
+	movw planes,y;		am->vwdreg;	cjp,~vir .;		vmewr	| fb->ppmask.reg = planes  
+	compw 0,y;		am->scrmem;	;				| fake op, because is different for differnt planes
+
+|   Loop back to here on each new strip.
+rt1strip: movw d,prime;		fifo1->am;	cjp,f1e .;			 
+	movw d,src0;		fifo1->am;	cjp,f1e .;			 
+	movw src0,src;		;		;				| Interleave fifo and 0,1,or 2 other instructions.
+	movw d,dst0lo;		fifo1->am;	cjp,f1e .;			 
+	movw d,dst0hi;		fifo1->am;	cjp,f1e .;			 
+	movw dst0lo,dstlo;	;		;				| dst= dst0
+	movw dst0hi,dsthi;	;		;				 
+
+|   switch (w) {
+	sub2nw,s 1,w,junk;	=rt1w0->brreg;	;				| w-- (twice because fastloop done at least once).
+|   Handle case 0: and case 1: in same loop at rt1w0.
+	testw (nodst);		FBAllRopRegWidth->vloareg; cjp,neg;		| jump to rt1w0 if (w < 2)
+	;			;		cjp,zer rt1loop;		 
+	subw d,w,w;		2->am;		;				| w -= 2
+	movw d,y;		am->vwdreg;	cjp,~vir .;		vmewr	 
+	;			FBAllRopRegOpCnt->vloareg; ;			 
+	movw d,y;		am->vwdreg;	cjp,~vir .;		vmewr	 
+rt1loop: decws recht,recht;	;		;				| while (--SizeY >= 0)
+	movw dst0lo,dstlo;	;		cjp,neg rt1end;			 
+	movw dst0hi,dsthi;	;		;				| bx= by
+	testw (prime);		;		;				 
+	testw (nodst);		;		cjp,zer rt1primed;		 
+	;			;		cjs,go rt1texword;		| if (prime) {
+	testw (nodst);		FBAllRopRegSrc1->vloareg; ;			| Get ready for cg2_setrsource ()
+	movw FBCont,y;		am->vhiareg;	;				 
+	movw texword,y;		am->vwdreg;	cjp,~vir .;		vmewr	| cg2_setrsource (,,*(mwa)--)
+rt1primed: movw dstlo,y;	am->vloareg;	cjp,zer rt1dst1;		| if (~nodst) goto rt1dst1
+
+|   Loop when we don't need the dst
+	movw dsthi,y;		am->vhiareg;	cjs,go rt1texword;		
+	movw texword,y;		am->vwdreg;	cjp,~vir .;		vmewr	 
+	add2nw 2,dstlo;		;		cjs,go rt1texword;	varegs+	| incr varegs for next word,
+	addcw d,dsthi,dsthi;	0->am;		;			varegs+	| add 4 to dst.
+	movw texword,y;		am->vwdreg;	cjp,~vir .;		vmewr	 
+	movw ropmode,acc;	;		cjs,go vropmode;		| statusreg.ropmode= ropmode
+rt1dst1: testw (w);		;		;				 
+	sub2nw 0,w,junk;	am->brreg;	cjp,zer rt1last;		| ready to load counter for fastloop
+	;			;		push,go;			 
+
+|   fastloop (w,*dst++ = *mwa++)
+	movw dstlo,y;		am->vloareg;	cjs,go rt1texword;		 
+	movw dsthi,y;		am->vhiareg;	;				 
+	movw texword,y;		am->vwdreg;	cjp,~vir .;		vmewr	 
+	add2nw 1,dstlo;		;		;				 
+	addcw d,dsthi,dsthi;	0->am;		rfct;				 
+
+|   This code is called when w == 0, and resets the ropmode for the nodst case.  Also writes first scan line.
+rt1last: testw (nodst);		PWWWRD->am;	;				 
+	movw d,acc;		;		cjs,~zer vropmode;		| statusreg.ropmode= PWWWRD
+	movw dstlo,y;		am->vloareg;	cjs,go rt1texword;		 
+	movw dsthi,y;		am->vhiareg;	;				 
+	movw texword,y;		am->vwdreg;	cjp,~vir .;		vmewr	| *((short *) bx)++= *mwa
+	addw d,dst0lo,dst0lo;	SWWidth->am;	;				| dst0 += linebytes
+	addcw d,dst0hi,dst0hi; 0->am;		;				 
+	movw texwordwidth,y;	am->am;		;				 
+	addw d,src0,src0;	;		;				 
+	movw src0,src;		;		cjp,go rt1loop;			 
+
+|   This code sets up width for each strip (as counts down)
+rt1w0:	movw w,y;		am->vwdreg;	cjp,~vir .;		vmewr	| cgw_setwidth (,,2,2)
+	;			FBAllRopRegOpCnt->vloareg; ;			 
+	movw w,y;		am->vwdreg;	cjp,~vir .;		vmewr	| cgw_setwidth (,,2,2)
+	sub2nw 0,w;		;		;				| 0 or 1 => -1 or 0.
+rt1w0loop: sub2nw,s 0,recht;	;		;				| while (--SizeY >= 0)
+	testw (prime);		;		cjp,neg rt1end;			 
+	;			;		cjp,zer rt1w0primed;		 
+	;			;		cjs,go rt1texword;		 
+	;			FBAllRopRegSrc1->vloareg; ;			| Get ready for cg2_setrsource ()
+	movw FBCont,y;		am->vhiareg;	;				 
+	movw texword,y;		am->vwdreg;	cjp,~vir .;		vmewr	| cg2_setrsource (,,*(sx)--)
+rt1w0primed: movw dstlo,y;	am->vloareg;	cjs,go rt1texword;		| Get texword
+	movw dsthi,y;		am->vhiareg;	;				 
+	movw texword,y;		am->vwdreg;	cjp,~vir .;		vmewr	| *dst= texword
+	testw (w);		;		;			varegs+	 
+	;			;		cjp,neg rt1w0y;		varegs+	 
+	;			;		cjs,go rt1texword;		 
+	movw texword,y;		am->vwdreg;	cjp,~vir .;		vmewr	 
+rt1w0y:	addw d,dstlo,dstlo;	SWWidth->am;	;				| dst += linebytes
+	addcw d,dsthi,dsthi;	0->am;		;				 
+	movw texwordwidth,y;	am->am;		;				 
+	addw d,src0,src0;	;		;				 
+	movw src0,src;		;		cjp,go rt1w0loop;		 
+
+
+|   Here we pull the texture word from scratchpad memory
+rt1texword: movw totalwords,acc; ;		;				 
+	rsubw,s src,acc,junk;	;		;				| if (src >= total words) src -= totalwords
+	rsubw src0,acc,r[1];	;		cjp,neg rt1tw1;			 
+	movw junk,src;		;		;				 
+	movw r[1],src0;		;		;				 
+rt1tw1:	addw d,src,junk;	Texture->am;	;				 
+	movw junk,y;		am->scrmemp;	;				 
+	movw d,texword;		scrmem->am;	;				 
+	incw src,src;		;		crtn,go;			 
+
+|   Here we are about to start on a new row of vertical texture.  Therefore we get new masks, and a new shift value.
+rt1end:	addw d,2,y;		RRValues->am;	;				| Want to point scrmem @ Mask2 address DEBUG
+	IMM;			am->scrmemp;	;				| DEBUG
+	movw,s d,acc;		fifo1->am;	cjp,f1e .;			| 
+	xorw,s d,acc,y;		scrmem->am;	cjp,neg start;			| DEBUG (changed & moved cjp,neg start up one line)
+	movw FBCont,y;		am->vhiareg;	;			
+	movw acc,y;		am->scrmem;	cjp,zer rt1em1;		scrmp+	| DEBUG
+	;			FBAllRopRegMask2->vloareg; ;			 
+	movw acc,y;		am->vwdreg;	cjp,~vir .;		vmewr	 
+rt1em1:	movw d,acc;		fifo1->am;	cjp,f1e .;			| 
+	xorw,s d,acc,y;		scrmem->am;	;				| DEBUG
+	movw acc,y;		am->scrmem;	cjp,zer rt1esh;		scrmp+	| DEBUG
+	;			FBAllRopRegMask1->vloareg; ;			 
+	movw acc,y;		am->vwdreg;	cjp,~vir .;		vmewr	 
+rt1esh:	movw d,acc;		fifo1->am;	cjp,f1e .;			| 
+	xorw,s d,acc,y;		scrmem->am;	;				| DEBUG
+	movw acc,y;		am->scrmem;	cjp,zer rt1ew;		scrmp+	| DEBUG
+	;			FBAllRopRegShift->vloareg; ;			| DEBUG (nodst)
+	movw acc,y;		am->vwdreg;	cjp,~vir .;		vmewr	 
+rt1ew:	testw (nodst);		;		;				| DEBUG (nodst)
+	movw d,w;		fifo1->am;	cjp,f1e .;			| 
+	movw RemRecHt,acc;	FBAllRopRegWidth->vloareg; ;			| 
+	movw acc,recht;		;		cjp,~zer rt1strip;		| return if don't need dst
+	xorw,s w,acc,y;		scrmem->am;	;				| 
+	movw w,y;		am->scrmem;	cjp,zer rt1strip;	scrmp+	| can return if width ok, since width = opcnt
+	movw w,y;		am->vwdreg;	cjp,~vir .;		vmewr	| DEBUG set width
+	;			FBAllRopRegOpCnt->vloareg; ;			| DEBUG
+	movw w,y;		am->vwdreg;	cjp,~vir .;		vmewr	| DEBUG set opcnt
+	movw w,y;		am->scrmem;	cjp,go rt1strip;		| DEBUG 
+	
+
+
+#undef junk
+#undef dst0lo
+#undef dst0hi
+#undef src
+#undef src0
+#undef dstlo
+#undef dsthi
+
+#undef w
+#undef ropmode
+#undef recht
+#undef prime
+#undef texword
+#undef texwordwidth
+
+#endif ifdef RT1
+
+
+#define draw1rout r[25]
+#define remsx	r[24]
+#define remsy	r[23]
+#define remx1	r[22]
+/* r [22-24] used by rt8.  Use r[22] in rtc (rt1). */
+#define ropmode r[22]
+
+#define clipptr	r[21]
+#define sizey	r[20]
+#define color0	r[19]	/* This corresponds to a 0 bit in a 1-bit deep texture. */
+#define temp1	r[18]
+#define count	r[17]
+#define clip	r[16]	/* Boolean flag.  In top half of reg. set to match Op reg. */
+
+#define y0	r[15]
+#define y1	r[14]
+#define x0	r[13]	/* starting x point,positive x incr. */
+#define x1	r[12]	/* number of points in line. */
+#define dx	r[11]
+#define sizex	r[10]
+#define TexWid	r[10]	
+	/* Re-use sizex register in drawing loop since it is reloaded for each clipping rectangle. */
+#define offsetx	r[9]
+#define SubPatt	r[9]
+	/* Pattern Sub-word address bits.  Reuse offsetx since it is reloaded. */
+#define offsety	r[8]
+#define LastWord r[8]
+#define	sx	r[7]
+#define sy	r[6]
+#define TexWidStub r[6]	/* Essentially (TexWid - 1) & 0xf. */
+#define WordNum r[5]
+#define RemTex	r[4]
+	/* Remembers address of texture row in scratch. */
+#define Patt	r[3]	/* Used in rt1 code. */
+#define WordHalf r[3]	/* Used in rt8 code to track which half of Texture word to use. */
+
+#define addrhi	r[1]
+#define addrlo	r[0]
+
+
+#ifndef RT1
+roptex1: movw d,y0;		fifo1->am;	cjp,f1e .;			 
+	movw d,x0;		fifo1->am;	cjp,f1e .;			 
+	movw d,x1;		fifo1->am;	cjp,f1e .;			 
+	rsubw,s d,x0,dx;	;		;				 
+	decw dx;		;		;				| Don't draw pixel of last point (for fitting).
+	movw d,color;		fifo1->am;	cjp,f1e .;			 
+	movw d,color0;		fifo1->am;	cjp,f1e .;			 
+	movw d,op;		fifo1->am;	cjp,f1e .;			 
+	movw d,sx;		fifo1->am;	cjp,f1e .;			 
+	movw d,acc;		0xfffe->am;	;				 
+	movw d,sy;		fifo1->am;	cjp,f1e .;			 
+	norw op,acc,clip;	;		cjp,zer start;			 
+	sr0w op,op;		;		;				| op >> 1
+	andw d,op,op;		0xf->am;	;				 
+	movw FBCont,y;		am->vhiareg;	;				 
+	;			;		cjp,~vir .;			| Wait till vctlreg ready.
+	;			GPVWord->vctlreg; ;				 
+	movw d,draw1rout;	=rt1draw->am;	;				 
+|    PIXOP_NEEDS_DST (op << 1)= (op^(op << 1)) & 0xa
+	movw op,acc;		;		;				 
+	sl0w acc,acc;		;		;				 
+	xorw op,acc,acc;	;		;				 
+	andw,s d,acc,acc;	0xa->am;	;				 
+	movw 0,nodst;		;		cjp,~zer rt1rej;		 
+	incw 0,nodst;		;		cjp,go rt1rej;			 
+#endif ifndef RT1
+
+
+
+|   plgtex1:  #28.  Assume texture is loaded into scratch memory and shinit has
+|   been called to set up the rasterop chips.
+|   Will have similar structure to plgtex8
+plgtex1: movw d,y0;		fifo1->am;	cjp,f1e .;			 
+	movw d,x0;		fifo1->am;	cjp,f1e .;			 
+	movw d,x1;		fifo1->am;	cjp,f1e .;			 
+	rsubw,s d,x0,dx;	;		;				 
+	decw dx;		;		;				| Don't draw pixel of last point (for fitting).
+	movw d,color;		fifo1->am;	cjp,f1e .;			 
+	movw d,color0;		fifo1->am;	cjp,f1e .;			 
+	movw d,op;		fifo1->am;	cjp,f1e .;			 
+	movw d,sx;		fifo1->am;	cjp,f1e .;			 
+	movw d,acc;		0xfffe->am;	;				 
+	movw d,sy;		fifo1->am;	cjp,f1e .;			 
+	norw op,acc,clip;	;		cjp,zer start;			 
+	sr0w op,op;		;		;				| op >> 1
+	andw d,op,op;		0xf->am;	;				 
+	movw FBCont,y;		am->vhiareg;	;				 
+	;			;		cjp,~vir .;			| Wait till vctlreg ready.
+	;			GPVWord->vctlreg; ;				 
+	movw d,draw1rout;	=rt1draw->am;	;				 
+	;			RRValues->scrmemp; ;				 
+	subw,s d,op,y;		scrmem->am;	;				 
+	movw op,y;		am->scrmem;	cjp,zer rt1rej;		scrmp +	 
+	;			FBAllRopRegOp->vloareg; ;			| vhiareg unchanged.
+	movw op,y;		am->vwdreg;	cjp,~vir .;		vmewr	| cg2_setfunction (...,op).
+
+rt1rej:	testw (y0);		=start->brreg;	;				 
+	subw,s d,y0,y;		SHeight->am;	cjp,neg;			| if (y0 < 0) trivial rejection.
+	testw (x1);		;		cjp,~neg;			| if (y0 > SHeight) trivial rejection.
+	subw,s d,x0,y;		SWidth->am;	cjp,neg;			| if (x1 < 0) trivial rejection.
+	movw,s x0,acc;		=rt1x0ok->brreg; cjp,~neg;			| if (x0 > SWidth) trivial rejection.DEBUG (acc)
+	subw,s d,x1,y;		SWidth->am;	cjp,~neg;			 
+	rsubw sx,acc,sx;	;		;				| DEBUG (adjust sx for x0 < 0)
+	movw 0,x0;		;		;				 
+	movw x1,dx;		;		;				| adjust dx for new x0
+rt1x0ok: ;			;		cjp,neg rt1x1ok;		 
+	movw d,x1;		XMax->am;	;				 
+rt1x1ok: testw (clip);		SavePts->scrmemp; ;				 
+	movw y0,y;		am->scrmem;	cjp,zer rt1draw0;	scrmp +	 
+	movw y1,y;		am->scrmem;	;			scrmp +
+	movw x0,y;		am->scrmem;	;			scrmp +	 
+	movw x1,y;		am->scrmem;	;			scrmp +	 
+	movw color0,y;		am->scrmem;	;			scrmp +	 
+	movw sx,y;		am->scrmem;	;			scrmp +	 
+	movw sy,y;		am->scrmem;	;
+	movw d,clipptr;		ClipList->am;	;	
+#ifndef GPPLUS			 
+	;			ClipList->scrmemp; ;				 
+rt1clip: movw,s d,offsetx;	scrmem->am;	;			scrmp +	| 4 tests for rejection follow.
+#else GPPLUS
+
+rt1clip: ;			Pickmode->scrmemp; ;				| 
+	sub2nw,s 0,d,y;		scrmem->am;	;				| check if picking is on
+	movw clipptr,y;		am->scrmemp;	cjp,neg rt1pkdn;		| Get clip list
+	;			;		cjs,go tex1plypk;		| 
+
+rt1pkdn: movw,s d, offsetx;	scrmem->am;	;			scrmp +	| 4 tests for rejection follow.
+#endif GPPLUS
+	incw x0,acc;		;		cjp,neg start;			| Recreate x1
+	addw dx,acc,x1;		;		;				 
+	subw,s d,x1,y;		;		;				 
+	movw d,offsety;		scrmem->am;	cjp,neg rt1reset;	scrmp +	 
+	subw,s d,y0,y;		;		;				 
+	addw d,offsetx,acc;	scrmem->am;	cjp,neg rt1reset;	scrmp +	| sizex + offsetx
+	movw acc,sizex;		;		;				| save in sizex
+	rsubw,s x0,acc,y;	;		;				 
+	addw d,offsety,acc;	scrmem->am;	cjp,~neg rt1reset;		| sizey + offsety
+	rsubw,s y0,acc,y;	;		;				 
+	movw offsetx,acc;	;		cjp,~neg rt1reset;		| Last rejection test.
+	subw,s x0,acc,acc;	;		;				 
+	;			;		cjp,neg rt1right;		 
+	movw offsetx,x0;	;		;				 
+	addw sx,acc,sx;		;		;				 
+	
+rt1right: movw sizex,acc;	;		;				 
+	subw,s x1,acc,acc;	;		;				 
+	;			;		cjp,~neg rt1drawdx;		 
+	addw x1,acc,x1;		;		;				 
+rt1drawdx: incw x0,y;		am->am;		;				| Restore dx.
+	subw d,x1,dx;		;		;
+#ifndef GPPLUS				 
+rt1draw0: movw draw1rout,y;	am->brreg;	;				 
+	;			;		cjs,go;	
+#else GPPLUS
+rt1draw0:;			Pickmode->scrmemp; ;				| 
+	sub2nw,s 1,d,y;		scrmem->am;	;				| if (NODRAW)
+	movw draw1rout,y;	am->brreg;	cjp,zer rt1reset;		| 	don't draw
+	;			;		cjs, go;			| 
+#endif GPPLUS			 
+rt1reset: testw (clip);		SavePts->scrmemp; ;				 
+	movw d,y0;		scrmem->am;	cjp,zer start;		scrmp +	 
+	movw d,y1;		scrmem->am;	;			scrmp +
+	movw d,x0;		scrmem->am;	;			scrmp +	 
+	movw d,x1;		scrmem->am;	;			scrmp +	 
+	rsubw d,x0,dx;		;		;				| Restore dx for next clip rectangle.
+	movw d,color0;		scrmem->am;	;			scrmp +	| 
+	movw d,sx;		scrmem->am;	;			scrmp +	 
+	movw d,sy;		scrmem->am;	;			scrmp +	 
+	add2nw 2,clipptr;	am->scrmemp;	cjp,go rt1clip;			 
+
+
+
+|   rt1draw:  shaded 2d segments.
+|   Use repeated subtraction for finding modulus functions since in the average case
+|   where sx might be 576 and TexWid 32 the division routine would take about 47 instructions
+|   whereas repeated subtraction takes 18.  ENHANCEMENT:  use priw instruction to branch between
+|   div routine or repeated subtraction.
+
+rt1draw: ;			0->scrmemp;	;				| Save values that rt1draw clobbers,for rt1ropchip
+	movw sizex,y;		am->scrmem;	;			scrmp+	 
+	movw offsetx,y;		am->scrmem;	;			scrmp+	 
+	movw,s sy,y;		TexWidth->scrmemp; ;				| Find addr of 1st pixel in row of texture.
+	movw d,TexWid;		scrmem->am;	;			scrmp+	 
+	addw,s d,sy,sy;		scrmem->am;	cjp,neg .;			 
+	subw,s d,sy,sy;		scrmem->am;	cjp,~neg .;			| scrmem == TexHt. 
+	addw d,sy,sy;		;		;				| sy is 2 * TexHt below negative.
+	addw d,sy,r[2];		;		;				| sy mod TexHt => r[2] for multiply.
+	sub2nw 0,TexWid,r[0];	;		;				| LastWord= (TexWidth - 1) >> 4
+	rolw 12,r[0],acc;	;		;				 
+	andw d,acc,LastWord;	0xfff->am;	;				 
+	incw LastWord,acc;	;		cjs,go multiply;		 
+	addw d,r[0],RemTex;	Texture->am;	;				| RemTex= Texture + sy * (LastWord + 1)
+	movw,s sx,acc;		;		;				 
+	addw,s TexWid,acc,acc; 	;		cjp,neg .;			| Find sx modulo texture width.
+	subw,s TexWid,acc,acc; 	;		cjp,~neg .;			| Find sx modulo texture width.
+	addw TexWid,acc,acc;	;		;				| acc will be 2 * TexWid below negative.
+	addw TexWid,acc,acc;	;		;				| Restore acc.
+	movw acc,sx;		;		;				| sx= sx mod TexHt
+	andw d,sx,SubPatt;	0xf->am;	;				| SubPatt= sx & 0xf
+	rolw 12,sx,WordNum;	;		;				| WordNum= sx >> 4
+	andw d,WordNum,WordNum; 0xfff->am;	;				 
+	movw RemTex,acc;	;		;				 
+	addw WordNum,acc,y;	am->scrmemp;	;				| Texture= RemTex + WordNum
+	movw d,Patt;		scrmem->am;	;				| Patt= *Texture.  Get first word.
+	movw SubPatt,y;		am->nreg;	;				 
+	rolw n,Patt,Patt;	;		;				| Sign bit indicates presence or absence of pixel.
+	sub2nw 0,TexWid;	;		;				| TexWidStub= (TexWid - 1) & 0xf
+	andw d,TexWid,TexWidStub; 0xf->am;	;				 
+	movw WordNum,acc;	;		;				| if (WordNum==LastWord) SubPatt= TexWidStub-SubPatt
+	subw,s LastWord,acc,y; 	;		;				 
+	movw TexWidStub,acc;	;		cjp,zer .+2;			 
+	movw d,acc;		15->am;		;				| else SubPatt= 15 - SubPatt
+	subw,s SubPatt,acc,SubPatt; ;		;				 
+	;			;		cjp,~neg rt1prime;		| if (SubPatt < 0) {
+	movw 0,WordNum;		;		;				| WordNum= 0
+	movw RemTex,y;		am->scrmemp;	;				| Texture= RemTex
+	movw d,Patt;		scrmem->am;	;				| Patt= (*Texture) << (-SubPatt)
+	negw SubPatt,y;		am->nreg;	;				 
+	rolw n,Patt,Patt;	;		;				 
+	rsubw d,SubPatt,SubPatt; 15->am;	;				| SubPatt= 15 - SubPatt }
+rt1prime: movw,s Patt,y;	;		;				 
+	movw color,acc;		;		cjp,neg .+2;			 
+	movw 0,acc;		;		;				 
+	rolw 1,Patt,Patt;	;		cjs,go rt8prime;		 
+	decws SubPatt;		;		;				 
+
+#define DONT_USE_ROP_CHIP
+#ifdef DONT_USE_ROP_CHIP
+
+	;			;		cjs,neg rt1patt;		| INITIALIZE LOOP.
+rt1fb:	movw y0,r[2];		;		cjs,go MulSWid;			| Calculate fb address.
+	movw x0,acc;		;		;				 
+	addw r[0],acc,r[0];	am->vloareg;	;				 
+	addcw d,r[1],acc;	RopFB->am;	;				| Pixel mode memory.
+	addw FBHi,acc,y;	am->vhiareg;	;				 
+	;			=rt1dloop->brreg; ;				 
+	;			;		cjp,~vir .;			 
+	movw dx,acc;		VByte->vctlreg;	;				 
+	movw,s Patt,y;		;		cjp,go rt1col;			| JUMP into middle of loop.
+
+rt1dloop: movw,s Patt,y;	;		;			varegs+	 
+rt1col:	movw color0,temp1;	;		cjp,~neg .+2;			 
+	movw color,temp1;	;		;				 
+	rolw 1,Patt,Patt;	;		;				 
+	decws SubPatt;		;		;				 
+	decws acc;		;		cjs,neg rt1patt;		 
+rt1wr:	movw temp1,y;		am->vwdreg;	cjp,~neg.3 .;		vmewr	 
+
+	;			;		crtn,go;			 
+
+rt1patt: incw WordNum,WordNum;	am->am;		;				| if (++WordNum > LastWord)
+	rsubw,s d,LastWord,y;	;		;				 
+	;			;		cjp,zer rt1patt0;	scrmp +	 
+	;			;		cjp,neg rt1patt1;		 
+	movw d,SubPatt;		15->am;		;				| { SubPatt= 15
+	rsubw,s d,TexWid,y;	;		;				| if (TexWid < 16) SubPatt= TexWid
+	movw 0,WordNum;		;		cjp,neg .+2;			| WordNum= 0
+	movw TexWid,SubPatt;	;		;				 
+	movw RemTex,y;		am->scrmemp;	cjp,go rt1patt2;		 
+rt1patt0: movw TexWidStub,SubPatt; ;		cjp,go rt1patt2;		| } else if (WordNum == LastWord) { SubPatt= TexWid
+rt1patt1: movw d,SubPatt;	15->am;		;				| } else { SubPatt= 15
+rt1patt2: movw d,Patt;		scrmem->am;	;				| Patt= *Texture
+	movw,s acc,y;		;		crtn,go;			 
+
+#else ELSE_USE_ROP_CHIP
+
+	;			;		cjs,go rt1ropchip;		 
+	;			;		crtn,go;			 
+
+#endif ELSE_USE_ROP_CHIP
+
+
+|   Uses rasterop chips to draw textured 1 bit deep rop lines 16 pixels at a time.
+rt1ropchip: ;			0->scrmemp;	;				| Retrieve scratch values
+	movw d,sizex;		scrmem->am;	;			scrmp +	 
+	movw d,offsetx;		scrmem->am;	;			scrmp +	 
+	;			FBPPMask->vloareg; ;				 
+	movw FBCont,y;		am->vhiareg;	;				 
+	;			;		cjp,~vir .;			| Wait till vctlreg ready.
+	;			GPVWord->vctlreg; ;				 
+	movw planes,y;		am->vwdreg;	cjp,~vir .;		vmewr	| write ppmask.reg.
+	;			RRValues->scrmemp; ;				 
+	subw,s d,op,y;		scrmem->am;	;				 
+	movw op,y;		am->scrmem;	cjp,zer rtcpatt0;	scrmp +	 
+	;			FBAllRopRegOp->vloareg; ;			| vhiareg unchanged.
+	movw op,y;		am->vwdreg;	cjp,~vir .;		vmewr	| cg2_setfunction (...,op).
+rtcpatt0: ;			FBAllRopRegPatt->vloareg; ;			| vhiareg unch.
+	testw (d);		scrmem->am;	;				 
+	movw d,Patt;		0xadde->am;	;				| DEBUG
+	movw Patt,y;		am->scrmem;	cjp,zer rtcpatt1;	scrmp +	 
+	movw Patt,y;		am->vwdreg;	cjp,~vir .;		vmewr	 
+rtcpatt1: testw (clip);		;		;				| if (clip) ...
+	testw (x0);		;		cjp,zer rtcnclip;		| if (pos0.x > 0)
+	movw x1,acc;		;		cjp,~neg rtcx1;			 
+	movw 0,x0;		;		;				| pos0.x= 0
+rtcx1:	subw,s sizex,acc,acc;	;		;				| if (pos1.x >= size.x)
+	decw sizex;		am->am;		cjp,neg rtcdx;			| pos1.x= size.x - 1
+	movw d,x1;		;		;				 
+rtcdx:	movw x1,acc;		;		;				 
+	subw x0,acc,dx;		;		;				| dx= pos1.x - pos0.x
+rtcnclip: movw x0,acc;		;		;				 
+	addw dx,acc,acc;	;		;				 
+	movw d,r[0];		scrmem->am;	;				 
+	addw offsetx,acc,acc;	FBAllRopRegMask2->vloareg; ;			| cg2_prd_skew (dmd,pos1.x). vhiareg unchanged.
+	andw d,acc,count;	0xf->am;	;				| count= cg2_prd_skew
+	addw d,count,acc;	RMaskTable->am;	;				| rmasktable [count]
+	movw acc,y;		am->scrmemp;	;				 
+	subw,s d,r[0],y ;	scrmem->am;	;				 
+	movw x0,acc;		;		cjp,zer rtcm1;			 
+	movw d,r[0];		scrmem->am;	;				 
+	;			RRValm2->scrmemp; ;				 
+	movw r[0],y;		am->scrmem;	;				 
+	movw r[0],y;		am->vwdreg;	cjp,~vir .;		vmewr	 
+rtcm1:	addw offsetx,acc,acc;	FBAllRopRegMask1->vloareg; ;			| cg2_prd_skew (dmd,pos0.x) vhiareg unchanged.
+	andw d,acc,count;	0xf->am;	;				| count= cg2_prd_skew
+	addw d,count,acc;	LMaskTable->am;	;				 
+	movw acc,y;		am->scrmemp;	;				 
+	movw d,r[0];		scrmem->am;	;				 
+	;			RRValm1->scrmemp; ;				 
+	subw,s d,r[0],y;	scrmem->am;	;				 
+	movw r[0],y;		am->scrmem;	cjp,zer rtcrm;		scrmp +	 
+	movw r[0],y;		am->vwdreg;	cjp,~vir .;		vmewr	 
+rtcrm:	testw (nodst);		PRRWRD->am;	;				 
+	movw d,ropmode;		;		cjp,~zer rtcropmode;		| if (nodst) ropmode= PRRWRD
+	movw d,ropmode;		PWRWRD->am;	;				| else ropmode= PWRWRD
+rtcropmode: movw d,acc;		PWRWRD->am;	;				 
+	;			;		cjs,go vropmode;		 
+	movw dx,acc;		;		;				| count= (dx+count)>>4.  (>>4 == <<12).
+	addw count,acc,count;	0xfff->am;	;				 
+	rolw 12,count,count;	FBAllRopRegWidth->vloareg; ;			| vhiareg unchanged.  mask off high bits of rotate.
+	andw d,count,count;	;		;				 
+	subw,s d,count,y;	scrmem->am;	;				 
+	movw count,y;		am->scrmem;	cjp,zer rtccnt;		scrmp +	| 
+	movw count,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 1st 1/2 cg2_setwidth (...,count,count).
+rtccnt:	;			FBAllRopRegOpCnt->vloareg; ;			| vhiareg unchanged.
+	subw,s d,count,y;	scrmem->am;	;				 
+	movw count,y;		am->scrmem;	cjp,zer rtcsh;		scrmp +	 
+	movw count,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 2nd 1/2 cg2_setwidth (...,count,count).
+rtcsh:	;			FBAllRopRegShift->vloareg; ;			| vhiareg unchanged.
+	sub2nw,s 8,d,y;		scrmem->am;	;				 
+	mov2nw 8,y;		am->scrmem;	cjp,zer rtcsrc2a;	scrmp +	 
+	mov2nw 8,y;		am->vwdreg;	cjp,~vir .;		vmewr	| cg2_setshift (...,0,1).
+rtcsrc2a: movw color,acc;	;		;				 
+	romw 8,color,acc,0xff00; ;		;				| instruction completes on next cycle.
+	IMM;			FBAllRopPrimeSrc2->vloareg; ;			| vhiareg unchanged.
+	subw d,acc,y;		scrmem->am;	;				 
+	movw acc,y;		am->vwdreg;	cjp,~vir .;		vmewr	 
+rtcrwrd: movw y0,acc;		;		;				 
+	movw acc,Multiplier;	;		cjs,go MulSWWid;		| cg2_ropword (dmd,0,pos0.x,pos0.x)
+	rolw 13,x0,acc;		;		;				| cg2_ropword: (x>>4)*(sizeof(short))
+	andw d,acc,acc;		0x1ffe->am;	;				| a5_adr= cg2_ropword	
+	addw addrlo,acc,addrlo; am->vloareg;	;				 
+	addcw d,FBHi,acc;	RopFB->am;	;				 
+	addw addrhi,acc,addrhi; am->vhiareg;	;				 
+| switch (d5_count) unwrapped.  nodst part separated out.
+rtccolor: testw (nodst);	;		;				 
+	movw count,y;		am->brreg;	cjp,~zer rtcnodst;		 
+	;			;		push,go;			 
+	movw color,y;		am->vwdreg;	cjp,~vir .;		vmewr	| value written is immaterial.
+	;			;		;			varegs + 
+	;			;		rfct;			varegs + 
+	;			;		crtn,go;			 
+rtcnodst: subw,s d,count,y;	2->am;		;				 
+	testw (count);		;		cjp,~neg rtc2;			 
+	movw color,y;		am->vwdreg;	cjp,~vir .;		vmewr	 
+	;			;		crtn,zer;		varegs + 
+	;			;		;			varegs + 
+	;			;		cjp,~vir .;		vmewr	 
+	;			;		crtn,go;			 
+rtc2:	movw FBCont,y;		am->vhiareg;	;				 
+	mov2nw 1,acc;		FBAllRopRegWidth->vloareg; ;			 
+	;			RRValWid->scrmemp; ;				 
+	sub2nw,s 1,d,y;		scrmem->am;	;				 
+	mov2nw 1,y;		am->scrmem;	cjp,zer rtccnt1;	scrmp +	 
+	movw acc,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 1st 1/2 cg2_setwidth (...,2,2).
+rtccnt1: ;			FBAllRopRegOpCnt->vloareg; ;			| vhiareg unchanged.
+	sub2nw,s 1,d,y;		scrmem->am;	;				 
+	mov2nw 1,y;		am->scrmem;	cjp,zer rtccol0;	scrmp +	 
+rtccount1: movw acc,y;		am->vwdreg;	cjp,~vir rtccount1;	vmewr	| 2nd 1/2 cg2_setwidth (...,2,2).
+rtccol0: movw addrlo,y;		am->vloareg;	;				 
+	movw addrhi,y;		am->vhiareg;	;				 
+	movw color,y;		am->vwdreg;	cjp,~vir .;		vmewr	| *(a5_adr)++= d3_color (value is immaterial)
+	;			;		;			varegs + 
+	;			;		;			varegs + 
+	;			;		cjp,~vir .;		vmewr	| *(a5_adr)++= d3_color (value is immaterial)
+	subw,s d,count,count;	3->am;		;			varegs +| count less 3 so "fastloop" right num
+	;			;		cjp,neg rtcvmewr3;	varegs + 
+	movw ropmode,acc;	;		cjs,go vropmode;		 
+	add2nw,s 2,addrlo;	;		;				| Sync addrlo with vme addr counter.
+	movw addrlo,y;		am->vloareg;	cjp,~cry rtcncry1;		 
+	incw addrhi,addrhi;	;		;				| Sync addrhi with vme addr counter.
+rtcncry1: movw count,y;		am->brreg;	;				| Get ready to load counter.
+	movw addrhi,y;		am->vhiareg;	push,go;			 
+	movw color,y;		am->vwdreg;	cjp,~vir .;		vmewr	| (value is immaterial)
+	;			;		;			varegs + 
+	;			PWRWRD->am;	rfct;			varegs + 
+	movw d,acc;		;		cjs,go vropmode;		 
+	sl0w count,temp1;	;		;				 
+	addw,s d,temp1,acc;	2->am;		;				 
+	addw,s addrlo,acc,addrlo;am->vloareg;	cjp,~cry rtcvmewr2;		 
+	incw addrhi,y;		;		;				 
+rtcvmewr2: movw addrhi,y;	am->vhiareg;	cjp,~cry rtcvmewr3;		 
+	incw addrhi,y;		am->vhiareg;	;				 
+rtcvmewr3: movw 0,y;		am->vwdreg;	cjp,~vir .;		vmewr	| (value is immaterial)
+	;			;		crtn,go;			 
+
+
+
+|   plgtex8:  #29.
+plgtex8: movw d,y0;		fifo1->am;	cjp,f1e .;			 
+	movw d,x0;		fifo1->am;	cjp,f1e .;			 
+	movw d,x1;		fifo1->am;	cjp,f1e .;			 
+	movw d,op;		fifo1->am;	cjp,f1e .;			 
+	movw d,sx;		fifo1->am;	cjp,f1e .;			 
+	movw d,acc;		0xfffe->am;	;				 
+	movw d,sy;		fifo1->am;	cjp,f1e .;			 
+	;			;		cjp,zer start;			 
+	;			;		cjs,go rt8prep;			 
+	;			;		cjp,go rt8line;			 	 
+
+
+
+|   roptex8:  #35.
+roptex8: movw d,x0;		fifo1->am;	cjp,f1e .;			 
+	movw d,y0;		fifo1->am;	cjp,f1e .;			 
+	movw d,x1;		fifo1->am;	cjp,f1e .;			 
+	sub2nw 0,x1;		am->am;		;				| ?
+	rsubw,s d,x0,dx;	;		;				 
+	addw d,y0,y1;		fifo1->am;	cjp,f1e .;			 
+	movw d,op;		fifo1->am;	cjp,f1e .;			 
+	movw d,sx;		fifo1->am;	cjp,f1e .;			 
+	movw d,acc;		0xfffe->am;	;				 
+	movw d,sy;		fifo1->am;	cjp,f1e .;			 
+	;			;		cjp,zer start;			 
+	;			;		cjs,go rt8prep;			 
+	;			;		cjs,go rt8rop;			 
+rt8end:	;			;		cjp,go start;			 	
+
+
+
+rt8rop:	testw (y1);		;		;				 
+	subw,s d,y0,y;		SHeight->am;	crtn,neg;			| if (y1 < 0) trivial rejection.
+	testw (x1);		;		crtn,~neg;			| if (y0 > SHeight) trivial rejection.
+	subw,s d,x0,y;		SWidth->am;	crtn,neg;			| if (x1 < 0) trivial rejection.
+	movw,s x0,acc;		=rt8x0ok->brreg; crtn,~neg;			| if (x0 > SWidth) trivial rejection.
+	subw,s d,x1,y;		SWidth->am;	cjp,~neg;			 
+	rsubw sx,acc,sx;	;		;				| adjust sx for x0 < 0
+	movw 0,x0;		;		;				 
+	movw x1,dx;		;		;				| adjust dx for new x0
+rt8x0ok: ;			;		cjp,neg rt8x1ok;		 
+	movw d,x1;		XMax->am;	;				 
+rt8x1ok: testw (clip);		SavePts->scrmemp; ;				 
+	movw y0,y;		am->scrmem;	cjp,zer rt8scan0;	scrmp +	 
+	movw y1,y;		am->scrmem;	;			scrmp +	 
+	movw x0,y;		am->scrmem;	;			scrmp +	 
+	movw x1,y;		am->scrmem;	;			scrmp +	 
+	movw dx,y;		am->scrmem;	;			scrmp +	 
+	movw sx,y;		am->scrmem;	;			scrmp +	 
+	movw sy,y;		am->scrmem;	;
+	movw d,clipptr;		ClipList->am;	;			 
+	;			ClipList->scrmemp; ;				 
+rt8clip: movw,s d,offsetx;	scrmem->am;	;			scrmp +	| 4 tests for rejection follow.
+	incw x0,acc;		;		crtn,neg;			| Recreate x1
+	addw dx,acc,x1;		;		;				 
+	subw,s d,x1,y;		;		;				 
+	movw d,offsety;		scrmem->am;	cjp,neg rt8reset;	scrmp +	 
+	subw,s d,y1,y;		;		;				 
+	addw d,offsetx,acc;	scrmem->am;	cjp,neg rt8reset;	scrmp +	| sizex + offsetx
+	movw acc,sizex;		;		;				| save in sizex
+	rsubw,s x0,acc,y;	;		;				 
+	addw d,offsety,acc;	scrmem->am;	cjp,~neg rt8reset;		| sizey + offsety
+	movw acc,sizey;		;		;				| save in sizey
+	rsubw,s y0,acc,y;	;		;				| Last rejection test.
+	movw offsetx,acc;	;		cjp,~neg rt8reset;		 
+	subw,s x0,acc,acc;	;		;				| Test for rop crossing left boundary.
+	;			;		cjp,neg rt8y0;			 
+	movw offsetx,x0;	;		;				 
+	addw sx,acc,sx;		;		;				 
+rt8y0:	movw offsety,acc;	;		;				 
+	subw,s y0,acc,acc;	;		;				| Test for rop crossing top boundary.
+	;			;		cjp,neg rt8right;		 
+	movw offsety,y0;	;		;				 
+	addw sy,acc,sy;		;		;				 
+rt8right: movw sizex,acc;	;		;				| Test for rop crossing right boundary.
+	subw,s x1,acc,acc;	;		;				 
+	;			;		cjp,~neg rt8below;		 
+	addw x1,acc,x1;		;		;				 
+rt8below: movw sizey,acc;	;		;				| Test for rop crossing bottom boundary.
+	subw,s y1,acc,acc;	;		;				 
+	;			;		cjp,~neg rt8scan0;		 
+	addw y1,acc,y1;		;		;		 
+rt8scan0: movw sx,acc;		;		;	 
+	movw acc,remsx;		;		;				 
+	movw sy,acc;		;		;				 
+	movw acc,remsy;		;		;				 
+	movw x1,acc;		;		;				 
+	movw acc,remx1;		;		;				 
+	movw y0,y;		am->am;		;				| Prepare dreg for loop.
+
+rt8scan: rsubw,s d,y1,y;	;		;				 
+	movw remsx,acc;		;		cjp,~neg rt8reset;		 
+	movw acc,sx;		;		;				 
+	movw remsy,acc;		;		;				 
+	movw acc,sy;		;		;				 
+	movw remx1,acc;		;		;			
+	movw acc,x1;		;		;				 
+	subw x0,acc,dx;		;		;				 
+	incw remsy,remsy;	;		cjs,go rt8draw;		 
+	incw y0,y0;		am->am;		cjp,go rt8scan;		
+
+rt8reset: testw (clip);		SavePts->scrmemp; ;				 
+	movw d,y0;		scrmem->am;	crtn,zer;		scrmp +	 
+	movw d,y1;		scrmem->am;	;			scrmp +	 
+	movw d,x0;		scrmem->am;	;			scrmp +	 
+	movw d,x1;		scrmem->am;	;			scrmp +	
+	movw d,dx;		scrmem->am;	;			scrmp +	 
+	movw d,sx;		scrmem->am;	;			scrmp +	 
+	movw d,sy;		scrmem->am;	;			scrmp +	 
+	add2nw 2,clipptr; 	am->scrmemp;	cjp,go rt8clip;		 
+
+
+
+rt8prep: norw op,acc,clip;	;		;				 
+	sr0w op,op;		;		;				| op >> 1
+	andw d,op,op;		0xf->am;	;				 
+	movw FBCont,y;		am->vhiareg;	;				 
+	;			;		cjp,~vir .;			| Wait till vctlreg ready.
+	;			GPVWord->vctlreg; ;				 
+	;			RRValues->scrmemp; ;				 
+	subw,s d,op,y;		scrmem->am;	;				 
+	movw op,y;		am->scrmem;	cjp,zer rt8dst;	scrmp +	 
+	;			FBAllRopRegOp->vloareg; ;			| vhiareg unchanged.
+	movw op,y;		am->vwdreg;	cjp,~vir .;		vmewr	| cg2_setfunction (...,op).
+|  PIXOP_NEEDS_DST (op << 1)= (op^(op << 1)) & 0xa
+rt8dst:	movw op,acc;		;		;				 
+	sl0w acc,acc;		;		;				 
+	xorw op,acc,acc;	;		;				 
+	andw,s d,acc,acc;	0xa->am;	;				 
+	movw 0,nodst;		;		crtn,~zer;			 
+	incw 0,nodst;		;		crtn,go;			 
+
+
+
+|   rt8line is called by plgtex8 to do clipping, and then call rt8draw for rendering of 8 bit textures
+rt8line: testw (y0);		=start->brreg;	;				| 
+	subw,s d,y0,y;		SHeight->am;	cjp,neg;			| if (y0 < 0) trivial rejection.
+	testw (x1);		;		cjp,~neg;			| if (y0 > SHeight) trivial rejection.
+	subw,s d,x0,y;		SWidth->am;	cjp,neg;			| if (x1 < 0) trivial rejection.
+	movw,s x0,acc;		=rt8lx0ok->brreg; cjp,~neg;			| if (x0 > SWidth) trivial rejection.
+	subw,s d,x1,y;		SWidth->am;	cjp,~neg;			| check if (x1 > SWidth)
+	rsubw sx,acc,sx;	;		;				| adjust sx for x0 < 0 
+	movw 0,x0;		;		;				 
+rt8lx0ok: ;			;		cjp,neg rt8lx1ok;		 
+	movw d,x1;		XMax->am;	;				| if (x1 > SWidth), x1=XMax (SWidth-1)
+rt8lx1ok: testw (clip);		SavePts->scrmemp; ;				 
+	movw y0,y;		am->scrmem;	cjp,zer rt8ldrawdx;	scrmp +	 
+	movw x0,y;		am->scrmem;	;			scrmp +	 
+	movw x1,y;		am->scrmem;	;			scrmp +	 
+	movw sx,y;		am->scrmem;	;			scrmp +	 
+	movw sy,y;		am->scrmem;	;			scrmp +	 
+	movw d,clipptr;		ClipList->am;	;		
+#ifndef GPPLUS		 
+	;			ClipList->scrmemp; ;				 
+rt8lclip: movw,s d,offsetx;	scrmem->am;	;			scrmp +	| 4 tests for rejection follow.
+#else
+rt8lclip: ;			Pickmode->scrmemp; ;				| 
+	sub2nw,s 0,d,y;		scrmem->am;	;				| check if picking is on
+	movw clipptr,y;		am->scrmemp;	cjp,neg rt8lpkdn;		| Get clip list
+	;			;		cjs,go tex8plypk;		| 
+rt8lpkdn: movw,s d,offsetx;	scrmem->am;	;			scrmp +	| 
+#endif GPPLUS
+	;			;		cjp,neg start;			| Return if done with rectangle list
+	subw,s d,x1,y;		;		;				| if (x1 < offsetx) process next clip rectangle
+	movw d,offsety;		scrmem->am;	cjp,neg rt8lreset;	scrmp +	 
+	subw,s d,y0,y;		;		;				| if (y0 < offsety) process next clip rectangle
+	addw d,offsetx,acc;	scrmem->am;	cjp,neg rt8lreset;	scrmp +	| 
+	movw acc,sizex;		;		;				| sizex + offsetx -> sizex
+	rsubw,s x0,acc,y;	;		;				| if (x0 > sizex) process next clip rectangle
+	addw d,offsety,acc;	scrmem->am;	cjp,~neg rt8lreset;		| sizey + offsety -> acc
+	rsubw,s y0,acc,y;	;		;				| if (y0 > acc) process next clip rectangle
+	movw offsetx,acc;	;		cjp,~neg rt8lreset;		| 
+
+|   Here we know that the scan line is not trivially rejected from the clip rectange, so we clip the scan line to the rect
+	rsubw,s x0,acc,acc;	;		;				| want (x0 >= offsetx), compute (x0 - offsetx)
+	;			;		cjp,~neg rt8lright;		| jump if x0 is ok
+	movw offsetx,x0;	;		;				 
+	rsubw sx,acc,sx;	;		;				| adjust sx for new x0 DEBUG (rsubw was old)
+	
+rt8lright: movw sizex,acc;	;		;				 
+	subw,s x1,acc,acc;	;		;				 
+	;			;		cjp,~neg rt8ldrawdx;		 
+	addw x1,acc,x1;		;		;				 
+rt8ldrawdx: movw x0,y;		am->am;		;				| dx = x1-x0 (don't want to draw right edge)
+	subw,s d,x1,dx;		=rt8lreset->brreg; ;				| 
+#ifndef GPPLUS	 
+rt8ldraw0: ;			;		cjs,~zer rt8draw;	
+#else GPPLUS
+rt8ldraw0: ;			Pickmode->scrmemp; cjp,zer;			| brreg set on last cycle
+	sub2nw,s 1,d,y;		scrmem->am;	;				| if (NODRAW)
+	;			;		cjp,zer;			| 	don't draw
+	;			;		cjs,go rt8draw;			| 
+#endif GPPLUS		 
+rt8lreset: testw (clip);	SavePts->scrmemp; ;				 
+	movw d,y0;		scrmem->am;	cjp,zer start;		scrmp +	
+	movw d,x0;		scrmem->am;	;			scrmp +	 
+	movw d,x1;		scrmem->am;	;			scrmp +	 
+	movw d,sx;		scrmem->am;	;			scrmp +	 
+	movw d,sy;		scrmem->am;	;			scrmp +	 
+	add2nw 2,clipptr;	am->scrmemp;	cjp,go rt8lclip;	
+
+
+
+|   rt8draw:  shaded 2d segments.
+|   Use repeated subtraction for finding modulus functions since in the average case
+|   where sx might be 576 and TexWid 32 the division routine would take about 47 instructions
+|   whereas repeated subtraction takes 18.  ENHANCEMENT:  use priw instruction to branch between
+|   div routine or repeated subtraction.
+|					    *********************
+|   Textures are stored 2 pixels per word.  * Word 0  *  Word 1 *  The register WordHalf corresponds to which
+|					    *********************
+|   word of the texture we are currently accessing.  Also notice that sx mod TexWid will be even (0) or odd (1)
+|   depending on whether we are accessing word 0 or 1 of the texture.
+
+rt8draw: movw,s sy,r[0];	TexWidth->scrmemp; ;				| Find addr of 1st pixel in row of texture.
+	movw d,TexWid;		scrmem->am;	;			scrmp+	 
+	addw,s d,r[0],r[0];	scrmem->am;	cjp,neg .;			| make sy positive (add height)
+	subw,s d,r[0],r[0];	scrmem->am;	cjp,~neg .;			| Get TexHt from scratch memory.
+	addw d,r[0],r[2];	;		;				| sy is 2 * TexHt below negative.
+	addw d,r[2],r[2];	;		;				| sy mod TexHt => r[2] for multiply.
+	incw TexWid,acc;	;		;				 
+	sr0w acc,acc;		;		cjs,go multiply;		| (sy mod TexHt) * (TexWid / 2)
+	movw,s sx,acc;		;		;				| Find x0 modulo texture width.
+	addw,s TexWid,acc,acc; 	;		cjp,neg .;			| Find sx modulo texture width.
+	subw,s TexWid,acc,acc; 	;		cjp,~neg .;			 
+	addw TexWid,acc,acc;	;		;				
+	addw TexWid,acc,x1;	;		;				| x1= sx mod TexWid (how far into texture to start in pixels)
+	addw d,r[0],acc;	Texture->am;	;				| Texture + (sy mod TexHt) * TexWid.
+	movw acc,RemTex;	;		;				| RemTex holds starting address of row of texture
+	sr0w x1,r[0];		;		;				| 
+	addw r[0],acc,acc;	am->scrmemp;	;				| Texture + (sx mod TexWid)>>1 + (sy mod TexHt)*TexWid
+	btstw,s 0,x1;		;		;				| x1 says if we want top & bottom or just bottom of word
+	movw d,acc;		scrmem->am;	cjp,~zer rt8half;		 
+	rolw 8,acc,acc;		;		;				| want full word, upper, then lower
+	incw 0,WordHalf;	;		cjp,go rt8mask0;		| DEBUG use upper half of word
+rt8half: movw 0,WordHalf;	;		;			scrmp+	| use lower half 
+rt8mask0: andw d,acc,acc;	0xff->am;	;				 
+	;			;		cjs,go rt8prime;		| Get first color. scrmp will be incr at rt8dec.
+	movw y0,r[2];		;		cjs,go MulSWid;			| Calculate address.
+	movw x0,acc;		=rt8loop->brreg; ;				 
+	addw,s r[0],acc,r[0];	am->vloareg;	;				| DEBUG (set carry bit)
+	addcw d,r[1],acc;	RopFB->am;	;				| Pixel mode memory.
+	addw FBHi,acc,y;	am->vhiareg;	;				 
+	movw TexWid,acc;	;		cjp,~vir .;			 
+	subw x1,acc,x1;		VByte->vctlreg;	;				| x1= TexWid - x1 (number of pixels to write first time)
+	decws x1;		;		;				| DEBUG (writing one less the first word - because of priming)
+	movw dx,acc;		;		cjp,~zer rt8majloop;		| DEBUG (condition code)
+	movw RemTex,y;		am->scrmemp;	;				| DEBUG account for case when sx = texwidth - 1
+	movw TexWid,x1;		;		;				| DEBUG
+
+rt8majloop: subw,s x1,acc,dx;	;		;				| dx= dx - x1 (TexWid)
+	;			;		cjp,neg rt8dec;			| if (dx < x1), leave dx in acc
+	movw x1,acc;		;		cjp,~zer rt8dec;		| x1 in acc
+	decw acc;		;		cjp,go rt8dec;			| DEBUG when dx = x1, would write extra pixel
+
+rt8loop: incw WordHalf,WordHalf; ;		;			varegs+	 
+rt8dec0: btstw,s 0,WordHalf;	;		;				 
+	rolw 8,d,r[0];		scrmem->am;	cjp,zer rt8mask;		| write upper color (even offset, wh even)
+	movw d,r[0];		scrmem->am;	;			scrmp+	| write lower color (odd offset)
+rt8mask: andw d,r[0],r[0];	0xff->am;	;				 
+	decws acc;		;		;				| dec loop counter.
+	movw r[0],y;		am->vwdreg;	cjp,~neg.3 .;		vmewr	| write color
+
+	movw,s dx,acc;		;		;				 
+	movw RemTex,y;		am->scrmemp;	crtn,neg;		varegs+	 
+	movw 0,WordHalf;	;		;				
+	movw TexWid,x1;		;		cjp,go rt8majloop;		 
+
+rt8dec:	decw acc;		;		cjp,go rt8dec0;			
+
+
+|   rt8prime:  Expects color in acc.  r[0] will be clobbered.
+rt8prime: movw acc,r[0];	;		cjp,~vir .;			 
+	romw 8,r[0],acc,0xff00; VWord->vctlreg; ;				 
+	IMM;			FBAllRopPrimeSrc2->vloareg; ;			 
+	movw FBCont,y;		am->vhiareg;	;				 
+	movw acc,y;		am->vwdreg;	cjp,~vir .;		vmewr	 
+	;			;		crtn,go;			 
+
+
+#undef clipptr
+#undef sizey
+#undef color0
+#undef temp1
+#undef ropmode
+#undef count
+#undef clip
+
+#undef y0
+#undef y1
+#undef x0
+#undef x1
+#undef dx
+#undef sizex
+#undef TexWid
+#undef offsetx
+#undef SubPatt
+#undef offsety
+#undef LastWord
+#undef sx
+#undef sy
+#undef WordNum
+#undef RemTex
+#undef Patt

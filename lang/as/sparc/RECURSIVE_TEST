@@ -1,0 +1,282 @@
+#! /bin/sh
+#	@(#)RECURSIVE_TEST	1.1	10/31/94
+
+# usage:  RECURSIVE_TEST [-save] [-O<n>] starting_step_number \
+#		[-debug] [-nooptstats] [-nodisassy]
+
+HERE=`pwd`
+if expr "$HERE" : ".*5.*" >/dev/null
+then 
+	FAB_MSG="[USING FAB-1 (V5) BINARIES IN TEST]"
+	FAB=" -DCHIPFABS -DIU_FABNO=1 -DFPU_FABNO=1 -DINTERIM_OBJ_FMT"
+else 
+	FAB_MSG="[USING FAB-2 (V6) BINARIES IN TEST]"
+ 	# [no options] FAB_OPTIONS=" -DCHIPFABS -DIU_FABNO=2 -DFPU_FABNO=3"
+	FAB=''
+fi
+
+CC=${CC-cc}
+SAVE=false
+# DISASSY='-S -Qoption as -SlC'	# disassembly options
+V=' -v'
+
+# script to test the assembler/optimizer recursively, that is,
+# assemble & optimize itself.
+
+if [ `mach` != "sparc" ]
+then	echo >&2 "[This must be a SPARC machine for the test to work]"
+	exit 1
+fi
+
+clean_dir() {
+	HERE=`pwd`;
+	cd $1
+	for PREFIX in  a  "[b-h]" "[i-n]"  o  "[p-s]" "[t-z]"
+	do 
+		rm -f ${PREFIX}*.o
+	done
+	cd $HERE
+}
+
+START_STEP=0
+OPTLVL=1
+ASOPT=''
+DBG=''
+GIVE_OPTSTATS=true
+DO_DISASSY=${DO_DISASSY-true}
+DISASSY='-S'	# disassembly options
+
+for ARG in $*
+do
+	case $ARG in
+	-save )		SAVE=true ;;
+	-O[A-Z~]* )	ASOPT="${ASOPT} -Qoption as $ARG" ;;
+	-O[0-9]* )	OPTLVL=`expr "$ARG" : '-O\(.*\)'` ;;
+	-debug )	DBG=" -DDEBUG" ;;
+	-nodebug )	DBG="" ;;
+	-optstats )	GIVE_OPTSTATS=true  ;;
+	-nooptstats )	GIVE_OPTSTATS=false ;;
+	-disassy )	DO_DISASSY=true  ; DISASSY='-S' ;;
+	-nodisassy )	DO_DISASSY=false ; DISASSY=''   ;;
+	* )		START_STEP=$ARG ;;
+	esac
+done
+
+OPT="-O${OPTLVL}"
+
+if ${GIVE_OPTSTATS}
+then	ASOPT="${ASOPT} -Qoption as -Os"
+else	ASOPT=""
+fi
+
+echo >&2 "[This test will run for a LONG time; approximately an hour."
+echo >&2 " Detailed results will be left in file TEST_LOG.O${OPTLVL}]"
+
+exec >TEST_LOG.O${OPTLVL} 2>&1
+echo "====================== `date` =========================="
+echo "[$0 $*]"
+echo "[CC=${CC}, V=${V}, OPTLVL=${OPTLVL}, OPT=${OPT}, ASOPT=${ASOPT}]"
+echo "$FABMSG"
+
+set -x
+
+TMP=${TMP-/usr/tmp}
+TESTDIR=${TMP}/as_test
+
+DOT_O_FILES="`/bin/make echo_objs`"
+DOT_S_FILES="`echo ${DOT_O_FILES} | sed -e 's/\.o/.s/g'`"
+
+if [ ${START_STEP} -le 0 ]
+then
+	: STEP 0: setup/cleanup.
+
+	if [ ! -d $TESTDIR ] ; then mkdir $TESTDIR ;  fi
+
+	for DIR in step1 step2 step3
+	do
+		if [ ! -d $TESTDIR/$DIR ] ; then mkdir $TESTDIR/$DIR ; fi
+	done
+
+	if $SAVE
+	then
+		if [ ! -d TEST_SAVE_DIR ] ; then mkdir TEST_SAVE_DIR ; fi
+		mv -f ${DOT_O_FILES} TEST_SAVE_DIR
+		mv -f ${DOT_S_FILES} TEST_SAVE_DIR
+		mv -f      as        TEST_SAVE_DIR
+	fi
+
+	clean_dir .
+fi
+
+if [ ${START_STEP} -le 1 ]
+then
+	: STEP 1: make w/o optimization, using existing assembler.
+	clean_dir $TESTDIR/step1
+
+
+	#1b. do the .s's.
+	if ${DO_DISASSY}
+	then
+		if /bin/make "O=" "DBX=" CC="${CC}${V}" \
+			"CFLAGS=${DISASSY} -pipe -DSUN3OBJ${DBG}${FAB}"  objs \
+		   && \
+		   ${CC} -c -v ${DOT_S_FILES} \
+		   && \
+		   /bin/make "O=" "DBX=" CC="${CC}${V}" \
+			"CFLAGS=-c -pipe -DSUN3OBJ${DBG}${FAB}"  as
+		then	: # all is OK
+		else	echo MAKE FAILED - EXIT. ; exit 1
+		fi
+		mv -f ${DOT_S_FILES} $TESTDIR/step1
+	else
+		#1b. only do the .o's.
+		if /bin/make "O=" "DBX=" CC="${CC}${V}" \
+			"CFLAGS=-c -pipe -DSUN3OBJ${DBG}${FAB}"  as
+		then	: # all is ok
+		else	echo MAKE FAILED - EXIT. ; exit 1
+		fi
+	fi
+	mv -f as $TESTDIR/step1
+	rm -f ${DOT_O_FILES}
+
+	: STEP 1 ENDED.
+fi
+
+if [ ${START_STEP} -le 2 ]
+then
+	: STEP 2: make w/ optimization, using unoptimized assembler from Step 1.
+	clean_dir $TESTDIR/step2
+
+	# 2a: do the .s's
+	if ${DO_DISASSY}
+	then
+		if \
+		   /bin/make "DBX=" "CC=${CC}${V} -Qpath $TESTDIR/step1" \
+		       "CFLAGS=${DISASSY} -pipe -DSUN3OBJ ${OPT}${ASOPT}${DBG}${FAB}" \
+			objs \
+		   && \
+		   ${CC}${V} -Qpath $TESTDIR/step1 -c -v ${DOT_S_FILES} \
+		   && \
+		   /bin/make "DBX=" "CC=${CC}${V} -Qpath $TESTDIR/step1" \
+		       "CFLAGS=-c -pipe -DSUN3OBJ ${OPT}${ASOPT}${DBG}${FAB}" as
+		then	: # all is OK
+		else	echo MAKE FAILED - EXIT. ; exit 1
+		fi
+		mv -f ${DOT_S_FILES} $TESTDIR/step2
+	else
+		# 2b: only make the .o's
+		if /bin/make "DBX=" \
+			"CC=${CC}${V} -Qpath $TESTDIR/step1" \
+			"CFLAGS=-c -pipe -DSUN3OBJ ${OPT}${ASOPT}${DBG}${FAB}" \
+			as
+		then	: # all is ok
+		else	echo MAKE FAILED - EXIT. ; exit 1
+		fi
+	fi
+	mv -f ${DOT_O_FILES} as $TESTDIR/step2
+
+	: STEP 2 ENDED.
+fi
+
+if [ ${START_STEP} -le 3 ]
+then
+	: STEP 3: make with optimization, using optimized assembler from Step 2.
+	clean_dir $TESTDIR/step3
+
+	# 3a: do the .s's
+	if ${DO_DISASSY}
+	then
+		if \
+		   /bin/make "DBX=" "CC=${CC}${V} -Qpath $TESTDIR/step2" \
+		       "CFLAGS=${DISASSY} -pipe -DSUN3OBJ ${OPT}${ASOPT}${DBG}${FAB}" \
+			objs \
+		   && \
+		   ${CC}${V} -Qpath $TESTDIR/step2 -c -v ${DOT_S_FILES} \
+		   && \
+		   /bin/make "DBX=" "CC=${CC}${V} -Qpath $TESTDIR/step2" \
+		       "CFLAGS=-c -pipe -DSUN3OBJ ${OPT}${ASOPT}${DBG}${FAB}" as
+		then	: # all is OK
+		else	echo MAKE FAILED - EXIT. ; exit 1
+		fi
+		mv -f ${DOT_S_FILES} $TESTDIR/step3
+	else
+		# 3b: only make the .o's
+		if /bin/make "DBX=" \
+			"CC=${CC}${V} -Qpath $TESTDIR/step2" \
+			"CFLAGS=-c -pipe -DSUN3OBJ ${OPT}${ASOPT}${DBG}${FAB}" \
+			as
+		then	: # all is ok
+		else	echo MAKE FAILED - EXIT. ; exit 1
+		fi
+	fi
+	mv -f ${DOT_O_FILES} as $TESTDIR/step3
+
+	: STEP 3 ENDED.
+fi
+
+if [ ${START_STEP} -le 4 ]
+then
+	: STEP 4: compare the files.
+	set +x
+
+	: 4a: compare the disassembled sources.
+	if ${DO_DISASSY}
+	then
+		if [ "$DBG" != "" ]
+		then	# Since they have date-stamps in them, the version-files
+			# will not compare equal.
+			rm -f $TESTDIR/step2/version_file.s
+			rm -f $TESTDIR/step3/version_file.s
+		fi
+
+		for f in  ${DOT_S_FILES}
+		do
+			echo $TESTDIR/step{2,3}objs/$f:
+			if cmp $TESTDIR/step2/$f $TESTDIR/step3/$f
+			then	: # they compared equal
+			else	echo "**** FAILURE: FILES $TESTDIR/step{2,3}/$f ARE DIFFERENT!"
+				diff -h $TESTDIR/step2/$f $TESTDIR/step3/$f
+				echo "[files left under $TESTDIR for inspection]"
+				exit 1
+			fi
+		done
+		echo "All .s's compared the same."
+	fi
+
+	: 4b: compare the binaries.
+	set +x
+	for f in  ${DOT_O_FILES}  as
+	do
+		echo $TESTDIR/step{2,3}objs/$f:
+		if cmp $TESTDIR/step2/$f $TESTDIR/step3/$f
+		then	: # they compared equal
+		else	echo "**** FAILURE: FILES $TESTDIR/step{2,3}/$f ARE DIFFERENT!"
+			cmp -l $TESTDIR/step2/$f $TESTDIR/step3/$f |head -4
+			echo "[files left under $TESTDIR for inspection]"
+			exit 1
+		fi
+	done
+	echo "All .o's compared the same."
+
+	echo "****************************************************************"
+	echo "**** RECURSIVE TEST SUCCESS:  FILES ALL COMPARED THE SAME!! ****"
+	echo "****************************************************************"
+
+	: STEP 4 ENDED.
+fi
+
+echo >&2 "****** SUCCESS:  RECURSIVE TEST PASSES."
+
+rm -rf $TESTDIR	# clean up after ourselves.
+
+if $SAVE
+then
+	cd TEST_SAVE_DIR
+	mv -f ${DOT_O_FILES} ..
+	mv -f ${DOT_S_FILES} ..
+	mv -f      as        ..
+	cd ..
+	rmdir TEST_SAVE_DIR
+fi
+
+exit 0

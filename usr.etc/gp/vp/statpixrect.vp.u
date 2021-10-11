@@ -1,0 +1,311 @@
+| @(#)statpixrect.vp.u 1.1 94/10/31 SMI
+| Copyright (c) 1985 by Sun Microsystems, Inc.
+
+#define sy	r[22]
+#define sx	r[21]
+#define nvptr r[17]
+#define temp16 r[16]
+#define TexDepth r[16]	/* depth 0 means no texture. */
+/* Has to be common with polyscan.vp.u */
+#define colorop r[15]
+#define edgtblptr r[14]
+#define nbnds r[13]
+#define nvert r[12]
+#define nedges r[11]
+#define nxtptr r[10]
+#define nxtx r[9]
+#define yoff r[8]
+#define xoff r[7]
+#define curx r[6]
+#define cury r[5]
+#define xpt1 r[4]
+#define ypt1 r[3]
+#define addra r[13]
+#define addrd r[12]
+
+#define numsegs r[3]
+#define numbytes r[0]
+
+#define solid 5
+#define mvlist 9
+
+#define MAXEDGES 400
+
+
+| These routines were moved over to the painting processor's memory bank, due to space considerations on the viewing
+| processor.  
+
+	 	
+org 0x1000
+debug off
+
+
+
+|   Pixinit does alot of the initialization that is common between pr_line, polyline and vec.
+pixinit: movw PPMASK,acc;	=wrfifo_pp->brreg; ;		;			| 
+	;			am->fifo1;	cjs,f1f;	;
+	andw d,cmd,acc;		0xFF->am;	cjs,go;		;
+#ifdef GPPLUS	
+	movw PPSETZBLINE,acc	; ;		;		;		
+	IMM;			am->fifo1;	cjs,f1f;	;		
+	movw 0,y;		am->fifo1;	cjp,f1f .;	;		
+#endif GPPLUS	
+	movw d,acc;		PPSTCLIP->am;	cjs,go;		;
+	add2nw 2,cmdptr,temp16;	am->shmemp;	;		;			| want shmemp to point to rect
+	incw 0, y;		am->fifo1;	cjp,f1f .;	;			| 1 clipping rectangle.
+	;			shmem->fifo1;	cjp,f1f .;	;
+	movw d,r[1];		shmem->am;	;		;		shp+
+	;			shmem->fifo1;	cjp,f1f .;	;			| 
+	movw d,r[2];		shmem->am;	ldct 1;		;		shp+	| 
+	movw d,acc;		shmem->am;	cjs,go;		;		shp+
+	movw d,acc;		shmem->am;	cjp,go;		;		shp+	| return directly from wrfifo_pp
+
+
+|	;			;		jmap prvec_pp; ;			| 
+prvec_pp: ;			;		cjs,go pixinit;	;			| 
+	movw d,acc;		PPVEC->am;	cjs,go;		;			| 
+prvec1:	addw d,r[1],acc;	shmem->am;	cjs,go;		;		shp+
+	addw d,r[2],acc;	shmem->am;	cjs,go;		;		shp+
+	;			;		rpct prvec1;	;
+	addw d,cmdptr,acc;	2->am;		;		;
+	movw acc,y;		am->shmemp;	;		;
+	;			shmem->fifo1;	cjp,f1f .;	;
+	addw d,cmdptr,cmdptr;	12->am;		;		;		shp+
+	;			shmem->fifo1;	cjp,f1f .;	;
+	;			;		jmap getcmd;	;
+
+|	;			;		jmap pr_line_pp; ;			| 
+pr_line_pp: 
+	;			;		cjs,go pixinit;	;			| 
+	movw d,acc;		PPPRLINE->am;	cjs,go;		;			| pr_line pp command
+prtvec1:addw d,r[1],acc;	shmem->am;	cjs,go;		;		shp+
+	addw d,r[2],acc;	shmem->am;	cjs,go;		;		shp+
+	;			;		rpct prtvec1;	;			| 
+	movw d,acc;		shmem->am;	cjs,go;		;		shp+	| width->fifo1
+	compw 0,numbytes;	shmem->am;	;		;		shp+	| first pattern segment from shmem
+prtpat:	movw,s d,y;		am->fifo1;	cjp,f1f .;	;			| first segment->fifo1
+	incw numbytes,numbytes;	shmem->am;	cjp,zer prtsol;	;		shp+	| jump if solid vector (1st seg 0).
+prtpatlp: movw,s d,y;		am->fifo1;	cjp,f1f .;	;			| continue writing segments
+	incw numbytes,numbytes;	shmem->am;	cjp,~zer prtpatlp; ;		shp+	| loop until pattern ends.
+	movw d,acc;		;		cjs,go;		;			| starting offset->fifo1
+	movw d,acc;		shmem->am;	cjs,go;		;			| options->fifo1
+prtbyt:	add2nw 1,cmdptr,temp16;	am->shmemp;	;		;			| shmemp points to op (cmdptr+2)
+	;			shmem->fifo1;	cjp,f1f .;	;			| op->fifo1
+	add2nw 4,numbytes;	am->am;		;		;		shp+	| numsegs+numbytes+1->cmdptr
+	;			shmem->fifo1;	cjp,f1f .;	;			| color->fifo1
+	addw d,cmdptr,cmdptr;	;		jmap getcmd;	;			| 
+
+prtsol:	mov2nw solid,y;		am->fifo1;	cjp, f1f .;	;			| options(solidvec)->fifo1
+	sub2nw 1,numbytes;	;		cjp, go prtbyt;	;			| solid,cmdptr+=14(nb = -2)
+
+
+|	;			;		jmap pr_polyline_pp; ;			| 
+pr_polyline_pp:
+	;			;		cjs,go pixinit;	;			| 
+	movw d,acc;		PPPRPOLYLINE->am; cjs,go;	;			| polyline pp command->fifo1
+	movw d,acc;		shmem->am;	cjs,go;		;		shp+	| xoff->fifo1
+	movw d,acc;		shmem->am;	cjs,go;		;		shp+	| yoff->fifo1
+	movw d,acc;		shmem->am;	cjs,go;		;		shp+	| width->fifo1
+	incw 0,numsegs;		shmem->am;	;		;		shp+	| first pattern segment from shmem
+	movw,s d,y;		am->fifo1;	cjp,f1f .;	;			| first segment->fifo1
+	movw d,r[4];		shmem->am;	cjp,zer prpsol;	;		shp+	| jump if solid (just pulled options)
+prppatlp: movw,s d,y;		am->fifo1;	cjp,f1f .;	;			| first segment->fifo1
+	incw numsegs,numsegs;	shmem->am;	cjp,~zer prppatlp; ;		shp+	| increment count, pull next seg
+prpoff:	movw d,y;		am->fifo1;	cjp,f1f .;	;			| starting offset->fifo1
+	movw,s d,r[4];		shmem->am;	;		;		shp+	| options->r[4]
+	bclrw solid,d,y;	am->fifo1;	cjp,f1f .;	;			| options->fifo1 (clear solid bit)
+	add2nw 1,cmdptr,temp16;	am->shmemp;	;		;			| load shmemp with op address
+prpbyt:	;			shmem->fifo1;	cjp,f1f .;	;			| op->fifo1
+	addw d,numsegs,acc;	13->am;		;		;		shp+	| add pattern length + # bytes sent.
+	;			shmem->fifo1;	cjp,f1f .;	;			| color->fifo1
+	addw cmdptr,acc,cmdptr;	am->shmemp;	;		;			| sum->cmdptr & shmemp to fetch nbytes
+	movw d,r[3];		shmem->am;	;		;		shp+	| npts->r[3] & d-latch
+	movw d,y;		am->fifo1;	cjp,f1f .;	;			| npts->fifo1 
+	btstw,s mvlist,r[4];	;		;		;			| test if mvlist exists
+	sub2nw 0,r[3],r[3];	am->brreg;	cjp,~zer prpmv;	;			| npts-1->brreg, npts->r[3], cjp mvlist
+	incw r[3],r[3];		;		ldct;		;			| npts->r[3]
+prpptlp: addw d,r[1],acc;	shmem->am;	;		;		shp+	| x+offset->acc
+	movw acc,y;		am->fifo1;	cjp,f1f .;	;			| x->fifo1
+	addw d,r[2],acc;	shmem->am;	;		;		shp+	| y+offset->acc
+	movw acc,y;		am->fifo1;	cjp,f1f .;	;			| y->fifo1
+	;			;		rpct prpptlp;	;			| loop until zero
+	sl1w r[3],r[3];		am->am;		cjp,go prpend;	;			| npts*2+1->d-latch (1->fetching npts)
+prpmv:	incw r[3],r[3];		;		ldct;		;			| npts-1->brreg, npts->r[3]
+prpmvlp: addw d,r[1],acc;	shmem->am;	;		;		shp+	| x+offset->acc
+	movw acc,y;		am->fifo1;	cjp,f1f .;	;			| x->fifo1
+	addw d,r[2],acc;	shmem->am;	;		;		shp+	| y+offset->acc
+	movw acc,y;		am->fifo1;	cjp,f1f .;	;			| y->fifo1
+	;			shmem->fifo1;	cjp,f1f .;	;			| mvlist->fifo1
+	movw r[3],acc;		;		rpct prpmvlp;	;		shp+	| loop until zero
+	sl1w r[3],r[3];		;		;		;			| npts*2+1->r[3] (1->fetching npts)
+	addw r[3],acc,acc;	am->am;		;		;			| npts*3+1->d-latch
+	
+prpend:	addw d,cmdptr,cmdptr;	;		jmap getcmd;	;			| update cmdptr for next fetch
+
+prpsol:	movw 0,numsegs;		am->fifo1;	cjp,f1f .;	;			| dummy stoff->fifo1
+	bsetw solid,r[4];	am->fifo1;	cjp,f1f .;	;			| options->fifo1 (solid bit set)
+	add2nw 1,cmdptr,temp16;	am->shmemp;	cjp,go prpbyt;	;			| 
+	
+
+|	movw 0, TexDepth;	;		jmap PRPOLYSOL1_PP; ;			| Solid => no texture.
+PRPOLYSOL1_PP:
+	movw PPMASK,acc;	=wrfifo_pp->brreg; ;		;			| put wrfifo_pp address in brreg and
+	;			am->fifo1;	cjs,f1f;	;			| send PPMASK cmd to PP
+	andw d,cmd,acc;		0xFF->am;	cjs,go;		;			| send bit plane mask to PP
+	movw d,colorop;		shmem->am;	;		;		shp+	| save color and op for later
+	movw d,acc;		PPSTCLIP->am;	cjs,go;		;			| now send clipping list
+	incw 0, y;		am->fifo1;	cjp,f1f .;	;			| 1 clipping rectangle.
+	movw d,xoff;		shmem->am;	;		;		shp+	| save dst pixrect x offset and send to PP
+	movw xoff,y;		am->fifo1;	cjp,f1f .;	;
+	movw d,yoff;		shmem->am;	ldct 1;		;		shp+	| save dst pixrect y offset and send to PP
+	movw yoff,y;		am->fifo1;	cjp,f1f .;	;
+	movw d,acc;		shmem->am;	cjs,go;		;		shp+	| send dst pixrect x size
+	movw d,acc;		shmem->am;	cjs,go;		;		shp+	| send dst pixrect y size
+	movw,s TexDepth, y;	;		;		;			| 
+	addw d,xoff,xoff;	shmem->am;	cjp, zer .+2;	;		shp+	| add dx to dst pixrect x offset
+	subw d, sx, sx;		;		;		;			| sub dx since vertices will include it.
+	addw d,yoff,yoff;	shmem->am;	cjp, zer .+2;	;		shp+	| add dy to dst pixrect y offset
+	subw d, sy, sy;		;		;		;			| 
+											| now have physical device coord offsets
+											| for polygon vertices
+	addw d,cmdptr,nvptr;	10->am;		;		;			| nvptr pts to vector of npts per boundary
+	addw d,nvptr,cmdptr;	shmem->am;	;		;			| cmdptr now points to first vertex
+	movw d,nbnds;		;		;		;		shp+	| # of separate boundaries
+#ifndef GPPLUS
+	sub2nw 0,nvptr;		;		;		;			| decrement nvptr because increment below
+#else GPPLUS
+	sub2nw 0,nvptr;		;		push,~go;	;			| decrement nvptr because increment below
+|   Turn picking *off* for pixrect polygons.	
+	;			PPSETPICKMODE->fifo1; loop,f1nf; ;		
+	movw 0,y;		am->fifo1;	cjp,f1f .;	;			| 0 -> fifo1 (says picking is off)
+	
+#endif GPPLUS
+										|
+										| edge structure is:
+										| fpreg[edgptr+0]: ymin    16-bit int in high word
+										|		   X       don't care in low word
+										| fpreg[edgptr+1]: ymax    16-bit int in high word
+										|		   X       don't care in low word
+										| fpreg[edgptr+2]: xmax    32-bit float
+										| fpreg[edgptr+3]: xmin    32-bit float
+										| fpreg[edgptr+4]: X       don't care in high word
+										|		   nxt     11-bit ptr in low word
+										|
+	movw d,nedges;		MAXEDGES->am;	;		;			| nedges<-MAXEDGES
+	mov2nw 4,edgtblptr;	;		;		;			| edgtblptr<-16
+	add2nw 2,edgtblptr,nxtptr; am->fpdp;	;		;			| fpdp<-&et[0].nxt
+	incw nxtptr,nxtptr;	am->fpregl;	;		;		dp+	| nxtptr<-21; et[0].nxt<-nxtptr; nxtptr of
+											| dummy first edge
+nxtbnd:	sub2nw,s 0,nbnds,nbnds;	;		;		;			| if ((nbnds -= 1)<0), goto doscan
+	incw nvptr,nvptr;	am->shmemp;	cjp,neg doscan_pp; ;			| else get # of vertices for next
+	movw d,nvert;		shmem->am;	;		;			| boundary
+	sl0w d,acc;		;		;		;			| acc <- nvert*2
+	subw,s d,nvert,y;	3->am;		;		;			| if 0 <= nvert < 3, not a good boundary
+	movw cmdptr,y;		am->shmemp;	;		;			| shmemp pts to vertices;update cmdptr to
+	addw cmdptr,acc,cmdptr;	;		cjp,~cry nxtbnd;;			| point to 1st loc after bndry's vertices
+	addw d,xoff,acc;	shmem->am;	;		;		shp+
+	movw acc,curx;		shmem->am;	;		;		shp+	| curx <- pt.x + xoff
+	movw curx,xpt1;		;		;		;			| remember x coord of 1st bndry pt
+	addw d,yoff,cury;	;		;		;			| cury <- pt.y + yoff
+	movw cury,ypt1;		;		;		;			| remember y coord of 1st bndry pt
+nxtvrt:	sub2nw,s 0,nvert,nvert;	;		;		;			| if ((nvert -= 1)==0), goto endbnd
+	movw d,nxtx;		shmem->am;	cjp,zer endbnd;	;		shp+	| nxtx <- pt.x
+	addw d,yoff,acc;	shmem->am;	;		;		shp+	| acc <- pt.y + yoff
+	xorw,s cury,acc,y;	;		;		;			| check for horizontal edge (cury==acc)
+	movw xoff,y;		am->am;		cjp,~zer .+2;	;			| d <- xoff
+	addw d,nxtx,curx;	;		cjp,go nxtvrt;	;			| if horiz, curx<-nxtx+xoff & goto nxtvrt
+	movw cury,y;		am->fpregh;	;		;		dp+	| fpreg[edgptr+0,high] <- cury
+	movw acc,cury;		am->fpregh;	;		;		dp+	| fpreg[edgptr+1,high] <- cury <- new y
+	addw,s d,nxtx,acc;	am->fpregl;	;		;			| fpreg[edgptr+2,low]<-acc<-(nxtx+xoff)
+	movw,s curx,y;		;		cjp,neg .+2;	;			| arrange sign extension bits in high word
+	movw 0,y;		am->fpregh;	cjp,go .+2;	;		dp+	| positive sign for (nxtx+xoff)
+	;			0xFFFF->fpregh;	;		;		dp+	| negative sign for (nxtx+xoff)
+	movw curx,y;		am->fpregl;	cjp,neg .+2;	;			| fpreg[edgptr+3,low] <- curx
+	movw 0,y;		am->fpregh;	cjp,go .+2;	;		dp+	| positive sign for curx
+	;			0xFFFF->fpregh;	;		;		dp+	| negative sign for curx
+	sub2nw,s 0,nedges,nedges;;		;		;			| nedges-=1
+	movw acc,curx;		5->am;		;		;			| curx <- (nxtx+xoff)
+	addw d,nxtptr,nxtptr;	am->fpregl;	cjp,~neg nxtvrt;;		dp+	| fpreg[edgptr+4,low]<-nxtptr<-address of
+											| next edge;if edgtbl not full,goto nxtvrt
+	compw 0,nedges;		;		cjp,go nxtvrt;	;			| else nedges <- -1 and goto nxtvrt
+											| last point in boundary
+endbnd:	movw cury,acc;		am->fpregh;	;		;		dp+	| fpreg[edgptr+0,high] <- cury
+	xorw,s ypt1,acc,y;	;		;		;			| check for horizontal edge (cury==ypt1)
+	movw ypt1,y;		am->fpregh;	cjp,~zer .+2;	;		dp+	| fpreg[edgptr+1,high] <- ypt1
+	movw nxtptr,y;		am->fpdp;	cjp,go nxtbnd;	;			| if horiz, reload fpdp and goto nxtbnd
+	movw,s xpt1,y;		am->fpregl;	;		;			| fpreg[edgptr+2,low]<-xpt1
+	movw,s curx,y;	;			cjp,neg .+2;	;			| arrange sign extension bits in high word
+	movw 0,y;		am->fpregh;	cjp,go .+2;	;		dp+	| positive sign for xpt1
+	;			0xFFFF->fpregh;	;		;		dp+	| negative sign for xpt1
+	movw curx,y;		am->fpregl;	cjp,neg .+2;	;			| fpreg[edgptr+3,low] <- curx
+	movw 0,y;		am->fpregh;	cjp,go .+2;	;		dp+	| positive sign for curx
+	;			0xFFFF->fpregh;	;		;		dp+	| negative sign for curx
+	sub2nw,s 0,nedges,nedges; 5->am;	;		;			| nedges-=1
+	addw d,nxtptr,nxtptr;	am->fpregl;	cjp,~neg nxtbnd;;		dp+	| fpreg[edgptr+4,low]<-nxtptr<-address of
+											| next edge;if edgtbl not full,goto nxtbnd
+	compw 0,nedges;		;		cjp,go nxtbnd;	;			| else nedges <- -1 and goto nxtbnd
+
+#ifndef GPPLUS
+doscan_pp: ;			;		jmap doscan;	;			| scan convert on vp bank
+
+#else GPPLUS
+doscan_pp: sub2nw 0,nxtptr,nxtptr; am->fpdp;	;		lmode rn,ai,pipe,fast;	| set Weitek mode
+	movw,s nedges,y;	0->fpregl;	;		;			| load NULL nxtptr for last edge
+	subw,s nedges,MAXEDGES,nedges; ;	cjp,neg noscan_pp; ;			| if # of edges > MAXEDGES, goto noscan
+	IMM;			23->am;		;		;			| compute real # of edges
+	movw d,addra;		am->fpap;	cjp,zer noscan_pp; ;			| if # of edges == 0, goto noscan
+	movw 5,acc;		;		;		floata,la,hi;		| convert xmin and xmax in each edge
+	IMM;			;		;		;		ap+	| structure to floats; start at xmax of
+	movw addra,addrd;	am->fpdp;	;		floata,la,hi;		| first real edge (address 23)
+	addw addra,acc,addra;	am->fpap;	;		;
+	movw =fltloop_pp,y;	;		;		floata,la,hi;
+	IMM;			am->brreg;	;		;		ap+
+	;			;		ldct;		floata,la,hi;		| 2910 R reg is fltloop_pp
+	addw addra,acc,addra;	am->fpap;	;		;
+	movw =doscan1_pp,y;	;		;		floata,la,a,hi;
+	IMM;			am->brreg;	;		;		ap+	| brreg is doscan1_pp; pipe now full
+fltloop_pp: sub2nw,s 0,nedges,nedges;;		;		floata,la,a,st,hi;	| store xmax
+	addw addra,acc,addra;	am->fpap;	;		;		dp+	| reload fpap, increment fpdp
+	;			;		;		floata,la,a,st,hi;	| store xmin
+	addw addrd,acc,addrd;	am->fpdp;	jrp,zer;	;		ap+	| reload fpdp, increment fpap; loop until
+											| all edges are done
+doscan1_pp: ;			;		cjp, go polyscan; ;			| call scan conversion routine on *this* bank
+noscan_pp: ;			;		jmap getcmd;	;			| 
+#endif GPPLUS
+
+
+
+wrfifo_pp: movw acc,y;		am->fifo1;	crtn,f1nf;	;			| 
+	;			;		cjp,go wrfifo_pp; ;			| 
+
+
+#undef sx
+#undef sy
+#undef nvptr
+#undef temp16
+#undef TexDepth
+#undef temp16
+#undef colorop
+#undef edgtblptr
+#undef nbnds
+#undef nvert
+#undef nedges
+#undef nxtptr
+#undef nxtx
+#undef yoff
+#undef xoff
+#undef curx
+#undef cury
+#undef xpt1
+#undef ypt1
+#undef addra
+#undef addrd
+
+#undef MAXEDGES
+
+#undef numsegs
+#undef numbytes
+
+#undef solid
+#undef mvlist
+

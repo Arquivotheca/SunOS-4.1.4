@@ -1,0 +1,159 @@
+| "@(#)clipoff.pp.u 1.1 94/10/31"
+
+| Copyright 1986 by Sun Microsystems, Inc.
+| Written by Stuart Levy
+
+|   Expects the following registers to be loaded:
+|   		dx,dy,options.
+|   Expects the following scratchpad memory locations to be loaded:
+|   		stoff,patln,numsegs
+|   Loads the following scratchpad memory locations for future use:
+|   		polyoff,oldpatln,fatoff.
+
+|   The options field is broken down as follows:
+|  	 bit 15 - startpt	bit 14 - endpt		bit 13 - balancing	bit 12 - givenpattern
+|  	 bit 11 - fat		bit 10 - poly		bit 9 - mvlist		bit 8 - righthalf
+|   	 bit 7 - close		bit 6 - cliprt		bit 5 - solid		bit 4 - pixrect
+|   	 bit 3 - nosetup	bit 2 - clipbit		bit 1 - firstvec
+
+#define minax		r[3]
+#define majax 		r[4]
+#define segaddr		r[6]
+#define options		r[7]
+#define stoff		r[8]
+#define polyoff		r[9]
+#define patln		r[10]
+#define dy		r[10]
+#define dx		r[11]
+#define numsegs		r[15]
+
+#define dvsr		acc
+#define result		r[0]
+#define dvdnd		r[0]
+#define modoff		r[1]
+#define himult		r[1]
+#define lomult		r[2]
+#define quot		r[2]
+
+#define pick		0
+#define pixrect		4
+#define right		8
+#define poly		10
+#define fat		11
+#define givenpat	12
+#define endpt		14
+#define startpt		15
+
+#define savstoff	0x120
+#define savpatln	0x121
+#define savnumsegs	0x122
+#define savoldpatln	0x131
+#define savfatoff	0x132
+#define savpolyoff	0x133
+
+clipoff: movw r[24],y;		am->am;		;				| Options arrives in r[24].
+	movw d,options;		;		;				| 
+	movw dx,acc;		;		;				| 
+	subw,s dy,acc,y;	;		;				| X is majax if (dx-dy) >= 0.
+clxmaj:	btstw,s fat,options;	;		cjp, neg clymaj;		| Preparation for clipcomp.
+	negw dx,majax;		savstoff->scrmemp; ;				| majax = -dx.
+	movw dy,minax;		;		cjp, go clcomp2;		| 
+clymaj: negw dy,majax;		savstoff->scrmemp; ;				| majax = -dy.
+	movw dx,minax;		;		cjp, go clcomp2;		| 
+
+clipcomp: btstw,s fat,options;	savstoff->scrmemp; ;				| Test if fat (no < correction nec).
+clcomp2: movw d,stoff;		scrmem->am;	cjp, ~zer clofat;	scrmp+	| Restore stoff, jump if fat vector..
+	movw d,patln;		scrmem->am;	;			scrmp+	| Restore patln. 
+	btstw,s pixrect,options; =clltst->brreg; ;				| Check if called from pixrects.
+	movw d,numsegs;		scrmem->am;	cjp, zer clxf;			| Restore numsegs. Jump if not pixrect.
+	movw d,segaddr;		0x150->am;	cjp, go;			| Store address of xform pattern.
+clxf:	movw d,segaddr;		0x600->am;	;				| Store address of pixrect pattern.
+clltst:	btstw,s right,options;	;		;				| Test if should write pattern backwards.
+	sub2nw 0,numsegs,r[0];	;		cjp, ~zer cplytst;		| Write in pattern reversed if on left side.
+clolft:	addw d,r[0],segaddr;	am->scrmemp;	;				| LEFT SIDE. segaddr += numsegs - 1.
+	btstw,s startpt,options; ;		;				| Swapping start & end pts if on left.
+	btstw,s endpt,options;	;		cjp, zer clftns;		| Jump if no startpoint.
+	bsetw endpt,options;	;		cjp, go clftb1;			| Set endpoint, jump to next bit.
+clftns:	bclrw endpt,options;	;		;				| Clear endpoint field.
+clftb1:	bclrw startpt,options;	;		cjp, zer cplytst;		| Clear startpoint.
+	bsetw startpt,options;	;		;				| Set startpoint.
+
+cplytst: btstw,s poly,options;	savpolyoff->scrmemp; ;				| Test if polyline.
+	testw (dx);		scrmem->am;	cjp, zer clonp;			| Jump if not polyline.
+	movw d,stoff;		savfatoff->scrmemp; ;				| stoff = polyoff.
+	movw stoff,y;		am->scrmem;	cjp, go cloang2;		| tex->fatoff = stoff = polyoff.
+clonp:	;			savoldpatln->scrmemp; ;				| Is not a polyline.
+	movw patln,y;		am->scrmem;	;			scrmp+	| oldpatln = patln.
+cloang:	movw stoff,y;		am->scrmem;	;				| tex->fatoff = stoff.
+cloang2: testw (dy);		;		cjp, zer coffstart;		| 
+	btstw,s givenpat,options; ;		cjp, zer coffstart;		| Test givenpattern field.
+closet:	btstw,s pixrect,options; ;		cjs, zer setinit;		| Call setpat if necessary.
+
+coffstart: negw majax,dvdnd;	savoldpatln->scrmemp; ;				| Move (majax+1) -> dividend.
+	movw patln,dvsr;	am->scrmem;	;			scrmp+	| patln->dvsr & oldpatln = patln (corr).
+	movw stoff,y;		am->scrmem;	;				| tex->fatoff = stoff (corr).
+	incw dvdnd,dvdnd;	;		cjs, go divide;			| 
+	btstw,s right,options;	savpolyoff->scrmemp; ;				| This is testing if on right side.
+	addw stoff,acc,modoff;	am->am;		cjp, ~zer coffrt;		| modoff = mod + stoff.
+cofflft: incw modoff,polyoff;	am->am;		cjp, go .+2;			| LEFT SIDE. polyoff = modoff + 1.
+coffrt:	decw modoff,polyoff;	am->am;		;				| RIGHT SIDE.  polyoff = modoff - 1.
+	rsubw,s d,patln,y;	;		;				| 
+#ifndef GPPLUS
+	movw,s polyoff,acc;	am->scrmem;	cjp, neg treset;		| Jump if (polyoff < patln).
+#else GPPLUS
+	movw,s polyoff,acc;	am->scrmem;	cjp, neg coend;			| Jump if (polyoff < patln).
+#endif GPPLUS
+	subw,s patln,acc,acc;	;		cjp, ~neg .;			| Loop until polyoff < patln.
+	addw patln,acc,acc;	;		;				| This gets done twice more than it should.
+#ifndef GPPLUS
+	addw patln,acc,polyoff;	am->scrmem;	cjp, go treset;			| Store polyoff in scrmem & return.
+#else GPPLUS
+	btstw,s pixrect,options; ;		;				| 
+	addw patln,acc,polyoff;	am->scrmem;	crtn,~zer;			| Store polyoff in scrmem & return if not xf_line
+	btstw,s pick,options;	;		cjp,go coend2;			| 
+coend:	btstw,s pixrect,options; ;		;				| 
+	btstw,s pick,options;	;		crtn,~zer;			| 
+coend2:	;			;		cjp,zer treset;			| 
+	;			;		crtn,go;			| 
+#endif GPPLUS
+
+|   Note that for fat vectors, you don't need numsegs restored.
+clofat: ;			savoldpatln->scrmemp; ;				| 
+	movw d,patln;		scrmem->am;	;			scrmp+	| patln = oldpatln.
+	movw d,stoff;		scrmem->am;	cjp, go coffstart;		| stoff = tex->fat_off.
+
+
+#undef minax
+#undef majax 	
+#undef segaddr
+#undef options	
+#undef stoff	
+#undef patln	
+#undef dx
+#undef dy
+#undef numsegs
+	
+#undef dvsr	
+#undef result	
+#undef dvdnd	
+#undef modoff
+#undef himult	
+#undef lomult	
+#undef quot	
+#undef polyoff	
+
+#undef pick
+#undef pixrect
+#undef right
+#undef poly
+#undef fat
+#undef givenpat
+#undef endpt
+#undef startpt
+
+#undef savstoff	
+#undef savpatln
+#undef savnumsegs
+#undef savoldpatln	
+#undef savfatoff
+#undef savpolyoff

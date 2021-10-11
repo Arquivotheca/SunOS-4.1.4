@@ -1,0 +1,310 @@
+This is a first cut at explaining the rules for working in
+krypton:/usr/src and the guidelines for source code at Sun.
+This is an attempt to explain "the way things are", not justify
+"the way things should be".  Comments on the former are welcome.
+
+1.  Organization of /usr/src
+
+	/usr/src is organized into subdirectories that parallel the
+places in the released system where the program resides.  For example,
+a program that resides in /bin will have its source kept in /usr/src/bin.
+Many of the larger programs will have their source kept in subdirectories
+with the same name as the program (e.g. source for /bin/sh is found in
+/usr/src/bin/sh).
+
+	The directories in /usr usually have the source for their
+programs stored in subdirectories of /usr/src with the "usr" dropped.
+For example, source for programs in /usr/ucb is found in /usr/src/ucb.
+However, directories that occur in both "/" and "/usr" have their /usr
+versions in directories prefixed with "usr." (e.g. source for programs
+in /usr/bin is found in /usr/src/usr.bin).  This is somewhat confusing
+and may change.
+
+	There is a special subdirectory of /usr/src that contains a
+directory hierarchy similar to that found under /usr/src.  This directory,
+/usr/src/sun, contains source programs that are Sun-specific, such as
+the window system and diagnostics.
+
+	Here's an index into /usr/src as of today:
+
+	directory		contains source for
+	---------		-------------------
+	/usr/src/adm		/usr/adm
+	/usr/src/bin		/bin
+	/usr/src/etc		/etc
+	/usr/src/files		various files in / (/.login, etc.)
+	/usr/src/games		/usr/games
+	/usr/src/include	/usr/include
+	/usr/src/lib		/lib
+	/usr/src/man		/usr/man
+	/usr/src/pub		/usr/pub
+	/usr/src/sccs		/usr/sccs
+	/usr/src/sun		Sun specfic source, see below
+	/usr/src/ucb		/usr/ucb
+	/usr/src/usr.bin	/usr/bin
+	/usr/src/usr.etc	/usr/etc
+	/usr/src/usr.lib	/usr/lib
+
+	/usr/src/sun/bin	/bin
+	/usr/src/sun/demo	/usr/demo
+	/usr/src/sun/doc	/usr/doc (not currently distributed on tape)
+	/usr/src/sun/etc	/etc
+	/usr/src/sun/lib	/lib
+	/usr/src/sun/mon	the PROM monitor
+	/usr/src/sun/stand	/stand (diagnostics)
+	/usr/src/sun/suntool	/usr/suntool (the window system)
+	/usr/src/sun/sys	the kernel
+	/usr/src/sun/ucb	/usr/ucb
+	/usr/src/sun/usr.bin	/usr/bin
+	/usr/src/sun/usr.lib	/usr/lib
+
+	Note that this organization is not complete or perfect but it
+should help you determine where to look for (or put) source code.
+
+2.  Modes, owners
+
+	All directories should be mode 775, in group staff.  Anyone
+working in /usr/src will need to be in group staff and should set their
+umask to 2 while working there.  This is usually done by adding the line
+"umask 2" to your .login file.  This allows other people in group staff
+to make and modify any source in /usr/src (as restricted by SCCS, of
+course).  Everyone in "Software" should be in group staff (group 10 in
+the passwd file).  Others who need to work in /usr/src (NOT just look
+at it) should be added to group staff by changing the /etc/group file,
+not by changing their group in the passwd file.
+
+	Note: you should NEVER work in /usr/src while running as root!
+Running as root tends to mess up modes and ownerships on files and mask
+other problems since root has access to everything.  You should almost
+never need to run as root to do normal work.  If you feel you do need
+to run as root then something is wrong.  Tell me and we will try to find
+a way for you to do your work without running as root.
+
+3.  Makefiles
+
+	Each major directory should contain a Makefile.  The Makefile
+should be under SCCS control (see below).  The Makefile should support
+at least the following invocations:
+
+	make		make everything
+	make clean	remove everything that can be remade with "make",
+			as well as any "tmp" files and other common junk
+			(e.g. a.out, core, errs, etc.)
+	make install	install the program(s) in the appropriate
+			directory(s) after making them if necessary
+
+The "make install" command should use the DESTDIR variable in the
+Makefile as a prefix to the directory in which the program will be
+installed.  "Make install" should also make any directories that are
+specific to the program being installed.  See existing Makefiles for
+examples.
+
+	When adding a new program or program subdirectory, upper
+level Makefiles will have to be modified.  The Makefile should recurse
+to handle any subdirectories, as necessary.  Again, see existing Makefiles
+for examples.
+
+4.  SCCS
+
+	All source in /usr/src should be under SCCS control.  This
+includes all language source files, header files, shell files,
+Makefiles, and any related files or programs used to make a program.
+After "make clean" everything left should be under SCCS control.
+Everything under SCCS control should have one of the following
+canonical headers as the first thing in the file.  For source imported
+from Berkeley the X's in the "from UCB" clauses should be filled in
+with the SCCS information from the Berkeley source.  The Berkeley SCCS
+lines should be removed.  For source written at Sun the "from UCB"
+clauses can be removed.  For source written in languages other than
+those represented below, one of the existing headers should be
+adapted.
+
+==> for C programs <==
+#ifndef lint
+static	char sccsid[] = "@(#)RULES 1.1 94/10/31 SMI"; /* from UCB X.X XX/XX/XX */
+#endif
+
+==> for Copyrighted C programs <==
+#ifndef lint
+static	char sccsid[] = "@(#)RULES 1.1 94/10/31 Copyr 1983 Sun Micro";
+#endif
+
+/*
+ * Copyright (c) 1983 by Sun Microsystems, Inc.
+ */
+
+
+==> for header files <==
+/*	@(#)RULES 1.1 94/10/31 SMI; from UCB X.X XX/XX/XX	*/
+
+
+==> for Copyrighted header files <==
+/*	@(#)RULES 1.1 94/10/31 SMI	*/
+
+/*
+ * Copyright (c) 1983 by Sun Microsystems, Inc.
+ */
+
+
+==> for Makefiles <==
+#
+# @(#)RULES 1.1 94/10/31 SMI; from UCB X.X XX/XX/XX
+#
+
+==> for sh files <==
+#! /bin/sh
+#
+# @(#)RULES 1.1 94/10/31 SMI; from UCB X.X XX/XX/XX
+#
+
+==> for csh files <==
+#! /bin/csh
+#
+# @(#)RULES 1.1 94/10/31 SMI; from UCB X.X XX/XX/XX
+#
+
+==> for manual pages <==
+.\" @(#)RULES 1.1 94/10/31 SMI; from UCB 4.2
+
+==> for assembler files <==
+	.data
+	.asciz	"@(#)RULES 1.1 94/10/31 SMI"	| from UCB X.X XX/XX/XX
+	.even
+	.text
+
+==> for Copyrighted assembler files <==
+	.data
+	.asciz	"@(#)RULES 1.1 94/10/31 Copyr 1983 Sun Micro"
+	.even
+	.text
+
+|	Copyright (c) 1983 by Sun Microsystems, Inc.
+
+	There are two aliases commonly used to make dealing with SCCS
+as simple as possible.  They are call "ci" (check in) and "co" (check out)
+and have the following definitions:
+
+	alias ci sccs delget
+	alias co sccs edit
+
+Check out is used to retrieve a copy of a file that you can edit (e.g.
+co file.c).  Check in is used to put a changed file back in to SCCS
+(don't forget to enter meaningful comments!).  See the SCCS manuals
+for more details.
+
+
+5.  Hacking
+
+	When making simple changes to programs it may be easiest to
+actually make the change on krypton.  In most cases the change should
+be done elsewhere.  There are several techniques for doing this but
+one important fact should be remembered - krypton is THE master source.
+
+	One way to make changes to a program is to "check out" the file
+or files and copy them to your machine.  You can then make the changes
+and test them on your machine and copy the new version back to krypton.
+This makes sure no one else will try to change the file while you are
+changing it.  It also means no one else can fix bugs while you are making
+changes.  This method is most appropriate if the changes can be made in
+a relatively short amount of time or if it is very unlikely that anyone
+else will need to change the file while you have it checked out.
+
+	The second method is to take an entire copy of the program and
+all related files and SCCS files using rcp or (preferably) tar.  You can
+then check out the files on your own machine and make the changes there.
+This allows you to make large changes that may take a long time without
+impacting other people's use of the program involved.  After making the
+changes you will have to merge your changes back into the master version
+on krypton.  This can be painful if many people are actively working on
+a program but fortunately that is usually not the case.  Note that you
+CAN NOT blindly replace the source on krypton with your source, you must
+check out the source on krypton, diff it with your new version, and merge
+in the changes.  If you can be sure that no one has changed the source
+since you took your copy, the diffing and merging can go quite quickly.
+Saving a time stamp (date >stamp.me) and using "find -newer stamp.me"
+can be helpful.
+
+	If you take serious policy related action, or create some
+oddball situation, you should record it in the file /usr/src/INTENTS.
+
+6.  Authority/Resposibility
+
+	There is currently no well defined notion of who has authority
+to do what or who is responsible for what.  This should be given some
+thought for the future.  Currently there are people "in charge" of
+various parts of the system.  Following is my first cut at a list of
+who's in charge of what.  Please send me any corrections or (especially)
+additions.  When dealing with code that someone else is in charge of,
+please work through that person to have them make the change or give
+you permission to make the change.  When working in code that no one
+is really in charge of, please tell me what you did or what you want
+to do.
+
+	alastair	/usr/src/usr.bin/f77
+	alastair	/usr/src/usr.lib/libF77
+	alastair	/usr/src/usr.lib/libI77
+	alastair	/usr/src/usr.lib/libU77
+	alison		/usr/src/man
+	alison		/usr/src/sun/doc
+	bove		/usr/src/sun/stand
+	evan		/usr/src/sun/ucb/pascal
+	evan		/usr/src/sun/usr.lib/libpc
+	gnu		/usr/src/sun/mon
+	gnu		/usr/src/usr.lib/sendmail
+	jevans		/usr/src/sun/usr.lib/libcore77
+	marty		/usr/src/sun/demo
+	rt		/usr/src/bin/cc.c
+	rt		/usr/src/bin/ld.c
+	rt		/usr/src/lib/cpp
+	rt		/usr/src/lib/libc
+	rt		/usr/src/sun/bin/adb
+	rt		/usr/src/sun/bin/as
+	rt		/usr/src/sun/lib/c2
+	rt		/usr/src/sun/lib/mip
+	rt		/usr/src/sun/lib/pcc
+	rt		/usr/src/sun/usr.lib/libg
+	rt		/usr/src/ucb/gprof
+	rt		/usr/src/usr.bin/prof
+	sevans		/usr/src/sun/suntool
+	sevans		/usr/src/sun/usr.lib/libpixrect
+	sevans		/usr/src/sun/usr.lib/libsuntool
+	sevans		/usr/src/sun/usr.lib/libsunwindow
+	shannon		/usr/src
+	shannon		/usr/src/sun/sys
+	shantz		/usr/src/sun/usr.lib/libcore
+	wendy		/usr/src/sun/ucb/dbx
+
+7.  Releases
+
+	This is another area that is not well defined.  Let me try to
+describe briefly the way things work today.  First we pick a date for
+the release.  Sometime before this date the code is "frozen" on krypton.
+This implies that by the freeze date all code must be on krypton, checked
+in, and tested.  After the freeze date NO changes should be made without
+first informing me.  After the freeze date I then remake all programs
+from scratch several times to make sure everything is make-able and
+consistent.  The most often discovered problems at this stage are bugs
+in the Makefiles and permissions of directories and files.  I then
+produce boot tapes which are tested on various configurations.  Bugs
+effecting the installation or basic functionality of programs can be
+fixed at this point.
+
+	After the configuration and installation testing is completed
+the system is released for alpha test and then beta test.  Only very serious
+bugs can be fixed after the system enters beta test.  NO new functionality
+can be added.  Fixes must be localized so that another round of complete
+testing is not required.  All fixes at this point must be approved by (at
+least) me and theperson in charge of the code requiring the fix.  The code
+usually stays frozen during the beta test period (although this may change).
+Use the second method described above under "Hacking" (i.e. tar copy without
+checking out of all source you need to work on) to do work during the beta
+test period.
+
+8.  C Coding Style
+
+	A document on C coding style will be forthcoming.  In the mean time,
+most of the kernel is a good example of the "recommended" style.
+
+
+					Bill Shannon
+					10-21-83

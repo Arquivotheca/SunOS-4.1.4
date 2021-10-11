@@ -1,0 +1,157 @@
+| Copyright 1985 by Sun Microsystems, Inc.
+
+|   Temporary microcode for viewing proc. development.
+#define temp	r[0]
+|   	movw d, acc;		shmem->am;	jmap ALAN;	;		shp+	| Go do Alan's viewing proc. development.
+ALAN:	movw d, temp;		=acmd->am;	;		;			| 
+	addw temp, acc, y;	am->brreg;	;		;			| Command in acc.
+	;			;		cjp, go;	;			| 
+acmd:	movw 0, r[0];		;		cjp, go gbputrect; ;			| 
+	compw 0, r[0];		;		cjp, go gbputrect; ;			| 
+acmdend:addw cmdptr, acc, cmdptr;;		jmap getcmd;	;			| command must leave numargs used in acc.
+
+
+|   Pass data through to painting processor with no computation.
+|	mov2nw 1,acc;		shmem->am;	jmap PASSTHRU;	;		shp+
+PASSTHRU: rsubw,s d,acc,y;	shmem->fifo1;	cjp,f1f PASSTHRU;;
+	incw acc,acc;		;		cjp,~neg PASSTHRU;;		shp+
+	addw cmdptr,acc,cmdptr;	;		jmap getcmd;	;
+
+
+|	;			;		jmap ZOOM;	;
+ZOOM:	addw d,cmdptr,cmdptr;	5->am;		push,~go;	;
+	;			2->fifo1;	loop,f1nf;	;
+	movw d,acc;		shmem->am;	cjs,go wrfifo;	;		shp+
+	movw d,acc;		shmem->am;	cjs,go wrfifo;	;		shp+
+	movw d,acc;		shmem->am;	cjs,go wrfifo;	;		shp+
+zoom1:	;			shmem->fifo1;	cjp,f1f zoom1;	;
+	;			;		jmap getcmd;	;
+
+
+
+	stop
+STOPIT:	movw 0xa, y;		;		;		;			| 
+	;			am->stlreg;	cjp, go STOPIT;	;			| 
+
+
+
+#undef temp
+
+
+|   Copy a rectangle in the g-buffer to a rectangle on the screen.
+#define bx	r[0]
+#define by	r[1]
+#define bw	r[2]
+#define bh	r[3]
+#define sx	r[4]
+#define sy	r[5]
+#define planes	r[6]
+#define FBHi	r[7]
+#define op	r[8]
+#define w	r[9]
+#define temp	r[10]
+#define addrlo	r[10]	/* temp */
+#define addrhi	r[11]	/* temp */
+#define Multiplier r[12]
+gbputrect:movw 17, acc;		=wrfifo->brreg;	;		;			| test to see which pp command to issue.
+	;			am->fifo1;	cjs, f1f;	;			| pp command.
+	movw r[0], acc;		am->fifo1;	cjs, f1f;	;			| flag.  Neg == copy low bytes.
+	movw d, planes;		shmem->am;	;		;		shp+	| 
+	movw d, FBHi;		shmem->am;	;		;		shp+	| 
+	movw d, op;		shmem->am;	;		;		shp+	| 
+	movw d, bx;		shmem->am;	;		;		shp+	| 
+	movw d, by;		shmem->am;	;		;		shp+	| 
+	movw d, bw;		shmem->am;	;		;		shp+	| 
+gbw:	movw bw, acc;		am->fifo1;	cjp, f1f gbw;	;			| 
+	movw d, bh;		shmem->am;	;		;		shp+	| 
+gbh:	movw bh, acc;		am->fifo1;	cjp, f1f gbh;	;			| 
+	movw d, sx;		shmem->am;	;		;		shp+	| 
+	movw d, sy;		shmem->am;	;		;		shp+	| 
+	movw by, Multiplier;	;		cjs, go MulSWid;;			| Compute buffer address.
+	movw bx, acc;		;		;		;			| 
+	addw addrlo, acc, addrlo;;		;		;			| 
+	addcw d, addrhi, addrhi;0->am;		;		;			| 
+gbblo:	movw addrlo, acc;	am->fifo1;	cjp, f1f gbblo;	;			| 
+gbbhi:	movw addrhi, acc;	am->fifo1;	cjp, f1f gbbhi;	;			| 
+	movw sy, Multiplier;	;		cjs, go MulSWid;;			| Compute screen address.
+	movw sx, acc;		;		;		;			| 
+	addw addrlo, acc, addrlo;;		;		;			| 
+	addcw d, FBHi, acc;	0x10->am;	;		;			| 
+gbslo:	movw addrlo, y;		am->fifo1;	cjp, f1f gbslo;	;			| 
+	addw addrhi, acc, addrhi;;		;		;			| 
+gbshi:	movw addrhi, y;		am->fifo1;	cjp, f1f gbshi;	;			| 
+	sr0w op, op;		;		;		;			| op= (op >> 1) & 0xf
+	andw d, op, op;		0xf->am;	;		;			| 
+	addw d, FBHi, acc;	0x30->am;	;		;			| FBCont
+	movw acc, y;		am->fifo1;	cjs, f1f;	;			| 
+	movw op, acc;		;		;		;			| PIXOP_NEEDS_DST (op<<1)= (op^(op<<1)) &0xa
+	sl0w acc, acc;		;		;		;			| 
+	xorw op, acc, acc;	;		;		;			| 
+	andw,s d, acc, y;	0xa->am;	;		;			| 
+	movw d, acc;		1->am;		cjs, go;	;			| SRWPIX->am
+	;			;		cjp, ~zer gbpl;	;			| CHECK THE SENSE OF THIS BRANCH
+	movw d, acc;		3->am;		cjs, go;	;			| SWWPIX->am
+gbpl:	andw d, planes, acc;	0xff->am;	cjs, go;	;			| 
+gbopf:	movw op, acc;		am->fifo1;	cjp, f1f gbopf;	;			| cg2_setfunction (fb, CG2_ALLROP, op)
+gbpatt:	movw 0, acc;		am->fifo1;	cjp, f1f gbpatt;;			| pattern reg.
+gbwid:	movw 0, acc;		am->fifo1;	cjp, f1f gbwid;	;			| cg2_setwidth (fb, CG2_ALLROP, 0, ...)
+gbcnt:	movw 0, acc;		am->fifo1;	cjp, f1f gbcnt;	;			| cg2_setwidth (,,, 0)
+	movw d, acc;		0x100->am;	cjs, go;	;			| cg2_setshift (,, 0, 1)
+gbprime:movw 0, acc;		am->fifo1;	cjp, f1f gbprime;;			| prime src 2.
+gbmask1:movw 0, acc;		am->fifo1;	cjp, f1f gbmask1;;			| mask1
+gbmask2:movw 0, acc;		am->fifo1;	cjp, f1f gbmask2;;			| mask2
+
+	movw d, acc;		11->am;		;		;			| 2 + number of shmems used here.
+	;			;		cjp, go acmdend;;			| 
+
+
+#ifndef SWIDTH
+#define SWIDTH 1152
+#endif
+
+|   Multiply by 1152.  Number comes in r[2] (Multiplier as in mul.pp.u)
+|   and goes out in r[0] (low) and r[1] (high).
+|   Must save accumulator.
+
+#if SWIDTH == 1152
+
+#define m10 acc
+
+|   y * 1152 = y * 1024 + y * 128 = y << 10 + y << 7 = (y << 3 + y) << 7
+|   y < (1 << 10).
+|   y << 3 needs no masking because y is < 1024.
+MulSWid:rolw 3, Multiplier, m10;;		;		;			| y << 3.  Highbits 0.
+	addw Multiplier, m10, m10;;		;		;			| y << 3 + y.
+	rolw 7, m10, addrhi;	;		;		;			| (y << 3 + y) << 7.
+	andw d, addrhi, addrlo;	0xff80->am;	;		;			| 
+	andw d, addrhi, addrhi;	0x7f->am;	crtn, go;	;			| 
+#endif
+
+#if SWIDTH == 1024
+|   Multiply by 1024.
+|   y * 1024 = y << 10
+MulSWid:rolw 10, Multiplier, addrhi;;		;		;			| (y << 3 + y) << 7.
+	andw d, addrhi, addrlo;	0xfc00->am;	;		;			| 
+	andw d, addrhi, addrhi;	0x3ff->am;	crtn, go;	;			| 
+
+#undef data
+#undef high
+
+#endif
+
+
+#undef bx
+#undef by
+#undef bw
+#undef bh
+#undef sx
+#undef sy
+#undef planes
+#undef FBHi
+#undef op
+#undef w
+#undef temp
+#undef addrlo
+#undef addrhi
+#undef m10
+#undef Multiplier

@@ -1,0 +1,422 @@
+| "@(#)pick.pp.u 1.1 94/10/31 SMI"
+| Copyright 1987 by Sun Microsystems, Inc.
+
+
+#define pkptr	r[25]
+#define options	r[24]
+#define clip	r[23]
+#define reflect	r[22]
+#define offsety	r[20]
+#define offsetx r[19]
+#define sizey	r[18]
+#define sizex	r[17]
+#define clipptr	r[16]
+#define x0	r[15]
+#define y0	r[14]
+#define x1	r[13]
+#define y1	r[12]
+#define dx	r[11]
+#define dy	r[10]
+
+#define pwx0	r[4]
+#define pwy0	r[3]
+#define pwx1	r[2]	/* same as width, never both needed at once */
+#define pwwidth	r[2]
+#define pwy1	r[1]
+#define pwhght	r[1]
+
+#define pkcnthi r[4]
+#define pkcntlo r[3]
+#define pkidhi	r[2]
+#define pkidlo	r[1]
+
+#define pickbit		0
+#define zbuf		1
+#define firstvec	1
+#define clipbit		2
+#define solid		5
+#define right		8
+#define poly		10
+
+#define savxfln		0x135
+#define savxflnwid	0x136
+
+
+
+|   code will return to pkvtr (through pkreset) after each clip rectangle.
+pkvtr:	btstw,s solid,options;	;		;				| test if solid or textured
+	testw (clip);		;		cjp,~zer .+2;			| test clip register for solid vectors
+	btstw,s clipbit,options; ;		;				| clipbit is valid for textured vectors
+	movw,s d,offsetx;	scrmem->am;	cjp,zer pkvtrnc;	scrmp +	 
+	movw d,offsety;		scrmem->am;	crtn,neg;		scrmp +	 
+	movw d,sizex;		scrmem->am;	;			scrmp +	 
+	movw d,sizey;		scrmem->am;	;				 
+pkvtn:	;			Frame->scrmemp;	;				| read context number from Frame
+	rolw 4,d,acc;		scrmem->am;	;				| 16*Frame is offset into PickContext array
+	addw acc,PickOffset,y;	;		;				| get pick window from top of PickOffset
+	IMM;			am->scrmemp;	;				 
+	movw d,pwx0;		scrmem->am;	;			scrmp+	 
+	movw d,pwy0;		scrmem->am;	;			scrmp+	 
+	addw d,pwx0,acc;	scrmem->am;	;			scrmp+	| add pwdx to pwx0 to get pwx1
+	movw acc,pwx1;		;		;				
+	addw d,pwy0,acc;	scrmem->am;	;			scrmp+	| add pwdy to pwy0 to get pwy1
+	movw acc,pwy1;		;		;				
+	movw offsetx,acc;	;		;				| test if pick window is within clip window 
+	subw,s pwx1,acc,y;	;		;				| reject if pwx1 <= offsetx
+	addw sizex,acc,acc;	;		cjp,~neg nopk;			| right clip window edge = offsetx+sizex
+	subw,s pwx0,acc,y;	;		;				| reject if pwx0 >= offsetx+sizex
+	movw offsety,acc;	;		cjp,neg nopk;
+	subw,s pwy1,acc,y;	;		;				| reject if pwy1 <= offsety
+	addw sizey,acc,acc;	;		cjp,~neg nopk;			| lower edge = offsety+sizey
+	subw,s pwy0,acc,y;	;		;				| reject if pwy0 >= offsety+sizey
+	subw,s pwy1,acc,y;	;		cjp,neg nopk;			| adjust edge if pwy1 >= offsety+sizey
+	;			;		cjp,~neg htadj;
+	subw pwy0,acc,y;	am->am;		;				| offsety+sizey - pwy0 -> pwhght
+htadj:	movw d,pwhght;		;		;				| pwdy is in dilatch
+	movw offsety,acc;	;
+	subw,s pwy0,acc,y;	am->am;		;				| adjust edge if pwy0 <= offsety
+	;			;		cjp,neg tpadj;
+	movw acc,pwy0;		;		;
+	addw d,pwhght,pwhght;	;		;				| adjust pwhght by (offsety - pwy0)
+tpadj:	movw offsetx,acc;	;		;
+	subw,s pwx0,acc,y;	;		;				| adjust edge if pwx0 <= offsetx
+	;			;		cjp,neg rtadj;
+	movw acc,pwx0;		;		;			
+rtadj:	addw sizex,acc,acc;	;		;				| offsetx+sizex -> acc
+	subw,s pwx1,acc,y;	;		;				| adjust edge if pwx1 >= offsetx+sizex
+	;			;		cjp,~neg widadj;	
+	movw acc,pwx1;		;		;			
+widadj:	movw pwx1,acc;		;		;			
+	subw pwx0,acc,pwwidth;	;		;				| pwwidth = pwx1 - pwx0
+
+|   Force vector to have increasing x.
+	testw (dx);		;		;				| Test dx.
+	movw 0,reflect;		;		cjp,~neg pknoswap;		| reflect= 0.
+	movw x0,acc;		;		;				
+	movw x1,x0;		;		;				| Swap x.
+	movw acc,x1;		;		;				 
+	movw y0,acc;		;		;				| Swap y.
+	movw y1,y0;		;		;				 
+	movw acc,y1;		;		;				 
+	negw dx,dx;		;		;				| dx= -dx.
+	negw dy,dy;		;		;				| dy= -dy.
+| for long, diagonal vectors and possibly fat, make pick window a clip window and follow regular clipping routine.
+| Don't update clipptr because should restore current clip window and then clip/draw vector in clip window
+pknoswap: movw pwx0,acc;	;		;				 
+	movw acc,offsetx;	am->am;		;			 	| make pick window a clip window
+	subw d,x0,x0;		;		;				| Transform screen coords to pixrect relative.
+	subw,s d,x1,x1;		;		;				| if x1 < offsetx trivial reject
+	movw pwy0,acc;		;		cjp,neg nopk;
+	movw acc,offsety;	am->am;		;			 	 
+	testw (dy);		;		;				| test for negative slope
+	subw,s d,y0,y0;		;		cjp,neg revslp;			| Transform screen coords to pixrect relative.
+	subw,s d,y1,y1;		;		;				| if y1 < offsety trivial reject
+	movw pwwidth,acc;	;		cjp,neg nopk;
+	movw acc,sizex;		am->am;		;				 
+	subw,s d,x0,y;		;		;				| if x0 > sizex trivial reject
+	movw pwhght,acc;	am->am;		cjp,~neg nopk;
+	subw,s d,y0,y;		VecAtts->scrmemp; ;				| if y0 > sizey trivial reject
+	movw acc,sizey;		;		cjp,~neg nopk;			| 
+rvpk:	btstw,s zbuf,d;		scrmem->am;	;				| Test if 3d
+	movw d,pkptr;		=pickhit->am;	;				| 
+	;			;		cjp,zer .+2;			| 
+	movw d,pkptr;		=vecpicmaybe->am; ;				| if 3d, will set pickmaybe if 2d picking true
+	movw dx,acc;		;		cjs,go vvdxdy;			| necessary for vdxdy routine
+nopk:	;			Pickmode->scrmemp; ;				| check pick mode
+	sub2nw,s 0,d,y;		scrmem->am;	;				| if mode == NODRAW get next clip rect
+	;			;		cjp,~zer pkndreset;		| if mode == DRAW continue with drawing code
+	;			SavePts->scrmemp; ;				 
+	movw d,x0;		scrmem->am;	;			scrmp +	| get original point values
+	movw d,y0;		scrmem->am;	;			scrmp +	
+	movw d,x1;		scrmem->am;	;			scrmp +	 
+	rsubw d,x0,dx;		;		;				 
+	movw d,y1;		scrmem->am;	;				 
+	rsubw d,y0,dy;		;		;				 
+	movw clipptr,y;		am->scrmemp;	;
+	movw d,offsetx;		scrmem->am;	;			scrmp+	| restore current clip window
+	subw d,x0,x0;		;		;				| Transform screen coords to pixrect relative.
+	subw d,x1,x1;		;		;				 
+	movw d,offsety;		scrmem->am;	;			scrmp+
+	subw d,y0,y0;		;		;				| Transform screen coords to pixrect relative.
+	subw d,y1,y1;		;		;				 
+	movw d,sizex;		scrmem->am;	;			scrmp+
+	movw d,sizey;		scrmem->am;	;			scrmp+
+	btstw,s solid,options;	;		ldct vtrstat;			 
+	add2nw 2,clipptr;	;		jsrp,zer ttrstat;		| Jump textured if zero, solid if 1.
+pkreset: btstw,s solid,options;	SavePts->scrmemp; ;				| test if solid or textured
+	testw (clip);		;		cjp,~zer .+2;			| test clip register for solid vectors
+	btstw,s clipbit,options; ;		;				| clipbit is valid for textured vectors
+	movw d,x0;		scrmem->am;	crtn,zer;		scrmp +	| if no clipping we are done.
+	movw d,y0;		scrmem->am;	;			scrmp +	 
+	movw d,x1;		scrmem->am;	;			scrmp +	 
+	rsubw d,x0,dx;		;		;				 
+	movw d,y1;		scrmem->am;	;			scrmp +	 
+	rsubw d,y0,dy;		Pickmaybe->scrmemp; ;				| reset pickmaybe for next rectangle
+	movw 0,y;		am->scrmem;	;			
+	movw clipptr,y;		am->scrmemp;	cjp,go pkvtr;	
+
+pkndreset: add2nw 2,clipptr;	;		cjp,go pkreset;			 
+
+|   Here we know that y decreases from y0 to y1 (y1 < y0).  In this section of code, we swap y values,
+|   so y increases from y0 to y1.
+
+revslp:	subw d,y1,y1;		;		cjp,neg nopk;			| reject if y0 <= offsety (0)
+	movw pwwidth,acc;	;		;
+	movw acc,sizex;		am->am;		;			 	 
+	subw,s d,x0,y;		;		;				| if x0 > sizex trivial reject
+	movw pwhght,acc;	am->am;		cjp,~neg nopk;
+	movw acc,sizey;		;		;				 
+	subw,s y1,acc,y;	;		;				| reject if y1 > sizey
+	negw dy,dy;		;		cjp,neg nopk;			 
+	subw d,sizey,acc;	1->am;		;				| sizey-1
+	subw y0,acc,y0;		;		;				| y0 = (sizey-1) - y0
+	subw y1,acc,y1;		VecAtts->scrmemp; ;				| y1 = (sizey-1) - y1
+	add2nw 1,reflect;	;		cjp,go rvpk;			| reflect += 2
+
+pkvtrnc: movw d,sizex;		SWidth->am;	;				 
+	movw d,sizey;		SHeight->am;	;				 
+	movw 0,offsetx;		;		;				 
+	movw 0,offsety;		;		cjp,go pkvtn;		
+	
+		 
+|   Vecpicmaybe is the 3d equivalent of pickhit, but only sets the pickmaybe flag, indicating that a 2d pick has
+|   occured, but we have to check for 3d on a pixel by pixel basis.  In the 3d code, we check if picking is on,
+|   and if it is, we then check pickmaybe, and if both these are true, we enter the 3d picking code.  Otherwise,
+|   we just go through the normal 3d code.
+
+vecpicmaybe:
+	;			Pickmaybe->scrmemp; ;				| 
+	incw 0,y;		am->scrmem;	crtn,go;			| return to drawing code
+	
+
+|   When we get a hit, we store -1 in the picklatch, move the active pickid into the hitpickid area of scrmem,
+|   and store away the number of the primitive that was picked. 
+pickhit: ;			SavPkcnt->scrmemp; ;				| current count is stored in scrmem
+	movw d,pkcnthi;		scrmem->am;	;			scrmp+	| grab pick count from scrmem
+	movw d,pkcntlo;		scrmem->am;	;				 
+	;			Frame->scrmemp;	;				| read context number from Frame
+	rolw 4,d,acc;		scrmem->am;	;				| 16*Frame is offset into PickContext array
+	addw d,acc,acc;		PickOffset->am;	;				| correct Pick flag == PickLatch + 16*Frame + PickOffset
+	addw d,acc,acc;		PickID->am;	;				 
+	movw acc,y;		am->scrmemp;	;				| scrmemp has active PickID address for context
+	movw d,pkidhi;		scrmem->am;	;			scrmp+	| cache active pickids
+	movw d,pkidlo;		scrmem->am;	;			scrmp+	 
+	movw d,acc;		scrmem->am;	;			scrmp+	 
+	;			scrmem->am;	;			scrmp+	 
+	;			0xffff->scrmem;	;			scrmp+	| PickHit <- -1 (says we got a hit)
+	movw pkcnthi,y;		am->scrmem;	;			scrmp+	| hit pick count high -> scrmem
+	movw pkcntlo,y;		am->scrmem;	;			scrmp+	| hit pick count low -> scrmem
+	movw pkidhi,y;		am->scrmem;	;			scrmp+	| move active pickids to hit id area
+	movw pkidlo,y;		am->scrmem;	;			scrmp+	 
+	movw acc,y;		am->scrmem;	;			scrmp+	 
+	movw d,y;		am->scrmem;	crtn,go;			 
+
+#undef pkptr
+#undef options
+#undef clip
+#undef reflect
+#undef offsety
+#undef offsetx
+#undef sizey
+#undef sizex
+#undef clipptr
+#undef x0
+#undef y0
+#undef x1
+#undef y1
+#undef dx
+#undef dy
+#undef pkcnthi
+#undef pkcntlo
+#undef pkidhi
+#undef pkidlo
+#undef pwwidth
+#undef pwhght
+
+#define zlo	r[6]	/* starting z value. lo set to zero. Used by shaded routines. */
+#define zhi	r[7]
+#define dzlo	r[8]	/* z increment. Implied decimal point between hi and lo. */
+#define dzhi	r[9]
+#define clo	r[10]	/* starting color.  lo set to zero. */
+#define chi	r[11]
+#define y0	r[16]	/* y of scan-line */
+#define x0	r[17]	/* starting x point, positive x incr. */
+#define x1	r[18]	/* number of points in line. */
+#define sizex	r[19]
+#define sizey	r[20]
+#define offsetx	r[21]
+#define offsety	r[22]
+#define clip	r[23]
+#define clipptr	r[24]
+
+#define tclipptr r[21]
+#define tcolor0	r[19]
+#define ty0	r[15]
+#define ty1	r[14]
+#define tx0	r[13]
+#define tx1	r[12]
+
+|   3D polygon picking code:
+|
+|   	'plypk3' is called from statshade.pp.u and is used to determine if the
+|   	current scanline intersects the pick aperture
+|   
+|   	'pkhit3' is called from statshade.pp.u ('pkgsquit') when a hit has been detected
+
+plypk3:	;			Pickmaybe->scrmemp; ;				 
+	movw 0,y;		am->scrmem;	cjs,go polypick;		| uses same compare routine as other polygon pick routines
+	;			Pickmaybe->scrmemp; ;				 
+	;			;		cjp,neg .+2;			| condition set (to neg if there is no hit) by last line of polypick
+	incw 0,y;		am->scrmem;	;				| scanline intersected pick window, maybe we will get a pick
+	;			;		cjs,go rstrpts;			| 			it depends on the z buffer
+	;			;		jmap plhpkdn;			| continue with 3D drawing code on the other bank
+	
+pkhit3:	;			;		cjs,go pickhit;			| called by 3D picking code in statshade.pp.u
+	;			Pickmode->scrmemp; ;				| there was a hit...
+	sub2nw,s 1,d,y;		scrmem->am;	;				| 	check pick mode
+	;			;		cjp,zer start;			| 	if mode == NODRAW return to start
+	movw 0,y;		am->scrmem;	;			scrmp +	| 	if mode == DRAW turn picking off and continue
+	movw 0,y;		am->scrmem;	jmap plhreset;			| set Pickmaybe = 0
+
+|   2D polygon picking code:
+|   	'plypk' is called from several places in shade.pp.u and is used to determine
+|   	if the current scanline intersects the pick aperture.  If a hit is detected
+|   	'pickhit' is called to register the pick
+
+plypk:	;			;		cjs,go polypick;		 
+	;			;		cjp,neg rstrpts;		| condition set (to neg if there is no hit) by last line of polypick
+	;			;		cjs,go pickhit;			 
+	;			Pickmode->scrmemp; ;				| there was a hit...
+	sub2nw,s 1,d,y;		scrmem->am;	;				| 	check pick mode
+	;			;		cjpp,zer start;			| 	if mode == NODRAW pop stack and return to start
+	movw 0,y;		am->scrmem;	;				| 	if mode == DRAW turn picking off and continue with drawing code
+
+rstrpts: ;			SavePts->scrmemp; ;				 
+	movw d,y0;		scrmem->am;	;			scrmp +	| get original point values
+	movw d,x0;		scrmem->am;	;			scrmp +	 
+	movw d,x1;		scrmem->am;	;			scrmp +	 
+	movw clipptr,y;		am->scrmemp;	crtn,go;			| continue with drawing routine
+
+|   textured polygon picking code:
+|   	'texNplypk' is called from roptex.pp.u and is used to determine
+|   	if the current scanline intersects the pick aperture.  If a hit is detected
+|   	'pickhit' is called to register the pick.  Seperate code is required since
+|   	the register maps are different
+
+tex1plypk: movw tclipptr,clipptr; SavePts->scrmemp; ;				| save tclipptr		 
+	movw d,y0;		scrmem->am;	;			scrmp +	 
+	;			=tex1rstrpts->brreg; ;			scrmp +	 
+	movw d,x0;		scrmem->am;	;			scrmp +	 
+	movw d,x1;		scrmem->am;	cjp,go texplypk;		 
+	
+tex8plypk: movw tclipptr,clipptr; SavePts->scrmemp; ;				| save tclipptr	 
+	movw d,y0;		scrmem->am;	;			scrmp +	 
+	movw d,x0;		scrmem->am;	;			scrmp +	 
+	movw d,x1;		scrmem->am;	;				 
+	;			=tex8rstrpts->brreg; ;				 
+	;			;		cjp,go texplypk;		 
+
+texplypk: ;			;		cjs,go polypick;		 
+	;			;		cjp,neg;			| condition set (to neg if there is no hit) by last line of polypick
+	;			;		cjs,go pickhit;			 
+	;			Pickmode->scrmemp; ;				| there was a hit...
+	sub2nw,s 1,d,y;		scrmem->am;	;				| 	check pick mode
+	;			;		cjpp,zer start;			| 	if mode == NODRAW pop stack and return to start
+	movw 0,y;		am->scrmem;	cjp,go;				| 	if mode == DRAW turn picking off and continue with drawing code
+
+tex1rstrpts: ;			SavePts->scrmemp; ;				 
+	movw d,ty0;		scrmem->am;	;			scrmp +	| get original point values
+	movw d,ty1;		scrmem->am;	;			scrmp +	 
+	movw d,tx0;		scrmem->am;	;			scrmp +	 
+	movw d,tx1;		scrmem->am;	;			scrmp +	 
+	movw d,tcolor0;		scrmem->am;	;				  
+	movw clipptr,tclipptr;	am->scrmemp;	crtn,go;			| restore tclipptr, and continue with drawing routine
+
+tex8rstrpts: ;			SavePts->scrmemp; ;				 
+	movw d,ty0;		scrmem->am;	;			scrmp +	| get original point values
+	movw d,tx0;		scrmem->am;	;			scrmp +	 
+	movw d,tx1;		scrmem->am;	;			scrmp +	 
+	movw clipptr,tclipptr;	am->scrmemp;	crtn,go;			| restore tclipptr, and continue with drawing routine
+
+|   generic routine to compare the current scanline with the intersection
+|   of the current clip window and the pick window
+polypick: ;			Frame->scrmemp;	;				| read context number from Frame
+	rolw 4,d,acc;		scrmem->am;	;				| 16*Frame is offset into PickContext array
+	addw d,acc,acc;		PickOffset->am;	;				| window parameters at beginning of frame array
+	movw acc,y;		am->scrmemp;	;				 
+	movw d,pwx0;		scrmem->am;	;			scrmp+	 
+	movw d,pwy0;		scrmem->am;	;			scrmp+	 
+	addw d,pwx0,acc;	scrmem->am;	;			scrmp+	| add pwdx to pwx0 to get pwx1
+	movw acc,pwx1;		;		;				 
+	addw d,pwy0,acc;	scrmem->am;	;			scrmp+	| add pwdy to pwy0 to get pwy1
+	movw acc,pwy1;		;		;				 
+	movw clipptr,y;		am->scrmemp;
+	movw,s d,offsetx;	scrmem->am;	;			scrmp+	| get current clip window 
+	movw d,offsety;		scrmem->am;	cjp,neg plynopk;	scrmp+	 
+	movw d,sizex;		scrmem->am;	;			scrmp+	 
+	movw d,sizey;		scrmem->am;	;			scrmp+	 
+	movw offsetx,acc;	;		;				| test if pick window is within clip window
+	rsubw,s pwx1,acc,y;	;		;				| reject if pwx1 < offsetx
+	addw sizex,acc,acc;	;		cjp,neg plynopk;		| right edge = offsetx+sizex
+	subw,s pwx0,acc,y;	;		;				| reject if pwx0 > offsetx+sizex
+	movw offsety,acc;	;		cjp,neg plynopk;
+	rsubw,s pwy1,acc,y;	;		;				| reject if pwy1 < offsety
+	addw sizey,acc,acc;	;		cjp,neg plynopk;		| lower edge = offsety+sizey
+	subw,s pwy0,acc,y;	;		;				| reject if pwy0 > offsety+sizey
+	subw,s pwy1,acc,y;	;		cjp,neg plynopk;		| adjust edge if pwy1 > offsety+sizey
+	movw pwy1,y;		am->am;		cjp,~neg pghtadj;		| recompute pwy1
+	movw acc,y;		am->am;		;				| offsety+sizey -> pwy1
+pghtadj: movw d,pwy1;		;		;
+	movw offsety,acc;	;		;
+	rsubw,s pwy0,acc,y;	;		;				| adjust edge if pwy0 < offsety
+	;			;		cjp,~neg pgtpadj;
+	movw acc,pwy0;		;		;
+pgtpadj: movw offsetx,acc;	;		;
+	rsubw,s pwx0,acc,y;	;		;				| adjust edge if pwx0 < offsetx
+	;			;		cjp,~neg pgrtadj;
+	movw acc,pwx0;		;		;				 
+pgrtadj: addw sizex,acc,acc;	;		;
+	subw,s pwx1,acc,y;	;		;				| adjust edge if pwx1 > offsetx+sizex
+	movw pwx1,y;		am->am;		cjp,~neg pgltadj;		| recompute pwx1
+	movw acc,y;		am->am;		;				 
+pgltadj: movw d,pwx1;		;		;				| offsetx+sizex -> pwx1
+
+|   at this point we know that the pick window intersects the clip window and 
+|   we want to see if the scanline intersects the new pick window
+|   for 2D this will tell us if we have a hit, and for 3D maybe we have a hit
+|   returns condition code negative if no intersection
+	movw pwx0,acc;		;		;
+	subw,s d,x0,y;		;		;				| if x0 > pwx1 trivial reject
+	rsubw,s x1,acc,y;	;		cjp,~neg plynopk;		| if x1 < pwx0 trivial reject
+	movw pwy0,acc;		;		cjp,neg plynopk;		 
+	rsubw,s y0,acc,y;	;		;				| if y < pwy0 trivial reject
+	movw pwy1,acc;		am->am;		cjp,neg plynopk;
+	rsubw,s d,y0,y;		;		crtn,go;			| if y > pwy1 trivial reject
+
+plynopk: testw (d);		0xffff->am;	crtn,go;			| no pick, reset condition code for return
+
+
+
+#undef offsety
+#undef offsetx
+#undef sizey
+#undef sizex
+#undef clipptr
+#undef x0
+#undef y0
+#undef x1
+#undef pwx0
+#undef pwy0
+#undef pwx1
+#undef pwy1
+#undef zlo
+#undef zhi
+#undef dzlo
+#undef dzhi
+#undef clo
+#undef chi
+
+#undef zbuf		
+#undef savxfln
+#undef savxflnwid
+

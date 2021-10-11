@@ -1,0 +1,101 @@
+| "@(#)pick.vp.u 1.1 94/10/31 SMI"
+| Copyright (c) 1987 by Sun Microsystems, Inc.
+
+
+
+|   Clear pick sets the pick mode, sets pkcnt = 0 and clears the hit status.  
+|   The ID and Window are not affected.  This is done on both the VP & PP (though no hit info is on the VP).
+
+|	incw cmdptr,cmdptr;	;		jmap CLEAR_PICK;;
+CLEAR_PICK:
+	addw frameptr,PICKCNT_FRMOFF,y; ;	;		;			| 
+	IMM;			am->shmemp;	push,~go;	;			| 
+	;			PPCLEARPICK->fifo1; loop,f1nf;	;			| 
+	movw 0,y;		am->shmem;	;		;		shp+	| pick count high
+	movw 0,y;		am->shmem;	jmap getcmd;	;			| pick count low
+	
+	
+
+|   Zero turns picking off, 1 turns picking on with drawing on and 2 turns picking on with drawing off.
+
+|	incw cmdptr,cmdptr;	;		jmap SET_PICK;	;
+SET_PICK:
+	addw frameptr,PICK_FRMOFF,y; 0x3->am;	;		;			| 
+	IMM;			am->shmemp;	;		;			| 
+	andw d,acc,acc;		am->shmem;	jmap getcmd;	;			| pick mode
+
+
+|	movw 0,y;		am->fpdp;	jmap SET_PICK_ID; ;
+SET_PICK_ID:
+	movw 0,y;		am->fpap;	;		;			| zero fpr src ptr
+	andw,s d,acc,acc;	0x1->am;	push,~go;	;			| 
+	;			PPSETPICKID->fifo1; loop,f1nf;	;			| 
+	addw frameptr,PICKID_FRMOFF,acc; ;	;		;			| acc = address for Pick IDs, SETPICKID command to fifo
+	IMM;			;		cjp,~zer setID1; ;			|
+setID0:	;			;		cjs,go shmemtofifo; ;			| ID0 from command block to fifo
+	movw acc,y;		am->shmemp;	;		;			| set shmemp to PICKID_FRMOFF
+	incw cmdptr,cmdptr;	fpregh->shmem;	;		;		shp+	| ID0 from fpregs to shmem
+	;			fpregl->shmem;	;		;		shp+	| 
+	;			;		cjs,go shmemtofifo; ;			| ID1 from shmem to fifo (extra cycle necessary)
+	;			;		cjp,go setIDdone; ;			| 
+setID1:	movw acc,y;		am->shmemp;	cjs,go shmemtofifo; ;			| ID0 from shmem to fifo
+	incw cmdptr,cmdptr;	am->shmemp;	cjs,go shmemtofifo; ;			| ID1 from command block to fifo
+	;			2->am;		;		;			|
+	addw d,acc,acc;		am->shmemp;	;		;			| PICKID1_FRMOFF to shmemp (acc + 2)
+	;			fpregh->shmem;	;		;		shp+	| ID1 from fpregs to shmem
+	;			fpregl->shmem;	;		;			| 
+setIDdone: add2nw 1,cmdptr,cmdptr; am->shmemp;	jmap getcmd2;	;			| add 2 more to command pointer
+
+|   shmemtofifo moves a 32 bit word from the current location in shmem
+|   to the fifo, using the current fpreg.  
+shmemtofifo:
+	;			shmem->fpregh;	;		;		shp+	| 
+	;			shmem->fpregl;	;		;			| 
+	;			fpregh->fifo1;	cjp,f1f .;	;			| 
+	;			fpregl->fifo1;	cjp,f1f .;	;			| 
+	;			;		crtn,go;	;			| 
+	
+
+|	movw 0,y;		am->fpdp;	jmap SET_PICK_WINDOW; ;
+SET_PICK_WINDOW:
+	movw PPSETPICKWIN,acc;	;		ldct 1;		;		
+	IMM;			am->fifo1;	cjs,f1f wrfifo_pp; ;		
+	;			shmem->fpregh;	;		;		shp+	| copy from cmd list in shmem to fpr[0]
+	;			shmem->fpregl;	rpct .-1;	;		shp+,dp+	
+	addw frameptr,PICKWINDOW_FRMOFF,y; 0->fpap; ;		;		
+	IMM;			am->shmemp;	push,go 1;	;			| add frameptr and pick frame offset
+	;			fpregh->fifo1;	cjp,f1f .;	;		
+	;			fpregl->fifo1;	cjp,f1f .;	;		
+	;			fpregh->shmem;	;		;		shp+	| copy from fpr[0] to frame in shmem
+	add2nw 1,cmdptr;	fpregl->shmem;	rfct;		;		shp+,abp+
+	incw cmdptr,cmdptr;	am->shmemp;	jmap getcmd2;	;			| cmdptr += 5
+
+
+
+|   Get_pick fetches the ID, pickcount and hit status from the Painting Processor.  It does this because
+|   on the VP, we don't know if a hit has occured.  On the PP, when a get_pick is done, it clears
+|   the hit info (hitID, and the fact that a hit happened).  The ready flag is set to zero (the word after
+|   the command) to indicate the information can be read by the user.
+
+|	incw cmdptr,cmdptr;	;		jmap GET_PICK;	;			| 66
+GET_PICK: 
+	movw PPGETPICK,acc;	;		;		;		
+	IMM;			am->fifo1;	cjs,f1f wrfifo_pp; ;		
+ppack:	;			fl2reg->am;	;		;			| wait for PP ack
+	btstw,s 0,d;		;		;		;	
+	;			;		cjp,zer ppack;	;
+	;			0x8000->fl1reg;	;		;			| change direction of fifo
+redir:	;			fl2reg->am;	;		;			| test fifo for PP->VP
+	btstw,s 9,d;		;		;		;			| timing
+	;			;		cjp,zer redir;	;
+	incw cmdptr,y;		am->shmemp;	push,go 6;	;			| write into buffer (skip over ready flag)
+	movw d,acc;		fifo2->am;	cjp,f2e .;	;			| get latch, 32 bit count, and 2 32 bit pick IDs
+	movw acc,y;		am->shmem;	rfct;		;		shp+
+	movw 8,acc;		0x4000->fl1reg;	;		;			| change back direction of fifo
+fback:	IMM;			fl2reg->am;	;		;			| test fifo for VP->PP
+	btstw,s 9,d;		;		;		;			| timing
+	movw cmdptr,y;		am->shmemp;	cjp,~zer fback;	;	
+	movw 0,y;		am->shmem;	;		;			| set ready flag = 0
+	addw cmdptr,acc,cmdptr;	am->shmemp;	jmap getcmd2;	;			| cmdptr += 9 (total)
+
+

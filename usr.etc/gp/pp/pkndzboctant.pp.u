@@ -1,0 +1,149 @@
+|  "@(#)pkndzboctant.pp.u 1.1 94/10/31 SMI"
+| Copyright 1988 by Sun Microsystems, Inc.
+
+| Written by Stuart Levy
+
+
+#define err acc
+#define count	r[2]
+#define incr0 	r[3]
+#define incr1 	r[4]
+#define reflect	r[5]
+#define zlo	r[12]
+#define zhi	r[13]
+#define glo	r[17]		/* same as addrlo */
+#define ghi	r[18]
+#define xcur	r[21]		/* DEBUG - x and y values along line */
+#define ycur	r[22]
+
+|   We reach here from pkzboctant.pp.u.
+|   Picking of 3d vectors with z-buffering in nodraw mode.
+pkndzboctant: ;			=pkndzb0176->am; ;				| 
+	addw d,reflect,y;	am->brreg;	cjs,go pk3dlninit;		| set up x and y values, and pickwindow
+	;			;		cjp,go;				| choose correct octant
+pkndzb0176: movw count,y;	am->brreg;	cjp,go pkndzboct0;		| Get ready to ld cntr.
+	movw count,y;		am->brreg;	cjp,go pkndzboct1;		| Get ready to ld cntr. (dx swapped w/ dy).
+	movw count,y;		am->brreg;	cjp,go pkndzboct7;		| Get ready to ld cntr.
+	movw count,y;		am->brreg;	cjp,go pkndzboct6;		| Get ready to ld cntr. (dx swapped w/ dy).
+
+
+|   Octant 0.		
+pkndzboct0: ;			;		;				| 
+	;			=pkndzb0pos->brreg; ldct;			| ldct sets up rpct
+pkndzb0loop: xorw,s d,zhi,y;	gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	testw (acc);		;		cjs,zer pkndtst3dln;	scrmp 0	| call pkndtst only if equal to value in buffer
+pkndzb0wrtdn: addw d,zlo,zlo;	scrmem->am;	;			scrmp+	| jump if error positive, update zlo
+	addcw d,zhi,zhi;	scrmem->am;	cjp,~neg;		scrmp+	| 
+
+pkndzb0neg: incw glo,glo;	;		;				| increment low graphics buffer pointer
+	addcw d,ghi,ghi;	0->am;		;				| 
+	movw ghi,y;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw glo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| Start read, takes 4 cycles to complete
+	incw xcur,xcur;		;		;				| update x
+	addw incr0,acc,acc;	;		rpct pkndzb0loop;		| error += major axis increment
+	;			;		cjp,go pkzbquit;		| 
+
+pkndzb0pos: addw d,glo,glo;	IncXY->am;	;				| update graphics buffer pointers
+	addcw d,ghi,ghi;	0->am;		;				| 
+	movw ghi,y;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw glo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| start read, takes 4 cycles to complete
+	incw xcur,xcur;		;		;				| update x 
+	incw ycur,ycur;		;		;				| update y
+	addw incr1,acc,acc;	;		rpct pkndzb0loop;		| increment x and y. (SWidth + 1).
+	;			;		cjp,go pkzbquit;		| 
+
+
+|   Octant 1.		
+pkndzboct1: ;			;		;				| 
+	;			=pkndzb1pos->brreg; ldct;			| ldct sets up rpct
+pkndzb1loop: xorw,s d,zhi,y;	gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	testw (acc);		;		cjs,zer pkndtst3dln;	scrmp 0	| zlo += dz/dx lo, jump if < value in buffer
+pkndzb1wrtdn: addw d,zlo,zlo;	scrmem->am;	;			scrmp+	| update zlo
+	addcw d,zhi,zhi;	scrmem->am;	cjp,~neg;		scrmp+	| jump if error negative, update zhi
+
+pkndzb1neg: addw d,glo,glo;	SWidth->am;	;				| update low graphics buffer pointer
+	addcw d,ghi,ghi;	0->am;		;				| 
+	movw ghi,y;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw glo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| Start read, takes 4 cycles to complete
+	incw ycur,ycur;		;		;				| update y 
+	addw incr0,acc,acc;	;		rpct pkndzb1loop;		| 
+	;			;		cjp,go pkzbquit;		| 
+
+pkndzb1pos: addw d,glo,glo;	IncXY->am;	;				| update graphics buffer pointers
+	addcw d,ghi,ghi;	0->am;		;				| 
+	movw ghi,y;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw glo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| start read, takes 4 cycles to complete
+	incw xcur,xcur;		;		;				| update x 
+	incw ycur,ycur;		;		;				| update y
+	addw incr1,acc,acc;	;		rpct pkndzb1loop;		| increment x and y. (SWidth + 1).
+
+
+
+|   Octant 7.		
+pkndzboct7: ;			;		;				| 
+	;			=pkndzb7pos->brreg; ldct;			| ldct sets up rpct
+pkndzb7loop: xorw,s d,zhi,y;	gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	testw (acc);		;		cjs,zer pkndtst3dln;	scrmp 0	| zlo += dz/dx lo, jump if < value in buffer
+pkndzb7wrtdn: addw d,zlo,zlo;	scrmem->am;	;			scrmp+	| update zlo
+	addcw d,zhi,zhi;	scrmem->am;	cjp,~neg;		scrmp+	| jump if error positive, update zhi
+
+pkndzb7neg: incw,s glo,glo;	0->am;		;				| update low graphics buffer pointer
+	addcw d,ghi,ghi;	;		cjp,~cry .+2;			| 
+	movw ghi,y;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw glo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| Start read, takes 4 cycles to complete
+	incw xcur,xcur;		;		;				| update x
+	addw incr0,acc,acc;	;		rpct pkndzb7loop;		| 
+	;			;		cjp,go pkzbquit;		| 
+
+pkndzb7pos: addw,s d,glo,glo;	IncXDecY->am;	;				| update graphics buffer pointers
+	;			;		cjp,cry .+3;			| DEBUG, CHECK IF THIS IS OK!!!
+	decw ghi,ghi;		;		;				| 
+	movw ghi,y;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw glo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| start read, takes 4 cycles to complete
+	incw xcur,xcur;		;		;				| update x
+	decw ycur,ycur;		;		;				| update y
+	addw incr1,acc,acc;	;		rpct pkndzb7loop;		| 
+	;			;		cjp,go pkzbquit;		| 
+
+|   Octant 6.		
+pkndzboct6: ;			;		;				| 
+	;			=pkndzb6pos->brreg; ldct;			| ldct sets up rpct
+pkndzb6loop: xorw,s d,zhi,y;	gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	testw (acc);		;		cjs,zer pkndtst3dln;	scrmp 0	| zlo += dz/dx lo, jump if < value in buffer
+pkndzb6wrtdn: addw d,zlo,zlo;	scrmem->am;	;			scrmp+	| update zlo
+	addcw d,zhi,zhi;	scrmem->am;	cjp,~neg;		scrmp+	| jump if error positive, update zhi
+	;			;		;				| 
+pkndzb6neg: subw,s d,glo,glo;	SWidth->am;	;				| update low graphics buffer pointer
+	;			;		cjp,cry .+3;			| DEBUG
+	decw ghi,ghi;		;		;				| 
+	movw ghi,y;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw glo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| start read, takes 4 cycles to complete
+	decw ycur,ycur;		;		;				| update y
+	addw incr0,acc,acc;	;		rpct pkndzb6loop;		| 
+	;			;		cjp,go pkzbquit;		| 
+
+pkndzb6pos: addw,s d,glo,glo;	IncXDecY->am;	;				| update graphics buffer pointers
+	;			;		cjp,cry .+3;			| update vme address pointers
+	decw ghi,ghi;		;		;				| 
+	movw ghi,y;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw glo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| start read, takes 4 cycles to complete
+	incw xcur,xcur;		;		;				| update x
+	decw ycur,ycur;		;		;				| update y
+	addw incr1,acc,acc;	;		rpct pkndzb6loop;		| 
+	;			;		cjp,go pkzbquit;		| 
+	
+
+#undef err
+#undef addrlo
+#undef addrhi
+#undef incr0
+#undef incr1
+#undef glo
+#undef ghi
+#undef clo	
+#undef chi	
+#undef zlo
+#undef zhi
+#undef xcur
+#undef ycur
+#undef reflect

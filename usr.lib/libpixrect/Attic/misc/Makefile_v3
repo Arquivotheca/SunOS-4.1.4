@@ -1,0 +1,290 @@
+#
+# @(#)Makefile_v3 1.1 94/10/31 SMI
+#
+
+# Makefile for pixrect library: libpixrect.a
+TARGET= libpixrect.a
+
+LINTLIB= llib-lpixrect
+
+CFILES=	pf.c pf_default.c pf_makedef.c pf_text.c pf_ttext.c pr_text.c \
+	pr_open.c pr_makefun.c pr_make.c \
+	pr_clip.c pr_dblbuf.c pr_reverse.c pr_plngrp.c \
+	pr_line.c pr_polygon2.c \
+	pr_polyline.c pr_polypoint.c pr_replrop.c \
+	pr_texpat.c pr_texvec.c pr_traprop.c \
+	pr_io.c \
+	mem.c mem_batch.c mem_colormap.c \
+	mem_getput.c mem_polypoint.c mem_region.c mem_rop.c \
+	mem_stencil.c  mem_vec.c \
+	mem_prs.c \
+	mem_kern.c \
+	prom_batch.c \
+	bw1.c bw1_batch.c bw1_colormap.c \
+	bw1_getput.c bw1_polypoint.c bw1_region.c bw1_rop.c \
+	bw1_vec.c \
+	bw1_stand.c \
+	bw2.c \
+	bw2_stand.c \
+	cg1.c cg1_batch.c cg1_colormap.c \
+	cg1_getput.c cg1_polypoint.c cg1_region.c cg1_rop.c \
+	cg1_stencil.c cg1_vec.c \
+	cg2.c cg2_batch.c cg2_colormap.c \
+	cg2_getput.c cg2_polypoint.c cg2_region.c cg2_rop.c \
+	cg2_stencil.c cg2_vec.c \
+	cg4.c cg4_colormap.c cg4_region.c \
+	gp1.c \
+	gp1_vec.c \
+	gp1_line.c gp1_polyline.c \
+	gp1_loadtex.c gp1_polygon2.c gp1_replrop.c \
+	gp1_shmem.c gp1_util.c
+
+SFILES=	bw1_vecbres.S cg1_vecbres.S gp1_shmem.IL
+
+SRCS=	$(CFILES) $(SFILES)
+
+OBJS=	pf.o pf_default.o pf_defdata.o pf_text.o pf_ttext.o pr_text.o \
+	pr_open.o pr_makefun.o pr_make.o \
+	pr_clip.o pr_dblbuf.o pr_reverse.o pr_plngrp.o \
+	pr_line.o pr_polygon2.o \
+	pr_polyline.o pr_polypoint.o pr_replrop.o \
+	pr_texpat.o pr_texvec.o pr_traprop.o \
+	pr_io.o \
+	mem.o mem_batch.o mem_colormap.o \
+	mem_getput.o mem_polypoint.o mem_region.o mem_rop.o \
+	mem_stencil.o  mem_vec.o \
+	mem_prs.o \
+	prom_batch.o \
+	bw1.o bw1_batch.o bw1_colormap.o \
+	bw1_getput.o bw1_polypoint.o bw1_region.o bw1_rop.o \
+	bw1_vec.o \
+	bw1_vecbres.o \
+	bw1_stand.o \
+	bw2.o \
+	bw2_stand.o \
+	cg1.o cg1_batch.o cg1_colormap.o \
+	cg1_getput.o cg1_polypoint.o cg1_region.o cg1_rop.o \
+	cg1_stencil.o cg1_vec.o \
+	cg1_vecbres.o \
+	cg2.o cg2_batch.o cg2_colormap.o \
+	cg2_getput.o cg2_polypoint.o cg2_region.o cg2_rop.o \
+	cg2_stencil.o cg2_vec.o \
+	cg4.o cg4_colormap.o cg4_region.o \
+	gp1.o \
+	gp1_rop.o \
+	gp1_vec.o \
+	gp1_line.o gp1_polyline.o \
+	gp1_loadtex.o gp1_polygon2.o gp1_replrop.o \
+	gp1_shmem.o gp1_util.o
+
+# implementation include files which are installed in /usr/include
+# (at least for now)
+IMPL_INCLS= mem_rop_impl_ops.h mem_rop_impl_util.h \
+	pr_impl_make.h pr_impl_shlib.h pr_impl_util.h 
+
+# include files which are installed in /usr/include
+INCLS=	bw1reg.h bw1var.h bw2var.h cg1reg.h cg1var.h cg2reg.h cg2var.h \
+	cg4var.h gp1reg.h gp1var.h gp1cmds.h \
+	memreg.h memvar.h pixfont.h pixrect.h pixrect_hs.h \
+	pr_dblbuf.h pr_io.h pr_line.h pr_planegroups.h pr_util.h \
+	traprop.h \
+	$(IMPL_INCLS)
+
+# include files which are *not* installed in /usr/include
+PRIVATE_INCLS= pr_texmacs.h 
+
+# list of fonts to be compiled into pf_defdata.o
+FONTLIST= pf_fontlist
+
+# owner of files installed in $(DESTDIR)
+OWNER= bin
+
+# compilation flags
+DEBUG=
+FLOAT= -fsoft
+INC= -I../../include
+OPTIM= -O
+READONLY= -R
+
+CFLAGS= $(INC) $(FLOAT) $(DEBUG) $(OPTIM)
+NOOPTIM= $(INC) $(FLOAT) $(DEBUG)
+
+# commands
+CHOWN=	chown -f
+CPP=	/lib/cpp -E
+LINT=	lint
+NATIVE_CC= /bin/cc
+RANLIB=	ranlib
+
+# rules
+.SUFFIXES: .S .S~ .IL .IL~
+
+.S~.S:	; $(GET) -G$@ $(GFLAGS) $<
+.S.o:	; $(CC) $(READONLY) -o $@ -c $<
+.S~.o:	; $(GET) -G$@ $(GFLAGS) $< ; $(CC) $(READONLY) -o $*.o -c $*.S
+.IL~.IL: ; $(GET) -G$@ $(GFLAGS) $<
+
+.DEFAULT: ; $(GET) -G$@ $(GFLAGS) SCCS/s.$<
+
+# targets
+default: $(TARGET) lintlib $(SRCS)
+
+$(TARGET): $(INCLS) $(OBJS)
+	@rm -f $@
+	ar rc $@ $(OBJS)
+	$(RANLIB) $@
+
+get:	$(SRCS) $(INCLS) $(PRIVATE_INCLS) $(FONTLIST) $(LINTLIB)
+
+groupwrite:
+	chmod g+w $(OBJS) $(TARGET) $(LINTLIB).ln errs
+
+devinstall: $(TARGET)
+	install -c -m 644 $(TARGET) /usr/lib
+	$(RANLIB) /usr/lib/$(TARGET)
+
+install: install_h lintlib $(TARGET) 
+	install -c -m 644 -o $(OWNER) $(LINTLIB) \
+		$(DESTDIR)/usr/lib/lint/$(LINTLIB)
+	install -c -m 644 -o $(OWNER) $(LINTLIB).ln \
+		$(DESTDIR)/usr/lib/lint/$(LINTLIB).ln
+	install -c -m 644 $(TARGET) $(DESTDIR)/usr/lib/$(TARGET)
+	$(RANLIB) $(DESTDIR)/usr/lib/$(TARGET)
+	$(CHOWN) $(OWNER) $(DESTDIR)/usr/lib/$(TARGET)
+
+install_h: $(INCLS)
+	-set +e ; \
+	if [ ! -d $(DESTDIR)/usr/include/pixrect ] ; then \
+		mkdir $(DESTDIR)/usr/include/pixrect; \
+		chmod 755 $(DESTDIR)/usr/include/pixrect ; \
+	fi ; \
+	for i in $(INCLS); do \
+		install -c -m 644 -o $(OWNER) $$i \
+			$(DESTDIR)/usr/include/pixrect ; \
+	done; \
+	$(CHOWN) $(OWNER) $(DESTDIR)/usr/include/pixrect 
+
+lintlib: $(LINTLIB) $(LINTLIB).ln
+
+# lint library 
+# (=.c is a bug workaround)
+$(LINTLIB).ln: $(LINTLIB) $(INCLS)
+	$(LINT) -Cpixrect $(INC) $(LINTLIB)=.c
+
+
+# pixfont data stuff
+
+# don't use $(CC) since we may be cross-compiling
+pf_makedef: pf_makedef.c
+	$(NATIVE_CC) $(DEBUG) -o $@ pf_makedef.c
+
+# remove output file on error
+pf_defdata.c: pf_makedef $(FONTLIST)
+	set +e; \
+	if pf_makedef < $(FONTLIST) > $@ ; then \
+		: ; \
+	else \
+		rm -f $@ ; exit 1; \
+	fi
+
+pf_defdata.o: pf_defdata.c
+	$(CC) -c $(READONLY) $(NOOPTIM) pf_defdata.c
+
+
+# files which we are certain should be compiled w/-R
+
+cg4_region.o:
+	$(CC) -c $(READONLY) $(CFLAGS) cg4_region.c
+
+mem_batch.o:
+	$(CC) -c $(READONLY) $(CFLAGS) mem_batch.c
+
+mem_colormap.o:
+	$(CC) -c $(READONLY) $(CFLAGS) mem_colormap.c
+
+mem_getput.o:
+	$(CC) -c $(READONLY) $(CFLAGS) mem_getput.c
+
+mem_prs.o:
+	$(CC) -c $(READONLY) $(CFLAGS) mem_prs.c
+
+mem_region.o:
+	$(CC) -c $(READONLY) $(CFLAGS) mem_region.c
+
+mem_rop.o:
+	$(CC) -c $(READONLY) $(CFLAGS) mem_rop.c
+
+mem_vec.o:
+	$(CC) -c $(READONLY) $(CFLAGS) mem_vec.c
+
+pr_clip.o:
+	$(CC) -c $(READONLY) $(CFLAGS) pr_clip.c
+
+pr_make.o:
+	$(CC) -c $(READONLY) $(CFLAGS) pr_make.c
+
+pr_open.o:
+	$(CC) -c $(READONLY) $(CFLAGS) pr_open.c
+
+pr_plngrp.o:
+	$(CC) -c $(READONLY) $(CFLAGS) pr_plngrp.c
+
+pr_polypoint.o:
+	$(CC) -c $(READONLY) $(CFLAGS) pr_polypoint.c
+
+pr_reverse.o:
+	$(CC) -c $(READONLY) $(CFLAGS) pr_reverse.c
+
+pr_texpat.o:
+	$(CC) -c $(READONLY) $(CFLAGS) pr_texpat.c
+
+pr_traprop.o:
+	$(CC) -c $(READONLY) $(CFLAGS) pr_traprop.c
+
+prom_batch.o:
+	$(CC) -c $(READONLY) $(CFLAGS) prom_batch.c
+
+# gp1_rop and cg2_rop share a source file
+gp1_rop.o: cg2_rop.c
+	$(CC) $(READONLY) $(CFLAGS) -DGP1_ROP -o $@ -c cg2_rop.c
+
+# gp1_shmem has an inline file
+gp1_shmem.o: gp1_shmem.il
+	$(CC) $(READONLY) $(CFLAGS) -c gp1_shmem.c gp1_shmem.il
+
+gp1_shmem.il: gp1_shmem.IL
+	$(CPP) $(INC) gp1_shmem.IL > $@
+
+# don't use -O on vector code which passes arguments in registers
+bw1_vec.o: bw1_vec.c
+	$(CC) -c $(NOOPTIM) bw1_vec.c
+
+cg1_vec.o: cg1_vec.c
+	$(CC) -c $(NOOPTIM) cg1_vec.c
+
+# misc. targets
+rcp:
+	rcp [a-z]* $(DESTMACH):/usr/src/sun/usr.lib/libpixrect/
+	rcp SCCS/[a-z]* $(DESTMACH):/usr/src/sun/usr.lib/libpixrect/SCCS/
+
+tar:
+	tar cf - * | rsh $(DESTMACH) \
+	    "cd /usr/src/sun/usr.lib/libpixrect;tar xBpf -"
+	cd /usr/include/pixrect;tar cf - * | rsh $(DESTMACH) \
+	    "cd /usr/include/pixrect;tar xBf -"
+
+clean:
+	rm -f *.o *.ln *.il $(TARGET) core pf_makedef pf_defdata.c
+
+tags:	*.h *.c
+	ctags -w *.h *.c
+
+print:
+	(ls -l | pr -f; pr -f *.h *.c) | lpr
+
+lint: $(LINTLIB).ln
+	lint $(INC) $(LINTLIB).ln $(CFILES)
+
+# dependencies on local include files
+mem_polypoint.o: mem_rop_impl_ops.h
+pr_texvec.o:	pr_texmacs.h

@@ -1,0 +1,150 @@
+| @(#)pixrect.vp.u 1.1 94/10/31 SMI
+| Copyright (c) 1985 by Sun Microsystems,Inc.
+
+
+#define sy	r[22]
+#define sx	r[21]
+#define junk1	r[18]
+#define nvptr r[17]
+#define TexDepth r[16]	/* depth 0 means no texture. */
+#define temp16 r[16]
+/* Has to be common with polyscan.vp.u */
+#define colorop r[15]
+#define edgtblptr r[14]
+#define nbnds r[13]
+#define nvert r[12]
+#define nedges r[11]
+#define nxtptr r[10]
+#define nxtx r[9]
+#define yoff r[8]
+#define xoff r[7]
+#define curx r[6]
+#define cury r[5]
+#define xpt1 r[4]
+#define ypt1 r[3]
+#define addra r[13]
+#define addrd r[12]
+
+#define numbytes r[0]
+#define MAXEDGES 400
+
+
+|	subw,s d,fbindx,y;	shmem->am;	jmap PRVEC;	;
+PRVEC:	movw d,acc;		shmem->am;	cjs,~zer getfbaddr;;
+	;			;		jmap prvec_pp;	;			| 
+
+
+|	subw,s d,fbindx,y;	shmem->am;	jmap PR_LINE;	;	
+PR_LINE: movw d,acc;		shmem->am;	cjs,~zer getfbaddr; ;			| 
+	;			;		jmap pr_line_pp; ;			| 
+
+
+|	subw,s d,fbindx,y;	shmem->am;	jmap PR_POLYLINE; ;	
+PR_POLYLINE:	
+	movw d,acc;		shmem->am;	cjs,~zer getfbaddr; ;			| 
+	;			;		jmap pr_polyline_pp; ;			| 
+  
+
+|   Textured 2D polygons.
+|   Defined registers must match SET_TEX.
+#define Depth	r[15]
+#define Width	r[14]
+#define Height	r[13]
+#define Words	r[12]
+#define Rows	r[11]
+#define temp	r[0]
+
+|   Can't use r[0] because PR_POLYTEX needs cmd (r[0]) preserved for use by PR_POLYSOL.
+|   	subw,s d,fbindx,y;	shmem->am;	jmap PR_POLYTEX; ;			| 
+PR_PGON_TEX: movw d,acc;	shmem->am;	cjs,~zer getfbaddr; ;		shp+	| if fbindx has changed get new address.
+	;			;		cjp,f1f .;	;			| 
+	;			PPLDTEX->fifo1;	;		;			| 
+	;			;		cjs,go stprep;	;			| see SET_TEX.
+	movw Width,y;		am->fifo1;	cjp,f1f .;	;			| 
+	movw Words,y;		am->brreg;	;		;			| 
+	movw Height,y;		am->fifo1;	cjp,f1f .;	;			| 
+	movw Height,Rows;	;		;		;			| 
+	movw Depth,y;		am->fifo1;	cjp,f1f .;	;			| 
+
+prptld:	sub2nw,s 0,Rows,Rows;	;		push,go;	;			| 
+	movw Depth,acc;		shmem->fifo1;	cjp,f1f .;	;			| 
+   	incw cmdptr,cmdptr;	;		rfct;		;		shp+	| 
+   	movw Words,y;		am->brreg;	cjp,~zer prptld; ;			| 
+
+|   PRPOLYSOL1_PP does jmap getcmd.
+
+	movw d,sx;		shmem->am;	;		;		shp+	| 
+	movw d,sy;		shmem->am;	;		;		shp+	| 
+	movw acc,TexDepth;	TEX2DPPFRM_GL->shmemp; ;	;			| Set PP tex block ptr to PIXRECT type.
+	;			0xffff->shmem;	;		;			| Always load texture if -1 is block ptr.
+	addw d,cmdptr,cmdptr;	5->am;		;		;			| 5= Depth,Width,Height,sx,sy.
+	add2nw 1,cmdptr,junk1;	am->shmemp;	jmap PRPOLYSOL1_PP; ;			| 
+
+
+
+#undef Depth
+#undef Width
+#undef Height
+#undef Words
+#undef Rows
+#undef temp
+
+
+|	subw,s d,fbindx,y;	shmem->am;	jmap PRPOLYSOL;	;
+PRPOLYSOL: movw d,acc;		shmem->am;	cjs,~zer getfbaddr; ;		shp+	| if fbindx has changed,get new address
+	movw 0,TexDepth;	;		jmap PRPOLYSOL1_PP; ;			| Solid => no texture.
+
+#ifndef GPPLUS
+doscan:	sub2nw 0,nxtptr,nxtptr;	am->fpdp;	;		lmode rn,ai,pipe,fast;	| set Weitek mode
+	movw,s nedges,y;	0->fpregl;	;		;			| load NULL nxtptr for last edge
+	subw,s nedges,MAXEDGES,nedges;;		cjp,neg noscan;	;			| if # of edges > MAXEDGES,goto noscan
+	IMM;			23->am;		;		;			| compute real # of edges
+	movw d,addra;		am->fpap;	cjp,zer noscan;	;			| if # of edges == 0,goto noscan
+	movw 5,acc;		;		;		floata,la,hi;		| convert xmin and xmax in each edge
+	IMM;			;		;		;		ap+	| structure to floats; start at xmax of
+	movw addra,addrd;	am->fpdp;	;		floata,la,hi;		| first real edge (address 23)
+	addw addra,acc,addra;	am->fpap;	;		;
+	movw =fltloop,y;	;		;		floata,la,hi;
+	IMM;			am->brreg;	;		;		ap+
+	;			;		ldct;		floata,la,hi;		| 2910 R reg is fltloop
+	addw addra,acc,addra;	am->fpap;	;		;
+	movw =doscan1,y;	;		;		floata,la,a,hi;
+	IMM;			am->brreg;	;		;		ap+	| brreg is doscan1; pipe now full
+fltloop: sub2nw,s 0,nedges,nedges;;		;		floata,la,a,st,hi;	| store xmax
+	addw addra,acc,addra;	am->fpap;	;		;		dp+	| reload fpap,increment fpdp
+	;			;		;		floata,la,a,st,hi;	| store xmin
+	addw addrd,acc,addrd;	am->fpdp;	jrp,zer;	;		ap+	| reload fpdp,increment fpap; loop until
+											| all edges are done
+doscan1: ;			;		cjs,go polyscan; ;			| call scan conversion routine
+noscan:	;			;		jmap getcmd;	;			| 
+
+#endif GPPLUS
+
+
+#undef sx
+#undef sy
+#undef junk1
+#undef nvptr
+#undef TexDepth
+#undef temp16
+#undef colorop
+#undef edgtblptr
+#undef nbnds
+#undef nvert
+#undef nedges
+#undef nxtptr
+#undef nxtx
+#undef yoff
+#undef xoff
+#undef curx
+#undef cury
+#undef xpt1
+#undef ypt1
+#undef addra
+#undef addrd
+
+#undef MAXEDGES
+
+#include "ropnull.vp.u"
+#include "ropfb.vp.u"
+#include "roptex.vp.u"

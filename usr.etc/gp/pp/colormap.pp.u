@@ -1,0 +1,121 @@
+| @(#)colormap.pp.u 1.1 94/10/31 SMI
+
+| Copyright 1985 by Sun Microsystems, Inc.
+
+|   Sets color map & synchronizes with retrace.
+|   For 16 colors & double buffering.  Even frames ignore most significant
+|   nibble.
+
+|   load 16 * 3 words.
+ldcolmap: ;			15->brreg;	;				| 
+	;			RMap->scrmemp;	push, go;			| 
+ldcmred:;			fifo1->am;	cjp, f1e ldcmred;		| 
+	movw d, y;		am->scrmem;	rfct;			scrmp +	| 
+	;			15->brreg;	;				| 
+	;			GMap->scrmemp;	push, go;			| 
+ldcmgrn:;			fifo1->am;	cjp, f1e ldcmgrn;		| 
+	movw d, y;		am->scrmem;	rfct;			scrmp +	| 
+	;			15->brreg;	;				| 
+	;			BMap->scrmemp;	push, go;			| 
+ldcmblu:;			fifo1->am;	cjp, f1e ldcmblu;		| 
+	movw d, y;		am->scrmem;	rfct;			scrmp +	| 
+	;			0x21->vhiareg;	;				| 
+	;			0xf000->vloareg;;				| 
+ld1:	;			;		cjp, ~vir ld1;			| 
+	;			0x73->vctlreg;	;				| 
+	;			0x6789->vwdreg;	;			vmewr	| 
+	;			;		cjp, go start;			| 
+
+
+retrlo:	;			FBStatus->vloareg;;				| 
+retvctl:movw FBCont, y;		am->vhiareg;	cjp, ~vir retvctl;		| 
+	;			GPVWord->vctlreg; ;				| 
+retvr:	;			;		cjp, ~vir retvr;	vmerd	| Wait for vertical retrace to go low.
+retvra:	btstw,s 7, d;		vrdreg->am;	cjp, ~vir retvra;		| 
+	;			;		cjp, ~zer retvr;		| 
+	;			;		crtn, go;			| 
+
+retrhi:	;			FBStatus->vloareg;;				| 
+retvctlh:movw FBCont, y;	am->vhiareg;	cjp, ~vir retvctlh;		| 
+	;			GPVWord->vctlreg; ;				| 
+retvr1:	;			;		cjp, ~vir retvr1;	vmerd	| Wait for vertical retrace to go high.
+retvrb:	btstw,s 7, d;		vrdreg->am;	cjp, ~vir retvrb;		| 
+	;			;		cjp, zer retvr1;		| 
+	;			;		crtn, go;			| 
+
+
+|   Set even colormap.  For low nibble of pixel byte.
+|   Assumes FBHi and FBCont have been set.
+colmape:;			0->vloareg;	;				| 
+cmevctl:incw FBCont, y;		am->vhiareg;	cjp, ~vir cmevctl;		| 
+	;			GPVWord->vctlreg; ;				| 
+	movw d, acc;		15->am;		;				| 
+cmered:	;			15->brreg;	;				| 
+	decws acc;		RMap->scrmemp;	push, go;			| 
+cmevwr:	;			scrmem->vwdreg;	cjp, ~vir cmevwr;	vmewr	| 
+	;			;		;			varegs +| 
+	;			;		;			varegs +| 
+	;			;		rfct;			scrmp +	| 
+	;			;		cjp, ~neg cmered;		| 
+	movw d, acc;		15->am;		;				| 
+cmegrn:	;			15->brreg;	;				| 
+	decws acc;		GMap->scrmemp;	push, go;			| 
+cmevwg:	;			scrmem->vwdreg;	cjp, ~vir cmevwg;	vmewr	| 
+	;			;		;			varegs +| 
+	;			;		;			varegs +| 
+	;			;		rfct;			scrmp +	| 
+	;			;		cjp, ~neg cmegrn;		| 
+	movw d, acc;		15->am;		;				| 
+cmeblu:	;			15->brreg;	;				| 
+	decws acc;		BMap->scrmemp;	push, go;			| 
+cmevwb:	;			scrmem->vwdreg;	cjp, ~vir cmevwb;	vmewr	| 
+	;			;		;			varegs +| 
+	;			;		;			varegs +| 
+	;			;		rfct;			scrmp +	| 
+	;			;		cjp, ~neg cmeblu;		| 
+	;			;		cjs, go colsync;		| 
+	;			;		cjp, go start;			| 
+
+
+|   sync with retrace
+colsync:;			;		cjs, go retrlo;			| 
+cmsupd:	;			;		cjp, ~vir cmsupd;	vmerd	| 
+cmsupd1:;			vrdreg->am;	cjp, ~vir cmsupd1;		| 
+	bsetw 1, d, y;		am->vwdreg;	cjs, go retrhi;		vmewr	| 
+	;			;		cjs, go retrlo;			| 
+cmsupd2:;			;		cjp, ~vir cmsupd2;	vmerd	| 
+cmsupd3:;			vrdreg->am;	cjp, ~vir cmsupd3;		| 
+	bclrw 1, d, y;		am->vwdreg;	cjp, go start;		vmewr	| 
+
+
+|   Set odd colormap.  For high nibble of pixel byte.
+|   Assumes FBHi and FBCont have been set.
+colmapo:;			0->vloareg;	;				| 
+cmovctl:incw FBCont, y;		am->vhiareg;	cjp, ~vir cmovctl;		| 
+	;			VByte->vctlreg;	;				| 
+	movw d, acc;		15->am;		;				| 
+	;			RMap->scrmemp;	;				| 
+cmored:	;			15->brreg;	;				| 
+	decws acc;		;		push, go;			| 
+cmovwr:	;			scrmem->vwdreg;	cjp, ~vir cmovwr;	vmewr	| 
+	;			;		;			varegs +| 
+	;			;		rfct;			varegs +| 
+	;			;		cjp, ~neg cmored;	scrmp +	| 
+	movw d, acc;		15->am;		;				| 
+	;			GMap->scrmemp;	;				| 
+cmogrn:	;			15->brreg;	;				| 
+	decws acc;		;		push, go;			| 
+cmovwg:	;			scrmem->vwdreg;	cjp, ~vir cmovwg;	vmewr	| 
+	;			;		;			varegs +| 
+	;			;		rfct;			varegs +| 
+	;			;		cjp, ~neg cmogrn;	scrmp +	| 
+	movw d, acc;		15->am;		;				| 
+	;			BMap->scrmemp;	;				| 
+cmoblu:	;			15->brreg;	;				| 
+	decws acc;		;		push, go;			| 
+cmovwb:	;			scrmem->vwdreg;	cjp, ~vir cmovwb;	vmewr	| 
+	;			;		;			varegs +| 
+	;			;		rfct;			varegs +| 
+	;			;		cjp, ~neg cmoblu;	scrmp +	| 
+	;			;		cjs, go colsync;		| 
+	;			;		cjp, go start;			| 

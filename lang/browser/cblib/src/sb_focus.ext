@@ -1,0 +1,67 @@
+/* @(#)sb_focus.ext 1.1 94/10/31 */
+
+/*
+ *	Copyright (c) 1989, Sun Microsystems, Inc.  All Rights Reserved.
+ *	Sun considers its source code as an unpublished, proprietary
+ *	trade secret, and it is available only under strict license
+ *	provisions.  This copyright notice is placed here only to protect
+ *	Sun in the event the source is deemed a published work.  Dissassembly,
+ *	decompilation, or other means of reducing the object code to human
+ *	readable form is prohibited by the license agreement under which
+ *	this code is provided to the user or company in possession of this
+ *	copy.
+ *	RESTRICTED RIGHTS LEGEND: Use, duplication, or disclosure by the
+ *	Government is subject to restrictions as set forth in subparagraph
+ *	(c)(1)(ii) of the Rights in Technical Data and Computer Software
+ *	clause at DFARS 52.227-7013 and in similar clauses in the FAR and
+ *	NASA FAR Supplement.
+ */
+
+/*
+ *	Summary of unit tags used
+ *
+ *	B	Block
+ *	E	Enum
+ *	F	Function
+ *	G	Language
+ *	L	Library
+ *	M	Macro
+ *	P	Program
+ *	S	Source file
+ *	T	Struct
+ *	U	Union
+ */
+
+#ifndef sb_focus_ext_INCLUDED
+#define sb_focus_ext_INCLUDED
+
+language focus
+
+version 1
+
+#include "sb_base.ext"
+
+#define PROP ( BASE.CB_MENU_TOKEN_CBCHECKCB BASE.CB_MENU_TOKEN_CBCAT )
+
+tags focus 15 {
+	def-focus-unit Program P PROP use-refd make-absolute stop inf
+	def-focus-unit Library L PROP use-refd make-absolute stop inf
+	def-focus-unit File S PROP make-absolute start zero stop inf
+	def-focus-unit Macro M PROP
+	def-focus-unit Function F PROP
+	def-focus-unit Block B PROP invisible
+	def-focus-unit Struct T PROP invisible
+	def-focus-unit Union U PROP invisible
+	def-focus-unit Enum E PROP invisible
+	def-focus-unit Language G PROP start zero stop inf
+}
+
+#undef PROP
+
+#define NO_CPP_SECONDARIES
+#include "sb_cpp.ext"
+#undef NO_CPP_SECONDARIES
+
+#include "sb_graph.ext"
+
+#endif

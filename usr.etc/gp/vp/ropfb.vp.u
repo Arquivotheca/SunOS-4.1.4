@@ -1,0 +1,262 @@
+| Copyright (c) 1985 by Sun Microsystems, Inc.
+|	@(#)ropfb.vp.u 1.1 94/10/31 SMI
+
+|   Frame buffer to frame buffer rops.
+
+#define LMaskTable	4096	/* vpprom address. */
+#define RMaskTable	4112	/* 4096 + 16 */
+
+#define dstx	r[0]	/* dbd->cgpr_offset.x */
+#define dsty	r[1]	/* dbd->cgpr_offset.y */
+#define dstwid	r[2]	/* dst.pr->pr_size.x */
+#define dstht	r[3]	/* dst.pr->pr_size.y */
+#define recx	r[4]	/* dst.pos.x */
+#define recy	r[5]	/* dst.pos.y */
+#define recwid	r[6]	/* dst.size.x */
+#define recht	r[7]	/* dst.size.y */
+#define srcx	r[8]	/* sbd->cpr_offset.x */
+#define srcy	r[9]	/* sbd->cpr_offset.y */
+#define srcwid	r[10]	/* src.pr->pr_size.x */
+#define srcht	r[11]	/* src.pr->pr_size.y */
+#define addrhi	r[12]
+#define addrlo	r[13]
+#define junk	r[14]
+#define Multiplier r[14]	/* Must be same as in ropnull.vp.u. */
+#define temp	r[15]
+
+#define ropmode	r[16]
+#define nodst	r[17]
+#define sx0	r[18]	/* src.pos.x */
+#define sy0	r[19]	/* src.pos.y */
+#define w	r[20]
+#define FBHi	r[21]
+#define dir	r[22]
+#define prime	r[23]
+#define op	r[24]
+
+|	movw,s d, y;		shmem->am;	jmap PRROPFF;	;			
+PRROPFF: movw PPSETFSTRD, acc;	;		cjp, ~neg .+2;  ;			| 
+	;			am->fifo1;	cjs, f1f wrfifo; ;			| 
+	subw,s d, fbindx, y;	shmem->am;	;		;			| 
+	movw d, acc;		shmem->am;	cjs, ~zer getfbaddr; ;		shp+	|
+	movw PPMASK, acc;	=wrfifo->brreg;	;		;			| 
+	;			am->fifo1;	cjs, f1f;	;			| 
+	andw d, cmd, acc;	0xff->am;	cjs, go;	;			| low 8 bits of cmd
+	movw d, op;		shmem->am;	cjs, go roprect; ;		shp+	| 
+	movw d, srcx;		shmem->am;	;		;		shp+	| 
+	movw d, srcy;		shmem->am;	;		;		shp+	| 
+	movw d, srcwid;		shmem->am;	;		;		shp+	| 
+	movw d, srcht;		shmem->am;	;		;		shp+	| 
+	movw d, sx0;		shmem->am;	;		;		shp+	| 
+	movw d, sy0;		shmem->am;	;		;		shp+	| 
+|   SetUp ()
+	norw,s d, op, y;	0xfffe->am;	;		;			| if (!(op & PIX_DONTCLIP)) prclip ()
+	;			;		cjs, ~zer prclip;;			| 
+	negw,s recwid, y;	;		;		;			| if ((dst.size.x <= 0)
+	negw,s recht, y;	;		cjp, ~neg prrfend;;			| (dst.size.y <= 0)) return
+	;			;		cjp, ~neg prrfend;;			| 
+	movw 5, acc;		=wrfifo->brreg;	;		;			| 
+	;			am->fifo1;	cjs, f1f;	;			| pp command
+	movw dstx, acc;		;		;		;			| dst.pos.x += dbd->cgpr_offset.x
+	addw recx, acc, recx;	;		;		;			| 
+	movw dsty, acc;		;		;		;			| dst.pos.y += dbd->cgpr_offset.y
+	addw recy, acc, recy;	;		;		;			| 
+	andw d, recx, temp;	0xf->am;	;		;			| skew= cg2_prskew (dst.pos.x) == recx & 15
+	sub2nw 0, temp, temp;	am->am;		;		;			| w= (dst.size.x + skew - 1) >> 4.
+	addw d, recwid, acc;	;		;		;			| 
+	rolw 12, acc, w;	;		;		;			| 
+	andw d, w, w;		0xfff->am;	;		;			| 
+	sr0w op, op;		;		;		;			| op= (op >> 1) & 0xf
+	andw d, op, op;		0xf->am;	;		;			| 
+|   End SetUp ()
+	movw srcx, acc;		;		;		;			| src.pos.x += sbd->cgpr_offset.x
+	addw sx0, acc, sx0;	;		;		;			| 
+	movw srcy, acc;		;		;		;			| src.pos.y += sbd->cgpr_offset.y
+	addw sy0, acc, sy0;	;		;		;			| 
+	movw recx, acc;		;		;		;			| dir= rop_direction ()
+	addw dstx, acc, acc;	;		;		;			| 
+	subw sx0, acc, acc;	;		;		;			| 
+	subw,s srcx, acc, acc;	;		;		;			| 
+	movw 0, dir;		;		cjp, ~neg rfdir;;			| 
+	mov2nw 1, dir;		;		;		;			| 
+rfdir:	movw recy, acc;		;		;		;			| 
+	addw dsty, acc, acc;	;		;		;			| 
+	subw sy0, acc, acc;	;		;		;			| 
+	subw,s srcy, acc, acc;	;		;		;			| 
+	incw dir, dir;		;		cjp, neg rfsetpp;;			| if (rop_isdown (dir))
+	sub2nw 0, dir, dir;	;		;		;			| 
+	subw d, recht, acc;	1->am;		;		;			| src.pos.y += dst.size.y - 1
+	addw sy0, acc, sy0;	;		;		;			| 
+	addw recy, acc, recy;	;		;		;			| dst.pos.y += dst.size.y - 1
+|   SetPPMask () (actually no longer sets per plane mask).
+rfsetpp:movw op, acc;		;		;		;			| PIXOP_NEEDS_DST (op<<1)= (op^(op<<1)) &0xa
+	sl0w acc, acc;		;		;		;			| 
+	xorw op, acc, acc;	=wrfifo->brreg;	;		;			| 
+	andw,s d, acc, acc;	0xa->am;	;		;			| 
+	movw d, ropmode;	6->am;		;		;			| PWRWRD->am
+	movw 0, nodst;		;		cjp, ~zer rfrop; ;			| 
+	movw d, ropmode;	4->am;		;		;			| PRRWRD->am
+	incw 0, nodst;		;		;		;			| 
+rfrop:	movw d, acc;		6->am;		cjs, go;	;			| PWRWRD->fifo1
+	movw op, acc;		;		cjs, go;	;			| cg2_setfunction (fb, CG2_ALLROP, op)
+	movw 0, acc;		am->fifo1;	cjs, f1f;	;			| RRPattern= 0
+	btstw,s 1, dir;		1->am;		;		;			| if (rop_isright (dir) && w)
+	movw,s w, y;		;		cjp, ~zer rfleft;;			| 
+	subw d, recwid, acc;	;		cjp, zer rfleft;;			| dst.size.x - 1
+	addw sx0, acc, sx0;	;		;		;			| src.pos.x += dst.size.x - 1
+	addw recx, acc, recx;	;		;		;			| dst.pos.x += dst.size.x - 1
+	subw d, recwid, acc;	1->am;		;		;			| RRMask2= mrc_lmasktable[(dst.size.x)&0xf]
+	rsubw recx, acc, acc;	;		;		;			| 
+	andw d, acc, acc;	0xf->am;	;		;			| 
+	addw d, acc, acc;	LMaskTable->am;	;		;			| 
+	movw acc, y;		am->vppromp;	;		;			| 
+rfmask2:;			;		cjp, f1f rfmask2; ;			| 
+	;			;		;		;			| 
+	;			vpprom->fifo1;	;		;			| 
+	movw d, junk;		RMaskTable->am;	;		;			| SKEW (0, mrc_rmasktable)
+	movw 0, temp;		;		cjs, go rfskew;	;			| 
+	subw,s temp, acc, y;	;		;		;			| prime= srcskew <= skew
+	incw 0, prime;		;		cjp, ~neg rfprim1;;			| 
+	movw 0, prime;		;		;		;			| 
+rfprim1:;			;		cjp, go rfsrc2;	;			| 
+rfleft:	subw d, recwid, acc;	1->am;		;		;			| RRMask2= mrc_rmasktable[(dst.size.x)&0xf]
+	addw recx, acc, acc;	;		;		;			| 
+	andw d, acc, acc;	0xf->am;	;		;			| 
+	addw d, acc, acc;	RMaskTable->am;	;		;			| 
+	movw acc, y;		am->vppromp;	;		;			| 
+rfmask2a:;			;		cjp, f1f rfmask2a; ;			| 
+	;			;		;		;			| 
+	;			vpprom->fifo1;	;		;			| 
+	movw d, junk;		LMaskTable->am;	;		;			| SKEW (1, mrc_lmasktable)
+	incw 0, temp;		;		cjs, go rfskew;	;			| 
+	rsubw,s temp, acc, y;	;		;		;			| 
+	incw 0, prime;		;		cjp, ~neg rfsrc2; ;			| 
+	movw 0, prime;		;		;		;			| 
+rfsrc2:	movw 0, y;		am->fifo1;	cjp, f1f rfsrc2; ;			| dummy src2
+	movw sy0, acc;		;		;		;			| 
+	movw acc, Multiplier;	;		cjs, go MulSWWid;;			| sy= cg2_ropwordaddr (fb,0,sx0,sy0)
+	;			;		cjs, go fbaddr;	;			| 
+	movw acc, FBHi;		;		;		;			| 
+	rolw 13, sx0, acc;	;		;		;			| 
+	andw d, acc, acc;	0x1fff->am;	;		;			| 
+	addw addrlo, acc, addrlo;;		;		;			| 
+	addcw d, FBHi, acc;	0x20->am;	;		;			| RopFB->am
+rfalof0:movw addrlo, y;		am->fifo1;	cjp, f1f rfalof0;;			| 
+	addw addrhi, acc, addrhi;;		;		;			| 
+rfahif0:movw addrhi, y;		am->fifo1;	cjp, f1f rfahif0;;			| 
+	movw recy, Multiplier;	;		cjs, go MulSWWid;;			| by= cg2_ropwordaddr (fb,0,recx,recy)
+	rolw 13, recx, acc;	;		;		;			| 
+	andw d, acc, acc;	0x1fff->am;	;		;			| 
+	addw addrlo, acc, addrlo;;		;		;			| 
+	addcw d, FBHi, acc;	0x20->am;	;		;			| RopFB->am
+rfalof:	movw addrlo, y;		am->fifo1;	cjp, f1f rfalof;;			| 
+	addw addrhi, acc, addrhi;;		;		;			| 
+rfahif:	movw addrhi, y;		am->fifo1;	cjp, f1f rfahif;;			| 
+rfwf:	movw w, y;		am->fifo1;	cjp, f1f rfwf;	;			| 
+rfropmf:movw ropmode, y;	am->fifo1;	cjp, f1f rfropmf;;			| 
+rfrechtf:movw recht, y;		am->fifo1;	cjp, f1f rfrechtf;;			| 
+rfdirf:	movw dir, y;		am->fifo1;	cjp, f1f rfdirf;;			| 
+rfprime:movw prime, y;		am->fifo1;	cjp, f1f rfprime;;			| 
+prrfend:addw d, cmdptr, cmdptr;	17->am;		;		;			|
+	movw PPUNSTFSTRD, acc;	;		;		;			|
+	;			am->fifo1;	cjs, f1f wrfifo; ;			| 
+	;			;		jmap getcmd;	;			| 
+
+|   SKEW (a,b)
+|   (b) masktable address in junk.  (a) is 0 or 1 in temp.
+|   Returns srcskew in temp, and skew in acc.  Loads RRMask1 into fifo.
+rfskew:	andw d, recx, acc;	0xf->am;	;		;			| skew= cg2_prskew (dst.pos.x)
+	addw junk, acc, y;	am->vppromp;	;		;			| *(b + (dst.pos.x & 0xf))
+	rolw 8, temp, r[0];	;		;		;			| Reuse op reg.
+	movw sx0, y;		am->am;		;		;			| 
+	movw d, junk;		;		;		;			| 
+	andw d, junk, temp;	0xf->am;	;		;			| srcskew= cg2_prskew (src.pos.x).
+	subw temp, acc, junk;	;		;		;			| cg2_setshift (,, (skew - srcskew)&0xf, a)
+	andw d, junk, junk;	;		;		;			| 
+rfskew3:;			vpprom->fifo1;	cjp, f1f rfskew3;;			| RRMask1
+rfwidf1:movw w, y;		am->fifo1;	cjp, f1f rfwidf1;;			| cg2_setwidth (fb, CG2_ALLROP, w, ...)
+rfwidf2:movw w, y;		am->fifo1;	cjp, f1f rfwidf2;;			| cg2_setwidth (,,, w)
+	movw junk, y;		am->am;		;		;			| 
+rfskew1:orw d, r[0], y;		am->fifo1;	cjp, f1f rfskew1;;			| RRShift
+	;			;		crtn, go;	;			| 
+	
+
+|   First:  pr_clip1 (dstp, &dstp->size, srcp)
+prclip:	movw,s recx, y;		am->am;		;		;			| if ((pra)->pos.x < 0)
+	movw,s recy, y;		;		cjp, ~neg prclipa;;			| if ((pra)->pos.y < 0)
+	subw d, sx0, sx0;	;		;		;			| (prb)->pos.x -= (pra)->pos.x
+	addw d, recwid, recwid;	;		;		;			| (size)->x += (pra)->pos.x
+	movw 0, recx;		;		;		;			| (pra)->pos.x = 0
+prclipa:movw recy, y;		am->am;		cjp, ~neg prclipb;;			| 
+	subw d, sy0, sy0;	;		;		;			| (prb)->pos.y -= (prb)->pos.y
+	addw d, recht, recht;	;		;		;			| (size)->y += (pra)->pos.y
+	movw 0, recy;		;		;		;			| (pra)->pos.y = 0
+|   The statement:  if ((a+b) > c) b= c-a; is equivalent to:  if (b > (c-a)) b= c-a;
+|   Notice the common c-a expression.  The rest of the prclip code has been reordered for this.
+prclipb:movw recx, y;		am->am;		;		;			| 
+	subw d, dstwid, acc;	;		;		;			| (pra)->pr->pr_size.x - (pra)->pos.x
+	subw,s recwid, acc, y;	;		;		;			| < (size)->x.  { (c-a) < b }
+	movw recy, y;		am->am;		cjp, ~neg prclipc;;			| 
+	movw acc, recwid;	;		;		;			| b= c-a
+prclipc:subw d, dstht, acc;	;		;		;			| (pra)->pr->pr_size.y - (pra)->pos.y
+	subw,s recht, acc, y;	;		;		;			| < (size)->y.  { (c-a) < b }
+	;			;		cjp, ~neg prclip1;;			| 
+	movw acc, recht;	;		;		;			| b= c-a
+|   Second:  pr_clip1 (srcp, &dstp->size, dstp)
+prclip1:movw,s sx0, y;		am->am;		;		;			| if ((pra)->pos.x < 0)
+	movw,s sy0, y;		;		cjp, ~neg prclip1a;;			| if ((pra)->pos.y < 0)
+	subw d, recx, recx;	;		;		;			| (prb)->pos.x -= (pra)->pos.x
+	addw d, recwid, recwid;	;		;		;			| (size)->x += (pra)->pos.x
+	movw 0, sx0;		;		;		;			| (pra)->pos.x = 0
+prclip1a:movw sy0, y;		am->am;		cjp, ~neg prclip1b;;			| 
+	subw d, recy, recy;	;		;		;			| (prb)->pos.y -= (prb)->pos.y
+	addw d, recht, recht;	;		;		;			| (size)->y += (pra)->pos.y
+	movw 0, sy0;		;		;		;			| (pra)->pos.y = 0
+|   The statement:  if ((a+b) > c) b= c-a; is equivalent to:  if (b > (c-a)) b= c-a;
+|   Notice the common c-a expression.  The rest of the prclip code has been reordered for this.
+prclip1b:movw sx0, y;		am->am;		;		;			| 
+	subw d, srcwid, acc;	;		;		;			| (pra)->pr->pr_size.x - (pra)->pos.x
+	subw,s recwid, acc, y;	;		;		;			| < (size)->x.  { (c-a) < b }
+	movw sy0, y;		am->am;		cjp, ~neg prclip1c;;			| 
+	movw acc, recwid;	;		;		;			| b= c-a
+prclip1c:subw d, srcht, acc;	;		;		;			| (pra)->pr->pr_size.y - (pra)->pos.y
+	subw,s recht, acc, y;	;		;		;			| < (size)->y.  { (c-a) < b }
+	;			;		crtn, ~neg;	;			| 
+	movw acc, recht;	;		crtn, go;	;			| b= c-a
+
+
+fbaddr:	addw d,fbindx,acc;	=cg2_board_addr0->am; ;		;			| 
+	movw acc,y;		am->brreg;	;		;
+	;			;		cjp, go;	;			| cg2_board_addrx will do crtn, go.
+
+
+#undef LMaskTable
+#undef RMaskTable
+
+#undef dstx
+#undef dsty
+#undef dstwid
+#undef dstht
+#undef recx
+#undef recy
+#undef recwid
+#undef recht
+#undef srcx
+#undef srcy
+#undef srcwid
+#undef srcht
+#undef addrhi
+#undef addrlo
+#undef junk
+#undef Multiplier
+#undef temp
+
+#undef ropmode
+#undef nodst
+#undef sx0
+#undef sy0
+#undef w
+#undef FBHi
+#undef dir
+#undef prime
+#undef op

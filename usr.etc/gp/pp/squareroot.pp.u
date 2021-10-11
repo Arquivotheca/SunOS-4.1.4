@@ -1,0 +1,100 @@
+| "@(#)squareroot.pp.u 1.1 94/10/31"
+
+| Copyright 1986 by Sun Microsystems, Inc.
+| Written by Stuart Levy
+
+ 
+
+|   Result is in r[7], number to be square-rooted is in r[5] and r[6], where r[6]
+|   must be zeroed out if not used.  Note that first instruction needs condition code to be
+|   set by calling routine, are checking if squares is 0.
+
+#define dvsr 		acc
+#define	mod		acc
+#define	dvdnd		r[0]
+#define t		r[0]
+#define divlow		r[0]
+#define thigh		r[1]
+#define divhigh		r[1]
+#define	quot		r[2]
+#define reshigh		r[3]
+#define x2 		r[4]
+#define squares		r[5]
+#define sqhigh		r[6]
+#define result		r[7]
+
+
+
+sqrt:	sub2nw,s 0,squares,r[0]; ;		cjp, zer sqzero;		| Will return zero if squares 0 or 1.
+	movw squares,result;	;		cjp, zer sqzero;		| 
+	testw (sqhigh);		;		;				| Check if need to do double precision.
+	movw squares,t;		;		cjp, ~zer sqdbl;		| Jump if need to use double precision.
+sqshft:	sr0w,s t,t;		17->am;		;				| while (t>>=2) x>>=1.
+	sr0w,s t,t;		;		cjp, zer sqrt2;			| 
+	sr0w result,result;	;		cjp, ~zer sqshft;		| 
+	slqw result,result;	;		;				| Shift back once, using qlink (MSB).
+sqrt2:	incw result,result;	;		;				| 
+sqloop:	movw result,dvsr;	;		;				| 
+	movw squares,dvdnd;	;		cjs, go divide;			| 
+	movw quot,y;		am->am;		;				| quot = n/x. Q is in d-latch.
+sqloop2: rsubw,s d,result,y;	;		;				| Compute (q-x). Will jump if (x <= q).
+	;			;		cjp, neg squpx;			| if (x <= q) => x2 = x+2 
+	add2nw 1,result,x2;	am->am;		;				| 
+	subw,s d,quot,y;	;		;				| Check if (q < x2), ie (q-x2) < 0.
+	movw quot,y;		am->am;		crtn, neg;			| Return if (q < x2).
+	testw (mod);		;		cjp, ~zer squpx;		| Continue if q != x2. 
+	;			;		crtn, zer;			| Return if (q == x2 && mod2==0). Q in d-latch.
+squpx:	addw d,result,result;	;		;				| x = (x + q) >> 1.
+	sr0w result,result;	;		cjp, go sqloop;			| 
+
+#undef mod
+
+|   Double precision squareroot routine.  Note that mod moves to r[1] now.
+
+#define mod		r[1]
+
+sqdbl: movw sqhigh,thigh;	;		;				| Double precision squareroot.
+	movw sqhigh,reshigh;	;		;				| 
+sqdshft: sr0w,s thigh,thigh;	;		;				| While (t>>=2) x>>=1.
+	srqw t,t;		;		cjp, zer sqrshft2;		| 
+	sr0w,s thigh,thigh;	;		;				| Shift down upper word of t again.
+	srqw t,t;		;		cjp, zer sqrres;		| Shift LSB of upper into MSB of lower.
+	sr0w,s reshigh,reshigh;	;		;				| Here we know res is still double prec.
+	srqw result,result;	;		cjp, go sqdshft;		| Loop.
+sqrshft: sr0w t,t;		;		;				| T is single prec., res is still double.
+sqrshft2: sr0w t,t;		;		;				| 
+sqrres:	sr0w,s reshigh,reshigh;	;		;				| Res should be single before t = 0. CHECK!
+	srqw result,result;	;		cjp, ~zer sqrshft;		| Loop as long as res is still double prec.
+sqsshft: sr0w,s t,t;		17->am;		;				| Code same as single prec. until divide!!
+	sr0w,s t,t;		;		cjp, zer sqrtd2;		| 
+	sr0w result,result;	;		cjp, ~zer sqsshft;		| 
+	slqw result,result;	;		;				| Shift back once, using qlink (MSB).
+sqrtd2:	incw result,result;	;		;				| x++
+sqdloop: movw result,dvsr;	;		;				| 
+	movw sqhigh,divhigh;	;		;				| Load upper word in upper dividend word.
+	movw squares,divlow;	;		cjs, go divlong;		| Load lower word in dividend.
+	movw quot,y;		am->am;		;				| Make sure can assume result is 16 bits.
+sqdloop2: rsubw,s d,result,y;	;		;				| Compute (q-x). Will jump if (x <= q).
+	;			;		cjp, neg squdpx;		| if (x <= q) => x2 = x+2 
+	add2nw 1,result,x2;	am->am;		;				| 
+	rsubw,s d,quot,y;	;		;				| Will return if (q <= x2), ie (x2 - q) >= 0.
+	movw quot,y;		am->am;		crtn, ~neg;			| 
+squdpx:	addw d,result,result;	;		;				| x = (x + q) >> 1.
+	sr0w result,result;	;		cjp, go sqdloop;		| 
+	
+sqzero:	movw 0,result;		;		crtn, go;			| Move 0 to result if number is 0 or 1.
+
+#undef dvsr 	
+#undef x2 	
+#undef mod	
+#undef dvdnd
+#undef divlow
+#undef divhigh	
+#undef quot	
+#undef squares	
+#undef sqhigh	
+#undef result	
+#undef reshigh	
+#undef t	
+#undef thigh	
+

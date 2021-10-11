@@ -1,0 +1,143 @@
+| "@(#)%M 1.1 94/10/31 SMI"
+| Copyright (c) 1986 by Sun Microsystems,Inc.
+
+|    Utilities for texture.
+
+
+|   	rolw 9,acc,acc;	;			jmap SET_PGON_TEX_BLK; ;
+SET_PGON_TEX_BLK: 
+	andw,s d,acc,y;		0xf1ff->am;	;		;			| Check for out of range block. comp 0x0e00
+	incw cmdptr,cmdptr;	;		cjp,zer stfok;	;			| 
+	compw 0,acc;		;		cjp,go stfshm;	;			| Invalid tex frame is -1.
+stfok:	addw d,acc,acc;		0x3000->am;	;		;			| Similar to USEFRAME
+stfshm:	addw frameptr,TEX2FRAME_FRMOFF,y; ;	;		;			| 
+	IMM;			am->shmemp;	;		;			| 
+	movw acc,y;		am->shmem;	jmap getcmd;	;			| 
+
+
+
+#define Depth	r[15]
+#define Width	r[14]
+#define Height	r[13]
+#define Words	r[12]
+#define Rows	r[11]
+#define Block	r[10]
+
+
+|   Can't use r[0] in stprep or stexld because PR_POLYTEX needs cmd (r[0]) preserved for use by PR_POLYSOL.
+|   Loads 8-bit pixels packed two per 16 bit word.
+SET_PGON_TEX: 
+	addw frameptr,TEX2FRAME_FRMOFF,y; ;	;		;			| Check for valid block ptr.
+	IMM;			am->shmemp;	;		;			| 
+	movw,s d,Block;		shmem->am;	;		;			| -1 == invalid tex frame.
+	incw cmdptr,y;		am->shmemp;	cjp,~neg stcmdok; ;			| restore cmdptr.
+	movw d,Depth;		shmem->am;	;		;		shp+	| 
+	movw d,r[2];		shmem->am;	;		;		shp+	| Width.  Pad it out.
+	btstw,s 3,Depth;	;		;		;			| 
+	add2nw 2,cmdptr;	;		cjp,zer stbad1;	;			| 4= cmd,depth,width,height
+	addw d,r[2],r[2];	1->am;		;		;			| 8-bit:  Width= (Width + 1) >> 1
+	sr0w r[2],r[2];		;		cjp,go stbad0;	;			| 
+stbad1:	addw d,r[2],r[2];	15->am;		;		;			| 1-bit:  Width= (Width + 15) >> 4
+	rolw 12,r[2],r[2];	;		;		;			| 
+	andw d,r[2],r[2];	0xfff->am;	;		;			| 
+stbad0:	movw d,acc;		shmem->am;	cjs,go multiply; ;		shp+	| NumWords= Width * Height...
+	addw cmdptr,acc,cmdptr; ;		jmap getcmd;	;			| Skip cmdptr over texture.
+
+stcmdok: ;			;		cjp,f1f .;	;			| 
+	;			PPLDTEX->fifo1;	;		;			| 
+	;			;		cjs,go stprep;	;			| 
+
+stexld0: sub2nw,s 0,Rows;	;		push,go;	;			| Copy texture into floating pt. regs.
+	;			shmem->fpregl;	rfct;		;		shp+,dp+| 
+	movw Words,y;		am->brreg;	cjp,~zer stexld0; ;			| 
+
+	movw Width,y;		am->fifo1;	cjp,f1f .;	;			| stores d,w,h and setups shmemp.
+	addw frameptr,TEX2DEPTH_FRMOFF,y; ;	;		;			| 
+	IMM;			am->shmemp;	;		;			| 
+	movw Height,y;		am->fifo1;	cjp,f1f .;	;			| 
+	movw Depth,y;		am->shmem;	;		;		shp+	| 
+	movw Width,y;		am->shmem;	;		;		shp+	| 
+	movw Height,y;		am->shmem;	;		;		shp+	| 
+	movw Depth,y;		am->fifo1;	cjp,f1f .;	;			| 
+	;			TEX2DPPFRM_GL->shmemp; ;	;			| What texture is on PP.
+	movw Block,y;		am->shmem;	;		;			| 
+	movw Block,y;		am->shmemp;	;		;			| TexBlock pointer -> shmemp.
+	movw Words,y;		am->brreg;	;		;			| 
+	movw Height,Rows;	TempFPAddr->fpap; ;		;			| 
+
+stexld:	sub2nw,s 0,Rows;	;		push,go;	;			| Copy from fl. pt. regs to shmem & fifo
+   	;			fpregl->fifo1;	cjp,f1f .;	;			| 
+	incw cmdptr,cmdptr;	fpregl->shmem;	;		;		ap+	| 
+	movw d,acc;		4->am;		rfct;		;		shp+	| shp+,ap+ illegal combination of controls
+	movw Words,y;		am->brreg;	cjp,~zer stexld; ;			| 
+
+streturn: addw cmdptr,acc,cmdptr; ;		jmap getcmd;	;			| 
+
+
+|   stprep does not adjust cmdptr,which must account for 3 items (d,w,h) taken from shared memory.
+stprep:	movw d,Depth;		shmem->am;	;		;		shp+	| 
+	movw d,Width;		shmem->am;	;		;		shp+	| 
+	movw d,Height;		shmem->am;	;		;		shp+	| 
+	btstw,s 3,Depth;	=stex8->brreg;	;		;			| 
+	andw,s d,Width,y;	0xf->am;	cjp,~zer;	;			| Is Width a multiple of 16?
+	rolw 12,Width,Words;	0xfff->am;	;		;			| Words= Width >> 4
+	andw d,Words,Words;	am->brreg;	cjp,~zer .+2;	;			| 
+	sub2nw 0,Words;		am->brreg;	;		;			| If (Width not a multiple of 16) Words++
+	movw Height,Rows;	TempFPAddr->fpdp; crtn,go;	;			| Really decrement Words for loop.
+stex8:	sub2nw 0,Width,Words;	;		;		;			| 
+	sr0w Words,Words;	am->brreg;	;		;			| Packed 2 per 16 bit word.
+	movw Height,Rows;	TempFPAddr->fpdp; crtn,go;	;			| TempFPAddr to avoid matrices.
+
+
+
+|   	add2nw 1,cmdptr; ;			jmap SET_PGON_TEX_ORG_SCR; ;	
+SET_PGON_TEX_ORG_SCR:
+	movw d,r[0];		shmem->am;	;		;		shp+	| temp store sx.
+	movw d,r[1];		shmem->am;	;		;			| temp store sy.
+	addw d,frameptr,acc;	TEX2SX_FRMOFF->am; ;		;			| 
+	movw acc,y;		am->shmemp;	;		;			| 
+	movw r[0],y;		am->shmem;	;		;		shp+	| store sx.
+	movw r[1],y;		am->shmem;	;		;			| store sy.
+	addw d,frameptr,acc;	TEX2OFFKIND_FRMOFF->am; ;	;			| Set kind = screen sx sy
+	movw acc,y;		am->shmemp;	;		;			| 
+	;			TEX2_SXSY->shmem; ;		;			| 
+	incw cmdptr,cmdptr;	;		jmap getcmd;	;			| 
+
+
+
+|   	movw 0,y;		am->fpdp;	jmap SET_PGON_TEX_ORG_XF_2D;
+SET_PGON_TEX_ORG_XF_2D:
+	movw 0,y;		am->fpap;	push,go 1;	;			| 
+	movw TEX2OFFX2_FRMOFF,acc; shmem->fpregh; ;		;		shp+	| 
+	IMM;			shmem->fpregl;	rfct;		;		shp+,dp+| 
+	addw frameptr,acc,y;	am->shmemp;	push,go 1;	;			| 
+	movw 5,acc;		fpregh->shmem;	;		;		shp+	| 
+	IMM;			fpregl->shmem;	rfct;		;		shp+	| 
+	addw d,frameptr,r[16]; TEX2OFFKIND_FRMOFF->am; ;	;			| Set kind = 2D
+	movw r[16],y;		am->shmemp;	;		;			| 
+	;			TEX2_2D->shmem; ;		;			| 
+	addw cmdptr,acc,cmdptr; ;		jmap getcmd;	;			| 
+
+
+
+|   	movw 0,y;		am->fpdp;	jmap SET_PGON_TEX_ORG_XF_3D;
+SET_PGON_TEX_ORG_XF_3D:
+	movw 0,y;		am->fpap;	push,go 2;	;			| 
+	movw TEX2OFFX3_FRMOFF,acc; shmem->fpregh; ;		;		shp+	| 
+	IMM;			shmem->fpregl;	rfct;		;		shp+,dp+| 
+	addw frameptr,acc,y;	am->shmemp;	push,go 2;	;			| 
+	movw 7,acc;		fpregh->shmem;	;		;		shp+	| 
+	IMM;			fpregl->shmem;	rfct;		;		shp+	| 
+	addw d,frameptr,r[16]; TEX2OFFKIND_FRMOFF->am; ;	;			| Set kind = 3D
+	movw r[16],y;		am->shmemp;	;		;			| 
+	;			TEX2_3D->shmem; ;		;			| 
+	addw cmdptr,acc,cmdptr; ;		jmap getcmd;	;			| 
+
+
+
+#undef Depth
+#undef Width
+#undef Height
+#undef Words
+#undef Rows
+#undef Block

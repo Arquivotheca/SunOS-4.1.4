@@ -1,0 +1,670 @@
+/* @(#)sb_sun_f77.ext 1.1 94/10/31 SMI */
+
+/*
+ *	Copyright (c) 1989, Sun Microsystems, Inc.  All Rights Reserved.
+ *	Sun considers its source code as an unpublished, proprietary
+ *	trade secret, and it is available only under strict license
+ *	provisions.  This copyright notice is placed here only to protect
+ *	Sun in the event the source is deemed a published work.  Dissassembly,
+ *	decompilation, or other means of reducing the object code to human
+ *	readable form is prohibited by the license agreement under which
+ *	this code is provided to the user or company in possession of this
+ *	copy.
+ *	RESTRICTED RIGHTS LEGEND: Use, duplication, or disclosure by the
+ *	Government is subject to restrictions as set forth in subparagraph
+ *	(c)(1)(ii) of the Rights in Technical Data and Computer Software
+ *	clause at DFARS 52.227-7013 and in similar clauses in the FAR and
+ *	NASA FAR Supplement.
+ */
+
+
+#ifndef sb_sun_f77_ext_INCLUDED
+#define sb_sun_f77_ext_INCLUDED
+
+language sun_f77 "C" "" grep-able
+version 1
+
+/*
+ * These ref-focus-unit statements defines the tags that the focus
+ * facility uses. sb_focus.ext describe them in detail.
+ */
+#define REF_FOCUS_UNITS \
+ref-focus-unit File \
+ref-focus-unit Macro \
+ref-focus-unit Function \
+ref-focus-unit Language
+
+#include "sb_language_master.ext"
+
+#define DEF ALL_HITS def
+#define REF ALL_HITS ref
+
+properties sun_f77 {
+	block
+	block_data
+	call
+	common
+	data
+	def
+	entry
+	equivalence
+	extern
+	field
+	formal
+	fortran
+	func
+	global
+	implicit
+	intrinsic
+	label
+	member
+	namelist
+	non_field
+	non_pointer
+	pointer
+	proc
+	program
+	read
+	ref
+	save_item
+	statement
+	struct
+	subr
+	tag
+	variable
+	volatile
+	word
+	write
+}
+
+tags sun_f77 40 {
+	def_program = DEF_WEIGHT
+			( DEF program )
+			CPP_SECONDARY_SYMBOL
+
+	def_global_func = DEF_WEIGHT
+			( DEF subr func global )
+			CPP_SECONDARY_SYMBOL
+	def_extern_func = EXTERN_DEF_WEIGHT
+			( DEF subr func extern )
+			CPP_SECONDARY_SYMBOL
+	def_statement_func = DEF_WEIGHT
+			( DEF subr func statement )
+			CPP_SECONDARY_SYMBOL
+	def_subroutine = DEF_WEIGHT
+			( DEF subr proc global )
+			CPP_SECONDARY_SYMBOL
+	def_entry = DEF_WEIGHT
+			( DEF subr entry )
+			CPP_SECONDARY_SYMBOL
+
+	ref_func_call =
+			( REF subr call )
+			CPP_SECONDARY_SYMBOL
+
+	def_block_data = DEF_WEIGHT
+			( DEF block_data )
+			CPP_SECONDARY_SYMBOL
+
+	def_constant = DEF_WEIGHT
+			( DEF BASE.constant )
+			CPP_SECONDARY_SYMBOL
+	ref_constant =
+			( REF BASE.constant )
+			CPP_SECONDARY_SYMBOL
+
+	data_word =
+			( DEF data word variable non_field )
+			CPP_SECONDARY_SYMBOL
+
+	def_namelist_group = DEF_WEIGHT
+			( DEF namelist )
+			CPP_SECONDARY_SYMBOL
+
+	def_volatile = DEF_WEIGHT
+			( DEF volatile variable non_field )
+			CPP_SECONDARY_SYMBOL
+
+	def_equivalence = DEF_WEIGHT
+			( DEF equivalence variable non_field )
+			CPP_SECONDARY_SYMBOL
+
+	def_implicit = DEF_WEIGHT
+			( DEF implicit )
+			CPP_SECONDARY_SYMBOL
+
+	def_intrinsic = DEF_WEIGHT
+			( DEF intrinsic )
+			CPP_SECONDARY_SYMBOL
+
+	def_save_item = DEF_WEIGHT
+			( DEF save_item )
+			CPP_SECONDARY_SYMBOL
+
+	def_var = DEF_WEIGHT
+			( DEF non_field variable non_pointer )
+			CPP_SECONDARY_SYMBOL
+	def_formal_var = DEF_WEIGHT
+			( DEF formal variable non_pointer non_field )
+			CPP_SECONDARY_SYMBOL
+
+	ref_var_read =
+			( REF variable non_pointer read non_field )
+			CPP_SECONDARY_SYMBOL
+	ref_var_write =
+			( REF variable non_pointer write non_field )
+			CPP_SECONDARY_SYMBOL
+	ref_var_read_write =
+			( REF variable non_pointer read write non_field )
+			CPP_SECONDARY_SYMBOL
+
+	def_pointer_var = DEF_WEIGHT
+			( DEF pointer variable non_field )
+			CPP_SECONDARY_SYMBOL
+	ref_pointer_var =
+			( REF pointer variable non_field )
+			CPP_SECONDARY_SYMBOL
+
+	def_common_block = DEF_WEIGHT
+			( DEF common block )
+			CPP_SECONDARY_SYMBOL
+	def_common_member = DEF_WEIGHT
+			( DEF common member non_field variable non_pointer )
+			CPP_SECONDARY_SYMBOL
+
+	def_struct_tag = DEF_WEIGHT
+			( DEF struct tag )
+			CPP_SECONDARY_SYMBOL
+	def_struct_field = DEF_WEIGHT
+			( DEF struct field variable non_pointer )
+			CPP_SECONDARY_SYMBOL
+	ref_struct_tag =
+			( REF struct tag )
+			CPP_SECONDARY_SYMBOL
+
+	def_label = DEF_WEIGHT
+			( DEF label )
+			CPP_SECONDARY_SYMBOL
+	ref_label =
+			( REF label )
+			CPP_SECONDARY_SYMBOL
+
+	def_string = DEF_WEIGHT
+			( DEF BASE.string fortran )
+			CPP_SECONDARY_STRING
+
+	included_file_name_fortran =
+			( ALL_HITS cpp.included_file fortran
+			  BASE.string BASE.constant )
+			CPP_SECONDARY_STRING
+
+/*
+ * Tag used to mark semantic records that were generated but were later
+ * found to be redundant.
+ */
+	bogus_entry =
+		( HIDDEN )
+}
+
+
+
+insert-menu-items gluemenu "Declarations" "Variables" "All Variables"
+menu {
+	"FORTRAN Formals"
+}
+
+insert-menu-items gluemenu "Declarations" "Variables" "FORTRAN Formals"
+menu {
+	"Data Words"
+	"Pointer Variables"
+	"Common Block Members"
+}
+
+insert-menu-items gluemenu "Declarations" "Variables"
+menu {
+	"Programs"
+}
+
+insert-menu-items gluemenu "Declarations" "Functions"
+menu {
+	"Block Data Labels"
+	"Common Blocks"
+	"Equivalences"
+	"Implicits"
+	"Intrinsics"
+	"Namelist Items"
+	"Save Items"
+	"Volatiles"
+}
+
+insert-menu-items gluemenu "Declarations" "Functions" "All Functions"
+menu {
+	"Functions Returning Value"
+	"Statement Functions"
+	"Entry"
+	"Subroutines"
+}
+
+insert-menu-items gluemenu "References" "Variables" "All Variables"
+menu {
+	"Non-Pointer Variables"
+	"Pointer Variables"
+}
+
+insert-menu-items gluemenu "Strings" "#include String" '#include ""'
+menu {
+	"FORTRAN include string"
+}
+
+menu {
+	CB_MENU_STRING_ALL_MATCHES equiv menu {
+		CB_MENU_STRING_ALL_MATCHES equiv
+			= ( ALL_HITS ) | ( CPP_ALL_HITS )
+			help "All mentions of the symbol"
+
+		"Variables" equiv menu {
+			"All Variables" equiv
+				= ( ALL_HITS variable )
+				help "All uses as a variable"
+			"Regular Variables" equiv
+				= ( ALL_HITS variable non_field )
+				help "All uses as a non-field variable"
+			"Field Variables" equiv
+				= ( ALL_HITS variable field )
+				help "All uses as a field"
+		} help "All uses as a variable"
+
+		"Functions" equiv
+			= ( ALL_HITS subr )
+			help "All uses as a function"
+
+		"Type Tags" equiv
+			= ( ALL_HITS struct tag )
+			help "All uses as type tag"
+
+		"Labels" equiv
+			= ( ALL_HITS label )
+			help "All uses of labels"
+
+		"Constants" equiv
+			= ( ALL_HITS BASE.constant )
+			help "All uses of constants"
+
+		"cpp Symbols" equiv menu {
+			"All Symbols" equiv
+				= ( CPP_ALL_HITS )
+				help "All cpp related symbols"
+			"Macros" equiv menu {
+				"All Macros" equiv
+					= ( CPP_ALL_HITS cpp.macro )
+					help "All cpp macros"
+				"With Formals" equiv
+					= ( CPP_ALL_HITS cpp.macro
+					   cpp.w_formals )
+					help "All cpp macros defined or " +
+					  "referenced with formals"
+				"Without Formals" equiv
+					= ( CPP_ALL_HITS cpp.macro
+					   cpp.wo_formals )
+					help "All cpp macros defined or " +
+					  "referenced without formals"
+			  } help "All cpp macros"
+		} help "All cpp related symbols"
+	} help "All mentions of the symbol"
+
+	"Declarations" equiv menu {
+		"All Declarations" equiv
+			= ( DEF ) | ( CPP_DEF )
+
+		"Variables" equiv menu {
+			"All Variables" equiv
+				= ( DEF variable )
+				help "All variable declarations"
+			"FORTRAN Formals" equiv
+				= ( DEF variable formal )
+				help "Formal function argument"
+			"Data Words" equiv
+				= ( DEF data word )
+				help "Data cells"
+			"Pointer Variables" equiv
+				= ( DEF pointer variable )
+				help "Variables declared to be pointers"
+			"Common Block Members" equiv
+				= ( DEF common member )
+				help "variables declared in a COMMON block"
+			"Fields" equiv
+				= ( DEF struct field )
+				help "All field declarations"
+		}
+
+		"Programs" equiv
+			= ( DEF program )
+			help "Program names"
+
+		"Functions" equiv menu {
+			"All Functions" equiv
+				= ( DEF subr )
+				help "All function declarations"
+			"Functions Returning Value" equiv
+				= ( DEF subr func )
+				help "Functions declared to return value"
+			"Subroutines" equiv
+				= ( DEF subr proc )
+				help "Functions not declared to return value"
+			"Statement Functions" equiv
+				= ( DEF subr statement )
+				help "Statement function declarations"
+			"Entry" equiv
+				= ( DEF entry )
+				help "entry point declarations"
+			"Extern Functions" equiv
+				= ( DEF subr extern )
+				help "Functions declared to be external"
+		} help "All function declarations"
+
+		"Block Data Labels" equiv
+			= ( DEF block_data )
+			help "Labels for block data constructs"
+
+		"Common Blocks" equiv
+			= ( DEF common block )
+			help "Commn block labels"
+
+		"Equivalences" equiv
+			= ( DEF equivalence )
+			help "Identifiers in EQUIVALENCE statements"
+
+		"Implicits" equiv
+			= ( DEF implicit )
+			help "Identifiers in IMPLICIT statements"
+
+		"Intrinsics" equiv
+			= ( DEF intrinsic )
+			help "Identifiers in INTRINSIC statements"
+
+		"Namelist Items" equiv
+			= ( DEF namelist )
+			help "Identifiers in namelists"
+
+		"Save Items" equiv
+			= ( DEF save_item )
+			  help "Save item names"
+
+		"Volatiles" equiv
+			= ( DEF volatile )
+			help "Identifiers in VOLATILE declarations"
+
+		"Type Tags" equiv
+			= ( DEF struct tag )
+			help "All type tag declarations"
+
+		"Labels" equiv
+			= ( DEF label )
+			help "All label declarations"
+
+		"Constants" equiv menu {
+			"All Constants" equiv
+				= ( DEF BASE.constant ) |
+				  ( CPP_DEF BASE.constant cpp.macro )
+				help "All constant declarations"
+			"Macro Constants" equiv
+				= ( CPP_DEF BASE.constant cpp.macro )
+				help "All cpp macro declarations without " +
+				  "formals"
+		} help "All constant declarations"
+			  
+		"cpp Symbols" equiv menu {
+			"All Symbols" equiv
+				= ( CPP_DEF )
+				help "Declarations of cpp symbols"
+			"Macros" equiv menu {
+				"All Macros" equiv
+					= ( CPP_DEF cpp.macro )
+					help "All macro definitions"
+				"With Formals" equiv
+					= ( CPP_DEF cpp.macro cpp.w_formals )
+					help "All cpp macros defined " +
+					  "with formals"
+				"Without Formals" equiv
+					= ( CPP_DEF cpp.macro cpp.wo_formals )
+					help "All cpp macros defined " +
+					  "without formals"
+				"From #undef" equiv
+					= ( CPP_DEF cpp.from_undef )
+					help "Undeclaration of macro"
+			} help "All macro definitions"
+			"Macro Formals" equiv
+				= ( CPP_DEF cpp.formal )
+				help "Macro formal defintions"
+		} help "Declarations of cpp symbols"
+	} help "All declarations"
+
+	"References" equiv menu {
+		"All References" equiv
+			= ( REF ) | ( CPP_REF )
+			help "All references to symbols"
+
+		"Variables" equiv menu {
+			"All Variables" equiv menu {
+				"All" equiv
+					= ( REF variable )
+					help "All references to variables " +
+					  "or fields"
+				"Write" equiv
+					= ( REF variable write )
+					help "All references to variables " +
+					  "or fields for write"
+				"Read" equiv
+					= ( REF variable read )
+					help "All references to variables " +
+					  "or fields for read"
+				"Read/Write" equiv
+					= ( REF variable read write )
+					help "All references to variables " +
+					  "or fields for update"
+			}
+			"Non-Pointer Variables" equiv
+				= ( REF variable non_pointer )
+				help "All references to non-pointer variables"
+			"Pointer Variables" equiv
+				= ( REF variable pointer )
+				help "All references to pointer variables"
+		} help "All references to variables or fields"
+
+		"Functions" equiv
+			= ( REF subr )
+			help "All function references"
+
+		"Type Tags" equiv
+			= ( REF struct tag )
+			help "All references to type tags"
+
+		"Labels" equiv
+			= ( REF label )
+			help "All references to labels"
+
+		"Constants" equiv menu {
+			"All Constants" equiv
+				= ( REF BASE.constant ) |
+				  ( CPP_REF BASE.constant cpp.macro )
+				help "All references to constants"
+			"Macros" equiv
+				= ( CPP_REF BASE.constant cpp.macro )
+				help "All references to cpp constants"
+		} help "All references to constants"
+
+		"cpp Symbols" equiv menu {
+			"All Symbols" equiv
+				= ( CPP_REF )
+				help "All cpp symbol references"
+			"Macros" equiv menu {
+				"All Macros" equiv menu {
+					"All Macros" equiv
+						= ( CPP_REF cpp.macro )
+						help "All macro references"
+					"From The Source" equiv
+						= ( CPP_REF cpp.macro
+						   cpp.from_source )
+						help "All macros referenced " +
+						  "from the source"
+					"From #if..." equiv menu {
+						"All #if..." equiv
+							= ( CPP_REF cpp.macro
+							   cpp.if )
+							help "All macros " +
+							  "referenced from " +
+							    "some kind of " +
+							      "#if statement"
+						"From #if" equiv
+							= ( CPP_REF cpp.macro
+							   cpp.from_if )
+							help "All macros " +
+							  "referenced from " +
+							    "#if"
+						"From #ifdef" equiv
+							= ( CPP_REF cpp.macro
+							   cpp.from_ifdef )
+							help "All macros " +
+							  "referenced from " +
+							    "#ifdef"
+						"From #ifndef" equiv
+							= ( CPP_REF cpp.macro
+							   cpp.from_ifndef )
+							help "All macros " +
+							  "referenced from " +
+							    "#ifndef"
+					} help "All macros referenced from " +
+					  "some kind of #if statement"
+				} help "All macro references"
+				"With Formals" equiv
+					= ( CPP_REF cpp.macro cpp.w_formals )
+					help "All macros referenced with " +
+					  "formals"
+				"Without Formals" equiv menu {
+					"All Macros" equiv
+						= ( CPP_REF cpp.macro
+						   cpp.w_formals )
+						help "All macros referenced " +
+						  "without formals"
+					"From The Source" equiv
+						= ( CPP_REF cpp.macro
+						   cpp.w_formals
+						   cpp.from_source )
+						help "All macros referenced " +
+						  "without formals from the " +
+						    "source"
+					"From #if..." equiv menu {
+						"All #if..." equiv
+							= ( CPP_REF cpp.macro
+							   cpp.if )
+							help "All macros " +
+							  "referenced from " +
+							    "some kind of " +
+							      "#if statement"
+						"From #if" equiv
+							= ( CPP_REF cpp.macro
+							   cpp.from_if )
+							help "All macros " +
+							  "referenced from " +
+							    "#if"
+						"From #ifdef" equiv
+							= ( CPP_REF cpp.macro
+							   cpp.from_ifdef )
+							help "All macros " +
+							  "referenced from " +
+							    "#ifdef"
+						"From #ifndef" equiv
+							= ( CPP_REF cpp.macro
+							   cpp.from_ifndef )
+							help "All macros " +
+							  "referenced from " +
+							    "#ifndef"
+					} help "All macros referenced from " +
+					  "some kind of #if statement"
+				} help "All macros referenced with formals"
+
+			} help "All macro references"
+			"Macro Actuals" equiv menu {
+				"All Actuals" equiv
+					= ( CPP_REF cpp.actual )
+					help "All references to macro actuals"
+				"Regular Actuals" equiv
+					= ( CPP_REF cpp.actual cpp.regular )
+					help "All references to macro actuals"+
+					  " that are not strings"
+				"String Actuals" equiv
+					= ( CPP_REF cpp.actual BASE.string )
+					help "All references to macro actuals"+
+					  " that are strings"
+			} help "All references to macro actuals"
+			"Macro Formals" equiv
+				= ( CPP_REF cpp.formal )
+				help "All references to macro formals"
+			"From Macro Body" equiv menu {
+				"All Body References" equiv
+					= ( CPP_REF cpp.in_body )
+					help "All references to non-formals " +
+					  "and strings from macro bodies"
+				"Regular" equiv
+					= ( CPP_REF cpp.in_body cpp.regular )
+					help "All references to non-formal " +
+					  "symbols from macro bodies"
+				"Strings" equiv
+					= ( CPP_REF cpp.in_body BASE.string )
+					help "All references to " +
+					  "strings from macro bodies"
+			} help "All references to non-formals " +
+			  "and strings from macro bodies"
+
+		} help "All cpp symbol references"
+	} help "All references to symbols"
+
+	"cpp Flow Control" equiv menu {
+		"Active #if/#ifdef/#ifndef blocks" equiv
+			= ( CPP_DEF cpp.active )
+			help "#if/#ifdef/#ifndef statements that " +
+			  "included their code"
+		"Inactive #if/#ifdef/#ifndef blocks" equiv
+			= ( CPP_DEF cpp.active )
+			help "#if/#ifdef/#ifndef statements that did not " +
+			  "include their code"
+	}
+
+	"Strings" equiv menu {
+		"All Strings" equiv
+			= ( BASE.string )
+			help "All references to strings"
+		"Regular Strings" equiv
+			= ( BASE.string fortran )
+			help "All strings from the regular program text"
+		"#include String" equiv menu {
+			"All #include" equiv
+				= ( ALL_HITS BASE.string cpp.included_file )
+				help "All strings used from include directives"
+			"#include <>" equiv 
+				= ( ALL_HITS BASE.string cpp.included_file
+				   cpp.system )
+				help "All strings used from #include " +
+				  "directives for system files"
+			'#include ""' equiv
+				= ( ALL_HITS BASE.string cpp.included_file
+				   cpp.local )
+				help "All strings used from #include " +
+				  "directives for local files"
+			"FORTRAN include string" equiv
+				= ( ALL_HITS BASE.string cpp.included_file
+				   fortran )	
+				help "All strings used from FORTRAN include " +
+				  "directives"
+		}
+	}
+
+	BASE_STANDARD_MENU_ITEMS
+}
+
+
+
+#undef DEF
+#undef REF
+
+#endif

@@ -1,0 +1,6 @@
+# @(#)cshrc 1.1 94/10/31 SMI
+umask 022
+set path=(/bin /usr/bin /usr/ucb /etc /usr/etc .)
+if ( $?prompt ) then
+	set history=32
+endif

@@ -1,0 +1,214 @@
+/* @(#)sb_sun_c.ext 1.1 94/10/31 */
+
+/*
+ *	Copyright (c) 1989, Sun Microsystems, Inc.  All Rights Reserved.
+ *	Sun considers its source code as an unpublished, proprietary
+ *	trade secret, and it is available only under strict license
+ *	provisions.  This copyright notice is placed here only to protect
+ *	Sun in the event the source is deemed a published work.  Dissassembly,
+ *	decompilation, or other means of reducing the object code to human
+ *	readable form is prohibited by the license agreement under which
+ *	this code is provided to the user or company in possession of this
+ *	copy.
+ *	RESTRICTED RIGHTS LEGEND: Use, duplication, or disclosure by the
+ *	Government is subject to restrictions as set forth in subparagraph
+ *	(c)(1)(ii) of the Rights in Technical Data and Computer Software
+ *	clause at DFARS 52.227-7013 and in similar clauses in the FAR and
+ *	NASA FAR Supplement.
+ */
+
+#ifndef sb_sun_c_ext_INCLUDED
+#define sb_sun_c_ext_INCLUDED
+
+/*
+ * This file defines the browser environment for the Sun-C language.
+ */
+
+language sun_c "/*" "*/" grep-able
+version 1
+
+/*
+ * These ref-focus-unit statements defines the tags that the focus
+ * facility uses. sb_focus.ext describe them in detail.
+ */
+#define REF_FOCUS_UNITS \
+ref-focus-unit File \
+ref-focus-unit Macro \
+ref-focus-unit Function \
+ref-focus-unit Block \
+ref-focus-unit Struct \
+ref-focus-unit Union \
+ref-focus-unit Enum \
+ref-focus-unit Language
+
+#include "sb_language_master.ext"
+
+#include "sb_c_baseline.ext"
+
+/*
+ * This macro defines the properties that should mark a declaration tag
+ */
+#define DEF ALL_HITS c.def
+
+/*
+ * This macro defines the properties that should mark a reference tag
+ */
+#define REF ALL_HITS c.ref
+
+
+/*
+ * This section of the file describes properties and tags that are required
+ * to support the Sun specific constructs in the C compiler.
+ */
+properties sun_c {
+	arg			/* Marks #pragma arguments */
+	asm_statement		/* Marks strings from asm() statements */
+	fortran			/* Marks declarations using the fortran */
+				/* keyword */
+	name			/* Marks #pragma names */
+	pragma			/* Marks all #pragma names and arguments */
+}
+
+/*
+ * The short comments for the tags have the format
+ *	pattern => symbol
+ * where the "pattern" is the cpp construct that generates a symbol with
+ * the tag in question and the "symbol" is the symbol from the "pattern"
+ * that gets filed.
+ */
+tags sun_c 15 {
+/*
+ * Tags for declarations using the fortran keyword
+ */
+	def_global_fortran_func_w_body =	/* fortran fn() {} => fn */
+		DEF_WEIGHT
+		( DEF c.function c.w_body c.toplevel fortran )
+		CPP_SECONDARY_SYMBOL
+	def_global_fortran_func_w_body_hidden =
+		( HIDDEN )
+
+	def_global_fortran_func_wo_body =	/* fortran fn(); => fn */
+		EXTERN_DEF_WEIGHT
+		( DEF c.function c.wo_body c.toplevel fortran )
+		CPP_SECONDARY_SYMBOL
+	def_global_fortran_func_wo_body_hidden =
+		( HIDDEN )
+
+	def_local_fortran_func =		/* { fortran fn(); } => fn */
+		EXTERN_DEF_WEIGHT
+		( DEF c.function c.wo_body c.local fortran )
+		CPP_SECONDARY_SYMBOL
+
+/*
+ * Tag for strings used with the asm() statement
+ */
+	asm_string =				/* asm("foo") => "foo" */
+		( ALL_HITS BASE.constant BASE.string asm_statement )
+		CPP_SECONDARY_STRING
+
+/*
+ * Tags used to mark #pragma words
+ */
+	ref_pragma_name =			/* #pragma p(a) => p */
+		( REF pragma name )
+
+	ref_pragma_arg =			/* #pragma p(a) => a */
+		( REF pragma arg )
+
+/*
+ * Tag used to mark semantic records that were generated but were later
+ * found to be redundant.
+ */
+	bogus_entry =
+		( HIDDEN )
+}
+
+/*
+ * Add all the Sun C specific menu items
+ */
+insert-menu-items sun_c "Declarations" "Functions"
+				"Static Functions"
+menu {
+	"FORTRAN Functions" menu {
+		"All FORTRAN Functions"
+			= ( DEF c.function fortran )
+			help "All functions declaread as fortran"
+		"FORTRAN Functions With Code Body"
+			= ( DEF c.function fortran c.w_body )
+			help "All functions declaread as fortran with a body"
+		"FORTRAN Functions Without Code Body"
+			= ( DEF c.function fortran c.w_body )
+			help "All functions declaread as fortran " +
+			  "without a body"
+		    }
+}
+insert-menu-items sun_c "Declarations" "Functions"
+				"Top Level Functions" "Static Toplevels"
+menu {
+	"FORTRAN Toplevels" menu {
+		"All FORTRAN Functions"
+			= ( DEF c.function c.toplevel fortran )
+			help "All functions declaread as fortran"
+		"FORTRAN Functions With Code Body"
+			= ( DEF c.function c.toplevel fortran c.w_body )
+			help "All functions declaread as fortran with a body"
+		"FORTRAN Functions Without Code Body"
+			= ( DEF c.function c.toplevel fortran c.w_body )
+			help "All functions declaread as fortran " +
+			  "without a body"
+		    }
+}
+insert-menu-items sun_c "Declarations" "Functions"
+				"Local Functions" "Extern Locals"
+menu {
+	"FORTRAN Locals"
+		= ( DEF c.function c.wo_body c.local fortran )
+		help "Local dummy FORTAN declaration"
+}
+
+insert-menu-items gluemenu "Strings" "Regular Strings"
+menu {
+	"asm() Strings"
+}
+
+insert-menu-items gluemenu "Strings"
+menu {
+	"Pragmas" menu {
+		"All Pargma Identifiers"
+		"Pragma Identifiers"
+		"Pragma Arguments"
+	}
+}
+
+insert-menu-items sun_c "Strings" "Regular Strings"
+menu {
+	"asm() Strings" equiv
+		= ( ALL_HITS BASE.constant BASE.string asm_statement )
+		help "All strings used from asm() statements"
+}
+
+insert-menu-items sun_c "Strings"
+menu {
+	"Pragmas" equiv menu {
+		"All Pargma Identifiers" equiv
+			= ( REF pragma )
+			help "All words used in pragmas"
+		"Pragma Identifiers" equiv
+			= ( REF pragma name )
+			help "All words used to name pragmas"
+		"Pragma Arguments" equiv
+			= ( REF pragma arg )
+			help "All words used pragma arguments"
+	} help "All words used in pragmas"
+}
+
+/*
+ * This section describes the node specific menus for the different graphs
+ */
+GRAPHER_FUNCTION_NODE_MENU
+GRAPHER_FILE_NODE_MENU
+
+#undef DEF
+#undef REF
+
+#endif

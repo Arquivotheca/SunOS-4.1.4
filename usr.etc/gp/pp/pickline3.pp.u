@@ -1,0 +1,131 @@
+|  "@(#)pickline3.pp.u 1.1 94/10/31 SMI"
+| Copyright 1988 by Sun Microsystems, Inc.
+
+| Written by Stuart Levy
+
+
+#define xcur	r[21]		/* vector registers - DEBUG - x and y values along line */
+#define ycur	r[22]
+
+#define pwx0	r[0]		/* pkln3dinit registers */
+#define pwx1	r[1]
+#define pwy0	r[2]
+#define pwy1	r[3]
+
+#define pkcnthi	r[0]		/* pickhit_pp registers */
+#define pkcntlo	r[1]
+#define pkidhi	r[2]
+#define pkidlo	r[3]
+
+
+
+|   pkstore & pkrestore store the acc & registers 0-3 in scrmem.
+pkstore:
+	;			SavePk3Reg->scrmemp; ;		
+	movw acc,y;		am->scrmem;	;			scrmp+	| 
+	movw r[0],y;		am->scrmem;	;			scrmp+	| 
+	movw r[1],y;		am->scrmem;	;			scrmp+	| 
+	movw r[2],y;		am->scrmem;	;			scrmp+	| 
+	movw r[3],y;		am->scrmem;	crtn,go;		
+	
+
+pkrestore:
+	;			SavePk3Reg->scrmemp; ;		
+	movw d,acc;		scrmem->am;	;			scrmp+	| 
+	movw d,r[0];		scrmem->am;	;			scrmp+	| 
+	movw d,r[1];		scrmem->am;	;			scrmp+	| 
+	movw d,r[2];		scrmem->am;	;			scrmp+	| 
+	movw d,r[3];		scrmem->am;	crtn,go;	
+
+
+
+|   Here we pull the x and y values computed in vec3.pp.u, and then initialize the pick window
+|   parameters for the 3d pick test.  This involves computint the right and bottom edges from
+|   the width and height, and then storing these values at a location in scrmem that is easy
+|   to get at.
+pk3dlninit:
+	;			;		cjs,go pkstore;			| store away registers that will be stepped on
+	;			SavePk3XY->scrmemp; ;				| x and y values stored in scrmem
+	movw d,xcur;		scrmem->am;	;			scrmp+	| xcur 
+	movw d,ycur;		scrmem->am;	;				| ycur 
+	;			Frame->scrmemp;	;				| read context number from Frame
+	rolw 4,d,acc;		scrmem->am;	;				| 16*Frame is offset into PickContext array
+	addw acc,PickOffset,y;	;		;				| get pick window from top of PickOffset
+	IMM;			am->scrmemp;	;				 
+	movw d,pwx0;		scrmem->am;	;			scrmp+	 
+	movw d,pwy0;		scrmem->am;	;			scrmp+	 
+	addw d,pwx0,acc;	scrmem->am;	;			scrmp+	| add pwdx to pwx0 to get pwx1
+	movw acc,pwx1;		;		;				
+	addw d,pwy0,acc;	scrmem->am;	;			scrmp+	| add pwdy to pwy0 to get pwy1
+	movw acc,pwy1;		SavePk3Win->scrmemp; ;				| will store pick window in scrmem
+	movw pwx0,y;		am->scrmem;	;			scrmp+	| 
+	movw pwx1,y;		am->scrmem;	;			scrmp+	| 
+	movw pwy0,y;		am->scrmem;	;			scrmp+	| 
+	movw pwy1,y;		am->scrmem;	cjp,go pkrestore;		| restore registers & return to calling routine
+
+
+|   Here we test if a pick hit has occured for the pixel just written to the frame buffer.  This requires that
+|   the pixel be within the pick rectangle (since it is implicitly within the clip rectangle).  The conditions
+|   for *rejection* are as follows:		x < pickleft
+|   						x > pickright
+|						y < picktop
+|						y > pickbottom		
+pktst3dln:
+	;			SavePk3Win->scrmemp; ;				| window located at scrmem[4,5,6,7]
+	subw,s d,xcur,y;	scrmem->am;	;			scrmp+	| compute (x - pickleft)
+	rsubw,s d,xcur,y;	scrmem->am;	cjp,neg pktstnohit;	scrmp+	| compute (pickright - x)
+	subw,s d,ycur,y;	scrmem->am;	cjp,neg pktstnohit;	scrmp+	| compute (y - picktop)
+	rsubw,s d,ycur,y;	scrmem->am;	cjp,neg pktstnohit;		| compute (pickbottom - y)
+	;			;		cjp,neg pktstnohit;		| 
+pk3hit: ;			;		cjs,go pickhit_pp;		| call hit routine
+pktstnohit: testw (acc);	;		crtn,go;		scrmp 0	| reset cc and exit
+
+
+pkndtst3dln:
+	;			SavePk3Win->scrmemp; ;				| window located at scrmem[4,5,6,7]
+	subw,s d,xcur,y;	scrmem->am;	;			scrmp+	| compute (x - pickleft)
+	rsubw,s d,xcur,y;	scrmem->am;	cjp,neg pkndtstnohit;	scrmp+	| compute (pickright - x)
+	subw,s d,ycur,y;	scrmem->am;	cjp,neg pkndtstnohit;	scrmp+	| compute (y - picktop)
+	rsubw,s d,ycur,y;	scrmem->am;	cjp,neg pkndtstnohit;		| compute (pickbottom - y)
+	;			;		cjp,neg pkndtstnohit;		| 
+pk3ndhit: ;			;		cjs,go pickhit_pp;		| jump to hit routine, & return somewhere other than nd code
+	;			;		cjpp,go pkzbquit;		| if got hit, will stop testing rest of vector
+pkndtstnohit: testw (acc);	;		crtn,go;		scrmp 0	| reset cc and exit
+
+
+|   When we get a hit, we store -1 in the picklatch, move the active pickid into the hitpickid area of scrmem,
+|   and store away the number of the primitive that was picked. 
+pickhit_pp: ;			;		cjs,go pkstore;			| store away registers before they are stepped on
+	;			SavPkcnt->scrmemp; ;				| current count is stored in scrmem
+	movw d,pkcnthi;		scrmem->am;	;			scrmp+	| grab pick count from scrmem
+	movw d,pkcntlo;		scrmem->am;	;				 
+	;			Frame->scrmemp;	;				| read context number from Frame
+	rolw 4,d,acc;		scrmem->am;	;				| 16*Frame is offset into PickContext array
+	addw d,acc,acc;		PickOffset->am;	;				| correct Pick flag == PickLatch + 16*Frame + PickOffset
+	addw d,acc,acc;		PickID->am;	;				 
+	movw acc,y;		am->scrmemp;	;				| scrmemp has active PickID address for context
+	movw d,pkidhi;		scrmem->am;	;			scrmp+	| cache active pickids
+	movw d,pkidlo;		scrmem->am;	;			scrmp+	 
+	movw d,acc;		scrmem->am;	;			scrmp+	 
+	;			scrmem->am;	;			scrmp+	 
+	;			0xffff->scrmem;	;			scrmp+	| PickHit <- -1 (says we got a hit)
+	movw pkcnthi,y;		am->scrmem;	;			scrmp+	| hit pick count high -> scrmem
+	movw pkcntlo,y;		am->scrmem;	;			scrmp+	| hit pick count low -> scrmem
+	movw pkidhi,y;		am->scrmem;	;			scrmp+	| move active pickids to hit id area
+	movw pkidlo,y;		am->scrmem;	;			scrmp+	 
+	movw acc,y;		am->scrmem;	;			scrmp+	 
+	movw d,y;		am->scrmem;	cjp,go pkrestore;		
+
+
+#undef pwx0	
+#undef pwx1	
+#undef pwy0	
+#undef pwy1	
+
+#undef pkcnthi	
+#undef pkcntlo	
+#undef pkidhi	
+#undef pkidlo	
+
+#undef xcur
+#undef ycur

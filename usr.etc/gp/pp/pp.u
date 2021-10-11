@@ -1,0 +1,202 @@
+| "@(#)pp.u 1.1 94/10/31 SMI"
+| Copyright 1986 by Sun Microsystems, Inc.
+
+|   Command processor from vp to pp.
+ 
+#include "pp.h"
+
+#define FBHi	r[31]	/* High address of frame buffer. */
+#define FBCont	r[30]
+#define planes	r[29]
+#define op	r[28]
+#define color	r[27]
+#define nodst	r[26]
+
+#define solid	5	/* options bit for solid vectors */
+
+| The starting org address had been changed for 3.2 to make more room for vp microcode.
+#ifndef GPPLUS
+org 0x117c
+#else GPPLUS
+org 0x2000
+#endif GPPLUS
+debug off
+
+reset:	movw 0, y;		am->fl2reg;	;				| 
+	;			DebugLevel->scrmemp; ;				| 
+	;			0->scrmem;	;				| 
+	;			LastCmd->scrmemp; ;				| 
+	movw 0, y;		am->scrmem;	cjs, go resetrr;		| 
+start:	movw d, acc;		fifo1->am;	cjp, f1e .;			| Get new command.
+	;			;		cjs, go badcmd;			| 
+|   Reset ropreg memory (resetrr) if last cmd was ack && current command is not ack.
+|   Doing resetrr here means that the next command was in the fifo (retrieved at start:).
+	movw acc, r[0];		LastCmd->scrmemp; ;				| copy acc to r[0] so sub2nw later preserves acc
+	sub2nw,s 0, d, y;	scrmem->am;	;				| Is last command ack?
+	movw acc, y;		am->scrmem;	cjp, ~zer norr;			| 
+	sub2nw,s 0, r[0];	;		;				| Is current command not ack?
+	;			;		cjs, ~zer resetrr;		| 
+norr:	movw d, r[0];		=cmd->am;	;				| 
+	addw r[0], acc, y;	am->brreg;	;				| 
+	mov2nw 14, r[0];	;		cjp, go;			| 0x4000 to add to bad commands.
+cmd:	;			;		jmap badcmd;			| 0 (used to be Null cmd)
+	;			;		jmap ppack;			| 1 Painting processor acknowledge
+	;			;		jmap roptex1;			| 2 textured 1 bit deep rops.
+	;			;		jmap ppinit;			| 3 Software reset.  1 means get gpaddr off fifo
+	;			;		jmap rnull;			| 4 Rop null to fb
+	;			;		jmap ropfb;			| 5 Rop fb to fb
+	;			;		jmap fbaddr;			| 6 Frame buffer board high address
+#ifdef GPPLUS
+	;			;		jmap gb_installed;		| 7 Set gb_installed flag, initialization only
+#else GPPLUS
+	;			;		jmap badcmd;			| 7
+#endif GPPLUS
+	;			;		jmap ppmask;			| 8 Planes mask
+	;			;		jmap vecvec;			| 9  Draw vectors  Must have called stclip first
+	;			;		jmap stclip;			| 10 Store multiple clip rectangles
+	;			;		jmap stcolor;			| 11 Store color
+	mov2nw solid,r[24];	;		jmap start;			| 12 Initialization for solid, width 1 xf vectors.NEW
+	;			;		jmap vecvecxf;			| 13 Xformed, solid width 1 vectors.
+	movw,s 1,y;		;		jmap setfstrd;			| 14 Enable fast read on CG3
+#ifndef GPPLUS	
+	;			;		jmap badcmd;			| 15
+#else GPPLUS
+	;			;		jmap setzbline;			| 15 set z buffered line attribute
+#endif GPPLUS	
+	;			;		jmap setbuf;			| 16 set a rectangle of buffer to color
+	;			;		jmap bufscr;			| 17 buffer rectangle bytes to screen rectangle
+	movw,s 0,y;		;		jmap setfstrd;			| 18 Disable fast read on CG3
+	;			;		jmap plhinit;			| 19 Polyhedra (3D) initialization
+	;			;		jmap fillinit;			| 20 filling initialization
+	;			;		jmap shinit;			| 21 gouraud shading initialization
+	;			;		jmap plgfill;			| 22 Polygon (2D) fill (one segment)
+	;			;		jmap badcmd;			| 23
+	;			;		jmap plgsh;			| 24 Polygon (2D) Gouraud shading (one segment)
+	;			;		jmap plhsh;			| 25 Polyhedra (3D)Gouraud shading (one segment)
+	;			;		jmap textex;			| 26 Textured vectors.
+	;			;		jmap ldtex;			| 27 Load polygon texture into scratch.
+	;			;		jmap plgtex1;			| 28 1 line textured 1-to-8 rop.
+	;			;		jmap plgtex8;			| 29 1 line textured 8-to-8 rop.
+	;			;		jmap polypoly;			| 30 Polylines, textured and solid.
+	;			;		jmap xflineinit;		| 31 Initialization for xfline.
+	;			;		jmap xfline;			| 32 For drawing transformed textured & fat vecs.
+	;			;		jmap setlinetex;		| 33 Set line texture.
+	;			;		jmap setlinewidth;		| 34 Set line width.
+	;			;		jmap roptex8;			| 35 8 bit textured multi-line rops.
+#ifdef GPPLUS
+	;			;		jmap set_pick_id;		| 36 Set current pick ID
+	;			;		jmap get_pick;			| 37 Get last pick
+	;			;		jmap set_pick_window;		| 38 Set active pick window
+	;			;		jmap pkvector;			| 39 xfvec with pick
+	;			;		jmap pickline;			| 40 xfline with pick
+	;			;		jmap set_pick_mode;		| 41 turns picking on/off and sets count for polygons
+	;			;		jmap set_context_no;		| 42 PP Context info to sync with VP
+	;			;		jmap clear_pick;		| 43 clear pick hit latch and ID
+	;			;		jmap set_pick_cnt;		| 44 set pick count 
+#endif GPPLUS
+
+#ifndef GPPLUS
+badcmd:	subw,s d, acc, y;	36->am;		;				| #->am is highest command + 1.
+#else GPPLUS
+				
+badcmd:	subw,s d, acc, y;	45->am;		;				| #->am is highest command + 1.
+#endif GPPLUS
+	movw,s d, r[6];		2->am;		crtn, ~cry;			| Number of times to flash - 1.
+	;			0x21->vhiareg;	;				| 
+	;			0xf800->am;	;				| 
+	movw d, r[5];		0xf800->vloareg; ;				| 
+	;			1020->brreg;	;				| Maximum number of shorts to write.
+	;			;		cjp, ~vir .;			| 
+	movw acc, r[0];		GPVWord->vctlreg; push, go;			| Write command in shmem.
+	movw r[0], y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+	movw d, acc;		160->am;	;				| Length of flash in milliseconds.
+	;			;		cjs, ~neg flash;		| Flash if r[6] not negative.
+	movw d, r[0];		fifo1->am;	cjp, f1e .;			| Get data out of fifo.  Maybe hang here.
+	add2nw 1, r[5], r[5];	am->vloareg;	;				| increment shmem address by two bytes.
+	sub2nw,s 0, r[6];	0x21->vhiareg;	rfct;				| 
+	;			;		cjp, go .;			| Hang here.
+
+#ifdef rdback
+rdback:	;			;		cjp, ~vir .;			| 
+	;			0x7b->vctlreg;	;				| 
+	;			;		cjp, ~vir .;			| 
+	;			0x21->vhiareg;	;				| 
+	;			0xf800->vloareg; ;				| 
+	;			;		ldct 500;			| 
+wait:	;			fifo1->am;	cjp, f1e .;			| 
+	movw d, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+	;			;		;			varegs +| 
+	;			;		rpct wait;		varegs +| 
+	;			;		cjp, go .;			| Hang here.
+#endif
+
+
+vecvec:	movw 0,r[24];		;		cjs, go vector;			| Initialization for pixrect routines.
+	;			;		cjp, go start;			| 
+
+#ifdef GPPLUS
+pkvector: movw 0,r[24];		;		cjs, go .+2;			| xfvec with picking on (xfline is pickline)
+	;			;		cjp, go start;			| 
+	;			;		jmap pickvector;		| 
+#endif GPPLUS
+
+vecvecxf: ;			;		cjs, go vector;			| Xformed vectors, single width, solid.
+	;			;		cjp, go start;			| r[24] set to zero in initialization
+
+textex:	movw 0,r[24];		;		cjs, go texvec;			| Clear options field, we later OR in passed options field
+	;			;		cjp, go start;			| This is done for picking, which needs bit 0 == 0.
+
+polypoly: movw 0,r[24];		;		cjs, go polyln;			| 
+	;			;		cjp, go start;			| 
+
+#ifdef GPPLUS
+gb_installed: ;			fifo1->am;	cjp, f1e .;			| get flag from fifo
+	;			GB_Installed->scrmemp; ;			| set scrmemp
+	movw d,y;		am->scrmem;	cjp, go start;			| move flag into scrmem
+#endif
+
+#undef solid
+
+#ifdef GPPLUS
+#include "mulchip.pp.u"
+#else
+#include "mul.pp.u"
+#endif GPPLUS
+
+#include "div.pp.u"
+#include "ack.pp.u"
+#include "init.pp.u"
+#include "ropnull.pp.u"
+#include "ropfb.pp.u"
+#include "vector.pp.u"
+#include "stclip.pp.u"
+#include "octant.pp.u"
+#include "gbuffer.pp.u"
+#include "shade.pp.u"
+#include "delay.pp.u"
+#include "texvector.pp.u"
+#include "texvec.pp.u"
+#include "fatvec.pp.u"
+#include "polyline.pp.u"
+#include "xfline.pp.u"
+#include "xflineinit.pp.u"
+#include "setlineatts.pp.u"
+#include "roptex.pp.u"
+#ifdef GPPLUS
+#include "pick.pp.u"
+#include "statpick.pp.u"
+#include "statshade.pp.u"
+#include "statmul.pp.u"
+#include "vec3.pp.u"
+#include "zboctant.pp.u"
+#include "dcoctant.pp.u"
+#include "dctexvec.pp.u"
+#include "zbtexvec.pp.u"
+#include "pkzboctant.pp.u"
+#include "pkndzboctant.pp.u"
+#include "pkzbtexvec.pp.u"
+#include "pkndzbtexvec.pp.u"
+#include "pickline3.pp.u"
+#endif GPPLUS
+
+stop

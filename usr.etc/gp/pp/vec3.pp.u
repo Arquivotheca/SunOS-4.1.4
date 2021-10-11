@@ -1,0 +1,221 @@
+| "@(#)vec3.pp.u 1.1 94/10/31 SMI"
+| Copyright 1988 by Sun Microsystems, Inc.
+
+| Written by Stuart Levy
+
+
+#define options	r[24]
+#define offsety r[20]
+#define offsetx r[19]
+#define ghi	r[18]
+#define glo	r[17]
+#define chi	r[15]
+#define clo	r[14]
+#define zhi	r[13]	/* we use whichever z value is appropriate (z0 or z1) */
+#define zlo	r[12]
+#define safereg r[9]
+#define startx	r[7]	/* This is clipped X starting coordinate */
+#define starty	r[6]
+#define count	r[5]	/* must save away count */
+#define advhi	r[5]	/* Same as Multiplier & MulHigh in muldbl routine */
+#define dzhi	r[4]
+#define dzlo	r[3]
+#define tmp3	r[3]
+#define advlo	r[2]
+#define HiRslt	r[1]
+#define LoRslt	r[0]
+#define addrlo	r[0]	/* computed in vector, before entering routine */
+#define addrhi	r[1]
+#define origx	acc	/* same as Mulcand in muldbl routine */
+
+#define solid 	5
+#define nosetup 3	
+#define zbuf 	1
+
+
+
+|   vec3clip advances the z-values of vectors, depending on if they were clipped or not.  If the vector is
+|   clipped, the starting z value (which is double precision) is advanced by (xclip * dz/dx).
+|   		1.  Check sign of dx (tells us which Z value to use, whether sign of dz is correct).
+|   		2.  Take difference of X in SavePts, and current X value (return if zero, no clipping done).
+|		3.  Advance Z value by amount X clipped.		
+|   
+|   SavePts  is set up as follows:	x0,y0,x1,y1
+|   ZSavepts is set up as follows:	z0hi,z0lo,z1hi,z1lo,dzhi,dzlo,chi,clo,dchi,dclo 
+|   When we exit, scrmp (0,1) is:	1. dzlo,dzhi,dclo,dchi 		z buffering enabled
+|   					2. dclo,dchi			z buffering disabled
+
+
+
+
+|   Offsetx holds beginning of clip rectangle.  Therefore if need to advance values, we advance by (offsetx - origx).
+|   If (startx = origx), then no clip was done.
+vec3majx:	
+|   X is major axis.  
+	movw count,safereg;	Pickmaybe->scrmemp; ;				| save count, will check if need picking parameters
+	testw (d);		scrmem->am;	;				| pickmaybe should be 0 for non-3d ops (don't need to check)
+	movw addrlo,acc;	SavePts->scrmemp; ;				| save gbuffer pointers
+	movw acc,glo;		;		cjp,zer v3nopkx;		| 
+|   Save away x0, and y0 (actual) values.  These are used for picking.  Computations come from vme address computation in vector.pp.u.
+	movw offsetx,acc;	SavePk3XY->scrmemp; ;				| 
+	addw startx,acc,acc;	am->scrmem;	;			scrmp+	| store x0 in scrmem
+	movw offsety,acc;	;		;				| 
+	addw starty,acc,acc;	am->scrmem;	;				| store y0 in scrmem
+	;			SavePts->scrmemp; ;				| restore scrmemp
+|   Clipping calculations.	
+v3nopkx: subw d,addrhi,acc;	PixFB->am;	;				| ghi equal to correct addrhi
+	movw acc,ghi;		scrmem->am;	;			scrmp+	| addrlo = glo, addrhi wrong by RopFB + FBHi
+	movw d,origx;		=v3cliplft->brreg; ;			scrmp+	| fetch original x0
+	rsubw,s d,origx,y;	scrmem->am;	;				| check sign of original dx
+	rsubw startx,origx,acc; ZSavePts->scrmemp; cjp,neg;			| jump if dx is negative, test if no clip done
+v3cliprt:
+	movw d,zhi;		scrmem->am;	;			scrmp+	| z0hi
+	movw d,zlo;		scrmem->am;	;				| z0lo
+	addw,s offsetx,acc,acc;	ZSaveDz->scrmemp; ;				| address of dzhi, dzlo, acc into chi is temporary
+	movw d,dzhi;		scrmem->am;	cjp,zer v3endx;		scrmp+	| dzhi & will return if no advance of z necessary
+|   Here we advance the z value by the (offsetx - xorig), which is the amount in which x  was clipped.	
+v3advz:	movw dzhi,advhi;	;		;				| 
+	movw acc,chi;		;		;				| 
+	movw d,advlo;		scrmem->am;	cjs,go stmuldbl;	scrmp+	| dzlo 
+	movw zlo,y;		am->am;		;				| d-latch <- zlo, set scrmp to store dzlo
+	addw,s d,HiRslt,zlo;	DCSaveC->scrmemp; ;				| compute new zlo, reload scrmemp
+	movw zhi,y;		am->am;		;				| 
+	addw d,LoRslt,zhi;	;		cjp,~cry .+2;			| compute new zhi
+	incw zhi,zhi;		;		;				| increment zhi if carry occured
+v3advcol: movw chi,acc;		;		;				| 
+	movw d,chi;		scrmem->am;	;			scrmp+	| chi
+	movw d,clo;		scrmem->am;	;			scrmp+	| clo
+	movw d,advhi;		scrmem->am;	;			scrmp+	| dchi
+	movw d,advlo;		scrmem->am;	cjs,go stmuldbl;		| dclo
+	movw chi,acc;		;		;				| 
+	movw clo,y;		am->am;		;				| 
+	addw d,HiRslt,clo;	;		;				| update clo
+	addcw LoRslt,acc,chi;	VecAtts->scrmemp; ;				| update chi
+	btstw,s zbuf,d;		scrmem->am;	;				| test if z buffering
+	;			ZSaveDz->scrmemp; ;				| 
+	movw d,dzhi;		scrmem->am;	ldct v3enddc;		scrmp+	| must restore dz values
+	movw d,dzlo;		scrmem->am;	;			scrmp 0	| will jump to v3enddc if only depth cueing
+	;			DCSaveDC->scrmemp; ;				| 
+	movw d,advhi;		scrmem->am;	;			scrmp+	| 
+	movw d,advlo;		scrmem->am;	jrp,~zer v3endzb;	scrmp 0	| 
+	
+|   Here we know we must use x1 and z1, since vector is being reversed.  Note that x1 is in d-latch. 
+v3cliplft:
+	subw d,startx,acc;	ZSavePts1->scrmemp; ;				| compute clip amount based on x1
+	addw,s offsetx,acc,acc; ;		;				| test if no clip was done
+	movw d,zhi;		scrmem->am;	;			scrmp+	| z1hi
+	movw d,zlo;		scrmem->am;	ldct v3advz;		scrmp+	| z1lo
+	movw d,dzhi;		scrmem->am;	jrp,zer v3endx;		scrmp+	| dzhi & will return if no advance of z necessary
+	
+v3endx:	movw d,dzlo;		scrmem->am;	;			scrmp+	| dzlo 
+	movw d,chi;		scrmem->am;	;			scrmp+	| chi
+	movw d,clo;		scrmem->am;	;			scrmp+	| clo
+	movw d,advhi;		scrmem->am;	;			scrmp+	| dchi
+	movw d,advlo;		scrmem->am;	;				| dclo
+	;			VecAtts->scrmemp; ;				| 
+	btstw,s zbuf,d;		scrmem->am;	;				| test if depth cueing only
+	;			;		cjp,zer v3enddc;	scrmp 0	| 
+|   Here we store dzlo,dzhi,dclo,dchi in scrmem[0-3].  These are used while drawing.
+v3endzb: movw dzlo,y;		am->scrmem;	;			scrmp+	| store dzlo @ scrmem[0]
+	movw dzhi,y;		am->scrmem;	;			scrmp+	| store dzhi @ scrmem[1] 
+v3enddc: movw advlo,y;		am->scrmem;	;			scrmp+	| store dclo @ scrmem[2] or [0], depending if z buffering
+	movw advhi,y;		am->scrmem;	cjp,~zer v3norm;		| store dchi @ scrmem[3] or [1], depending if z buffering
+
+|   Depth cueing enabled, z-buffering disabled.		
+v3dc:	movw ghi,acc;		am->vhiareg;	cjp,~vir .;			| 
+	movw acc,addrhi;	VByte->vctlreg;	;				| 
+	movw glo,acc;		;		;				| 
+	movw acc,addrlo;	am->vloareg;	;				| 
+	btstw,s solid,options;	;		;				| 
+	movw safereg,count;	;		cjp,~zer v3jmap;		| return if solid
+	movw chi,y;		am->am;		cjp,go v3tex;			| 
+
+|   Z-buffering enabled, so we initialize the graphics buffer for normal mode.  Note that the addrhi is initiated so
+|   that the rop chips are not used.
+v3norm:	movw ghi,acc;		am->vhiareg;	cjp,~vir .;			| addrhi needs to be loaded, since not using rop chips
+	movw acc,addrhi;	VByte->vctlreg;	push,go;			| need to add x value into addresses
+	movw safereg,count;	0x6000->gbhiptr; loop,gbr;			| set normal mode
+	addw d,FBHi,acc;	PixFB->am;	;				| compute high address for gb pointer
+	rsubw ghi,acc,ghi;	;		;				| ghi = addrhi - (RopFB + FBHi)
+	movw ghi,y;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw glo,acc;		am->gbloptr;	cjp,~gbr .;		gbrd	| 
+	btstw,s solid,options;	;		;				| check if vectors solid
+	movw acc,addrlo;	am->vloareg;	cjp,~zer v3jmap;		| restore addrlo 
+	movw chi,y;		am->am;		;				| move chi & clo for textured case
+v3tex:	movw d,r[20];		;		;				| 
+	movw clo,y;		am->am;		;				| 
+	movw d,r[19];		;		;				| 
+v3jmap:	;			;		jmap v3quit_pp;			| return to other bank
+
+|   Y is the major axis.  Our calculations for clipping assume that both y and x are positive going, so that
+|   we negate the dy value if negative.  Hallelujah!
+vec3majy:	
+|   First we clip
+	movw count,safereg;	Pickmaybe->scrmemp; ;				| save count, will check if need picking parameters
+	movw addrlo,acc;	SavePts->scrmemp; ;				| save gbuffer pointers
+	movw acc,glo;		;		cjp,zer v3nopky;	
+|   Save away x0, and y0 (actual) values.  These are used for picking.  Computations come from vme address computation in vector.pp.u.
+	movw offsetx,acc;	SavePk3XY->scrmemp; ;				| 
+	addw starty,acc,acc;	am->scrmem;	;			scrmp+	| store x0 in scrmem
+	movw offsety,acc;	;		;				| 
+	addw startx,acc,acc;	am->scrmem;	;				| store y0 in scrmem
+	;			SavePts->scrmemp; ;				| restore scrmemp
+v3nopky: subw d,addrhi,acc;	PixFB->am;	;				| ghi equal to correct addrhi
+	movw acc,ghi;		scrmem->am;	;			scrmp+	| addrlo = glo, addrhi wrong by RopFB + FBHi
+	movw d,origx;		=v3ycliplft->brreg; ;			scrmp+	| fetch original y0
+	rsubw,s d,origx,y;	scrmem->am;	;			scrmp+	| check sign of original dx, scrmp = y1
+	subw d,startx,acc;	scrmem->am;	cjp,neg;			| jump if dx is negative, test if no clip done
+										| compute clipped portion in y (based on y1)
+|   First, we must use y0 to see if clip was done.
+v3ycliprt:
+	;			SavePts->scrmemp; ;				| 
+	;			;		;			scrmp+	| skip over x0
+	subw d,startx,acc;	scrmem->am;	;				| 
+	addw,s offsety,acc,acc;	ZSavePts->scrmemp; ;				| 
+	movw d,zhi;		scrmem->am;	cjp,~neg .+2;		scrmp+	| z0hi
+	negw acc,acc;		;		;				| make dy positive
+	movw d,zlo;		scrmem->am;	ldct v3advz;			| z0lo
+	;			ZSaveDz->scrmemp; ;				| address of dzhi, dzlo, acc into chi is temporary
+	movw d,dzhi;		scrmem->am;	jrp,zer v3endx;		scrmp+	| dzhi & will return if no advance of z necessary
+
+|   Here we advance the z value by the (offsetx - xorig), which is the amount in which x  was clipped.	
+|   Here we know we must use x1 and z1, since vector is being reversed.  Note that x1 is in d-latch. 
+v3ycliplft: addw,s offsety,acc,acc; ZSavePts1->scrmemp; ;			| 
+	movw d,zhi;		scrmem->am;	cjp,~neg .+2;		scrmp+	| z1hi
+	negw acc,acc;		;		;				| 
+	movw d,zlo;		scrmem->am;	ldct v3advz;		scrmp+	| z1lo
+	movw d,dzhi;		scrmem->am;	jrp,zer v3endx;		scrmp+	| dzhi & will return if no advance of z necessary
+	
+	
+#undef options	
+#undef offsety
+#undef offsetx
+#undef chi	
+#undef clo	
+#undef ghi
+#undef glo
+#undef zhi	
+#undef zlo	
+#undef chi	
+#undef clo	
+#undef safereg
+#undef startx	
+#undef dzhi	
+#undef starty
+#undef dzlo	
+#undef HiRslt	
+#undef LoRslt	
+#undef origx	
+#undef count
+#undef tmp3
+#undef addrlo
+#undef addrhi
+#undef advhi
+#undef advlo
+
+#undef solid
+#undef nosetup
+#undef zbuf
+
+
+

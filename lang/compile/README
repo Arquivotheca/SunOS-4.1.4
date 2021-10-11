@@ -1,0 +1,10 @@
+#	@(#)README	1.1	10/31/94
+
+REGRESSION TESTING OF COMPILE:
+==============================
+
+   <The old contents of this file are now out of date.
+    All regression testing is now done under the "test_dir2"
+    directory.  Note that cross-compilers, or a faked-out
+    version of them, must be installed in order for the
+    regression test to work.>

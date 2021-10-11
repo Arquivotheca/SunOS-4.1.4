@@ -1,0 +1,229 @@
+| "@(#)ropfb.pp.u 1.1 94/10/31 SMI"
+
+| Copyright 1985 by Sun Microsystems, Inc.
+
+|   Frame buffer to frame buffer rops.
+
+#define sylo	r[0]
+#define syhi	r[1]
+#define bylo	r[3]
+#define byhi	r[4]
+#define sxlo	r[5]
+#define sxhi	r[6]	/* What may look like pre-inc{dec}rementing of addresses is actually post. */
+#define bxlo	r[7]
+#define bxhi	r[8]
+
+#define w	r[9]
+#define ropmode	r[10]
+#define recht	r[11]
+#define linebytes r[12]
+#define dir	r[13]
+#define prime	r[14]
+
+ropfb:	;			;		cjs, go ropreg;			| 
+rfalo1:	movw d, sylo;		fifo1->am;	cjp, f1e rfalo1;		| Interleave instructions with fifo fetches.
+	movw d, y;		am->vloareg;	;				| Get first data from source raster. (*sx)
+rfahi1:	movw d, syhi;		fifo1->am;	cjp, f1e rfahi1;		| 
+rfvctl:	movw d, y;		am->vhiareg;	cjp, ~vir rfvctl;		| 
+	;			GPVWord->vctlreg; ;				| 
+rfalo:	movw d, bylo;		fifo1->am;	cjp, f1e rfalo;			| 
+rfahi:	movw d, byhi;		fifo1->am;	cjp, f1e rfahi;			| 
+rfw:	movw d, w;		fifo1->am;	cjp, f1e rfw;			| 
+rfropm:	movw d, ropmode;	fifo1->am;	cjp, f1e rfropm;		| 
+rfrecht:movw d, recht;		fifo1->am;	cjp, f1e rfrecht;		| 
+rfdir:	movw d, dir;		fifo1->am;	cjp, f1e rfdir;			| 
+rfprime:movw d, prime;		fifo1->am;	cjp, f1e rfprime;		| 
+	movw d, linebytes;	SWWidth->am;	;				| 
+	;			;		cjp, ~vir .;		vmerd	| 
+	testw (w);		;		;				| if (w) {
+	sub2nw 1, w, w;		;		cjp, zer rfwzero;		| w-- (twice because fastloop done at least once).
+rfloop:	decws recht, recht;	;		;				| while (--SizeY >= 0)
+	movw sylo, sxlo;	;		cjp, neg start;			| sx= sy
+	movw syhi, sxhi;	;		;				| 
+	movw bylo, bxlo;	;		;				| bx= by
+	movw byhi, bxhi;	;		;				| 
+	btstw,s 1, dir;		;		;				| if (rop_isright (dir)) {
+	testw (prime);		;		cjp, ~zer rfleft;		| if (prime)
+	;			;		cjp, zer rfrxfer;		| 
+	;			FBAllRopRegSrc1->vloareg;;			| 
+	movw FBCont, y;		am->vhiareg;	;				| Get ready for cg2_set{r,l}source ()
+rfrvwr:	;			vrdreg->vwdreg;	cjp, ~vir rfrvwr;	vmewr	| cg2_setrsource (,, *(sx)--)
+	sub2nw 1, sxlo, sxlo;	am->vloareg;	;				| 
+	subcw d, sxhi, sxhi;	0->am;		;				| 
+	movw sxhi, y;		am->vhiareg;	;				| 
+rfrvrd:	;			;		cjp, ~vir rfrvrd;	vmerd	| *bx--= *sx--
+rfrxfer:movw bxlo, y;		am->vloareg;	;				| 
+	movw bxhi, y;		am->vhiareg;	;				| 
+rfrvwr1:testw (w);		vrdreg->vwdreg;	cjp, ~vir rfrvwr1;	vmewr	| 
+	movw w, y;		am->brreg;	cjp, neg rfrend;		| ready to load counter for fastloop (if needed)
+	movw ropmode, acc;	;		cjs, go vropmode;		| statusreg.ropmode= ropmode
+	movw 0, acc;		;		push, go;			| fastloop (w, *bx-- = *sx--)
+	sub2nw 1, sxlo, sxlo;	am->vloareg;	;				| 
+	rsubcw sxhi, acc, sxhi;	am->vhiareg;	;				| 
+rfrvrdf:;			;		cjp, ~vir rfrvrdf;	vmerd	| 
+	sub2nw 1, bxlo, bxlo;	am->vloareg;	;				| 
+	rsubcw bxhi, acc, bxhi;	am->vhiareg;	;				| 
+rfrvwrf:;			;		cjp, ~vir rfrvwrf;		| 
+	;			vrdreg->vwdreg;	;				| 
+rfrvwrf1:;			;		cjp, ~vir rfrvwrf1;	vmewr	| 
+	;			PWRWRD->am;	rfct;				| end of fastloop. PWRWRD for after loop done.
+	movw d, acc;		;		cjs, go vropmode;		| statusreg.ropmode= PWRWRD
+rfrend:	sub2nw 1, sxlo, sxlo;	am->vloareg;	;				| *bx= *sx
+	subcw d, sxhi, sxhi;	0->am;		;				| 
+	movw sxhi, y;		am->vhiareg;	;				| 
+rfrvrde:;			;		cjp, ~vir rfrvrde;	vmerd	| 
+	sub2nw 1, bxlo, bxlo;	am->vloareg;	;				| 
+	subcw d, bxhi, bxhi;	0->am;		;				| 
+	movw bxhi, y;		am->vhiareg;	;				| 
+rfrvwre:;			vrdreg->vwdreg;	cjp, ~vir rfrvwre;	vmewr	| 
+	btstw,s 0, dir;		;		cjs, go rfdown;			| 
+	;			;		cjp, go rfloop;			| 
+
+rfleft:	;			;		cjp, zer rflxfer;		| if (prime)
+	;			FBAllRopRegSrc2->vloareg;;			| cg2_setlsource (,, *(sx)--)
+	movw FBCont, y;		am->vhiareg;	;				| Get ready for cg2_set{r,l}source ()
+rflvwr:	;			vrdreg->vwdreg;	cjp, ~vir rflvwr;	vmewr	| 
+	add2nw 1, sxlo, sxlo;	am->vloareg;	;				| 
+	addcw d, sxhi, sxhi;	0->am;		;				| 
+	movw sxhi, y;		am->vhiareg;	;				| 
+rflvrd:	;			;		cjp, ~vir rflvrd;	vmerd	| *bx--= *sx--
+rflxfer:movw bxlo, y;		am->vloareg;	;				| 
+	movw bxhi, y;		am->vhiareg;	;				| 
+rflvwr1:testw (w);		vrdreg->vwdreg;	cjp, ~vir rflvwr1;	vmewr	| 
+	movw w, y;		am->brreg;	cjp, neg rflend;		| ready to load counter for fastloop (if needed)
+	movw ropmode, acc;	;		cjs, go vropmode;		| statusreg.ropmode= ropmode
+	movw 0, acc;		;		push, go;			| fastloop (w, *bx-- = *sx--)
+	add2nw 1, sxlo, sxlo;	am->vloareg;	;				| 
+	addcw sxhi, acc, sxhi;	am->vhiareg;	;				| 
+rflvrdf:;			;		cjp, ~vir rflvrdf;	vmerd	| 
+	add2nw 1, bxlo, bxlo;	am->vloareg;	;				| 
+	addcw bxhi, acc, bxhi;	am->vhiareg;	;				| 
+rflvwrf:;			vrdreg->vwdreg;	cjp, ~vir rflvwrf;	vmewr	| 
+	;			PWRWRD->am;	rfct;				| end of fastloop. PWRWRD for after loop done.
+	movw d, acc;		;		cjs, go vropmode;		| statusreg.ropmode= PWRWRD
+rflend:	add2nw 1, sxlo, sxlo;	am->vloareg;	;				| *bx= *sx
+	addcw d, sxhi, sxhi;	0->am;		;				| 
+	movw sxhi, y;		am->vhiareg;	;				| 
+rflvrde:;			;		cjp, ~vir rflvrde;	vmerd	| 
+	add2nw 1, bxlo, bxlo;	am->vloareg;	;				| 
+	addcw d, bxhi, bxhi;	0->am;		;				| 
+	movw bxhi, y;		am->vhiareg;	;				| 
+rflvwre:;			vrdreg->vwdreg;	cjp, ~vir rflvwre;	vmewr	| 
+	btstw,s 0, dir;		;		cjs, go rfdown;			| 
+	;			;		cjp, go rfloop;			| 
+
+rfwzero:movw d, acc;		PWRWRD->am;	;				| 
+	;			;		cjs, go vropmode;		| 
+rfwloop:decws recht, recht;	;		;				| while (--SizeY >= 0)
+	movw sylo, sxlo;	am->vloareg;	cjp, neg start;			| sx= sy
+	movw syhi, sxhi;	am->vhiareg;	;				| 
+	movw bylo, bxlo;	;		;				| bx= by
+	movw byhi, bxhi;	;		;				| 
+	testw (prime);		;		;				| 
+	;			;		cjp, zer rfwvrd;		| 
+rfwvrd0: ;			;		cjp, ~vir rfwvrd0;	vmerd	| *sx--
+	;			FBAllRopRegSrc2->vloareg;;			| cg2_setlsource (,, *(sx)--)
+	movw FBCont, y;		am->vhiareg;	;				| Get ready for cg2_set{r,l}source ()
+rfwvwr:	;			vrdreg->vwdreg;	cjp, ~vir rfwvwr;	vmewr	| 
+	add2nw 1, sxlo, sxlo;	am->vloareg;	;				| 
+	addcw d, sxhi, sxhi;	0->am;		;				| 
+	movw sxhi, y;		am->vhiareg;	;				| 
+rfwvrd:	;			;		cjp, ~vir rfwvrd;	vmerd	| *bx--= *sx--
+rfwxfer: movw bxlo, y;		am->vloareg;	;				| 
+	movw bxhi, y;		am->vhiareg;	;				| 
+rfwvwr1:;			vrdreg->vwdreg;	cjp, ~vir rfwvwr1;	vmewr	| 
+	btstw,s 0, dir;		;		cjs, go rfdown;			| rfdown will use result of this test.
+	;			;		cjp, go rfwloop;		| 
+
+
+rfdown:	movw d, acc;		SWWidth->am;	;				| 
+	;			;		cjp, ~zer rfup;			| 
+	rsubw sylo, acc, sylo;	am->vloareg;	;				| sy -= linebytes 
+	subcw d, syhi, syhi;	0->am;		;				| 
+rfdown1:movw syhi, y;		am->vhiareg;	cjp, ~vir rfdown1;		| get read ready for next line.
+	rsubw bylo, acc, bylo;	;		;			vmerd	| by -= linebytes
+	subcw d, byhi, byhi;	0->am;		crtn, go;			| 
+rfup:	addw sylo, acc, sylo;	am->vloareg;	;				| sy += linebytes 
+	addcw d, syhi, syhi;	0->am;		;				| 
+rfup1:	movw syhi, y;		am->vhiareg;	cjp, ~vir rfup1;		| get read ready for next line.
+	addw bylo, acc, bylo;	;		;			vmerd	| by += linebytes
+	addcw d, byhi, byhi;	0->am;		crtn, go;			| 
+
+
+|   Set color FBHi 2 rop registers from fifo.
+ropreg:	movw d, acc;		fifo1->am;	cjp, f1e .;			| 
+	;			;		cjp, ~vir .;			| 
+	;			GPVWord->vctlreg; ;				| 
+	;			;		cjs, go vropmode;		| 
+	;			RRValues->scrmemp; ;				| 
+	movw d, acc;		fifo1->am;	cjp, f1e .;			| 
+	subw,s d, acc, y;	scrmem->am;	;				| 
+	movw acc, y;		am->scrmem;	cjp, zer rrpatt;	scrmp +	| 
+	;			FBAllRopRegOp->vloareg; ;			| 
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+rrpatt:	movw d, acc;		fifo1->am;	cjp, f1e .;			| 
+	subw,s d, acc, y;	scrmem->am;	;				| 
+	movw acc, y;		am->scrmem;	cjp, zer rrm2;		scrmp +	| 
+	;			FBAllRopRegPatt->vloareg; ;			| 
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+rrm2:	movw d, acc;		fifo1->am;	cjp, f1e .;			| 
+	subw,s d, acc, y;	scrmem->am;	;				| 
+	movw acc, y;		am->scrmem;	cjp, zer rrm1;		scrmp +	| 
+	;			FBAllRopRegMask2->vloareg; ;			| 
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+rrm1:	movw d, acc;		fifo1->am;	cjp, f1e .;			| 
+	subw,s d, acc, y;	scrmem->am;	;				| 
+	movw acc, y;		am->scrmem;	cjp, zer rrwid;		scrmp +	| 
+	;			FBAllRopRegMask1->vloareg; ;			| 
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+rrwid:	movw d, acc;		fifo1->am;	cjp, f1e .;			| 
+	subw,s d, acc, y;	scrmem->am;	;				| 
+	movw acc, y;		am->scrmem;	cjp, zer rrcnt;		scrmp +	| 
+	;			FBAllRopRegWidth->vloareg; ;			| 
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+rrcnt:	movw d, acc;		fifo1->am;	cjp, f1e .;			| 
+	subw,s d, acc, y;	scrmem->am;	;				| 
+	movw acc, y;		am->scrmem;	cjp, zer rrsh;		scrmp +	| 
+	;			FBAllRopRegOpCnt->vloareg; ;			| 
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+rrsh:	movw d, acc;		fifo1->am;	cjp, f1e .;			| 
+	subw,s d, acc, y;	scrmem->am;	;				| 
+	movw acc, y;		am->scrmem;	cjp, zer rrsrc2;	scrmp +	| 
+	;			FBAllRopRegShift->vloareg; ;			| 
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+rrsrc2:	movw d, acc;		fifo1->am;	cjp, f1e .;			| 
+	;			FBAllRopPrimeSrc2->vloareg; ;			| 
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+rrrtn:	;			;		crtn, go;			| 
+
+|   	movw,s [0/1], y;	;		jmap setfstrd;			| [14/18] [en/dis]able fast read on CG3
+setfstrd: ;			0xB000->vloareg; ;				| 
+	movw FBCont,y;		am->vhiareg;	;				| 
+	movw GPVWord, y;	am->vctlreg;	;				| 
+	;			;		cjp, ~vir .;		vmerd	| 
+	movw d, acc;		vrdreg->am;	cjp, ~vir .;			| 
+	bsetw 10, acc;		;		cjp, ~zer .+2;			| 
+	bclrw 10, acc;		;		;				| 
+	movw acc, y;		am->vwdreg;	;			vmewr	| 
+	;			;		jmap start;			| 
+	 
+
+fifovme: ;			fifo1->am;	cjp, f1e .;			| 
+	movw d, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+	;			;		crtn, go;			| 
+
+#undef sylo
+#undef syhi
+#undef bylo
+#undef byhi
+#undef sxlo
+#undef sxhi
+#undef bxlo
+#undef bxhi
+
+#undef w
+#undef ropmode
+#undef recht
+#undef linebytes
+#undef dir
+#undef prime

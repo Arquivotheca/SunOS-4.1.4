@@ -1,0 +1,506 @@
+/* @(#)sb_gluemenu.ext 1.1 94/10/31 SMI */
+
+/*
+ *	Copyright (c) 1989, Sun Microsystems, Inc.  All Rights Reserved.
+ *	Sun considers its source code as an unpublished, proprietary
+ *	trade secret, and it is available only under strict license
+ *	provisions.  This copyright notice is placed here only to protect
+ *	Sun in the event the source is deemed a published work.  Dissassembly,
+ *	decompilation, or other means of reducing the object code to human
+ *	readable form is prohibited by the license agreement under which
+ *	this code is provided to the user or company in possession of this
+ *	copy.
+ *	RESTRICTED RIGHTS LEGEND: Use, duplication, or disclosure by the
+ *	Government is subject to restrictions as set forth in subparagraph
+ *	(c)(1)(ii) of the Rights in Technical Data and Computer Software
+ *	clause at DFARS 52.227-7013 and in similar clauses in the FAR and
+ *	NASA FAR Supplement.
+ */
+
+
+#ifndef sb_gluemenu_ext_INCLUDED
+#define sb_gluemenu_ext_INCLUDED
+
+language gluemenu
+default-equiv-language
+
+version 1
+
+invisible
+
+#include "sb_base.ext"
+
+ref-focus-unit Language
+
+#include "sb_cpp.ext"
+
+menu {
+	CB_MENU_STRING_ALL_MATCHES menu {
+		CB_MENU_STRING_ALL_MATCHES
+		"Variables" menu {
+			"All Variables"
+			"Regular Variables"
+			"Field Variables" menu {
+				"All Fields"
+				"Struct Fields" menu {
+					"All Struct Fields"
+					"Regular Struct Fields"
+					"Struct Bitfields"
+				}
+				"Union Fields"
+			}
+		}
+		"Functions"
+		"Types" menu {
+			"All Types"
+			"Typedefs"
+			"Builtin Types"
+		}
+		"Type Tags" menu {
+			"All Tags"
+			"Struct Tags"
+			"Union Tags"
+			"Enum Tags"
+		}
+		"Labels"
+		"Constants" menu {
+			"All Constants"
+			"Enum Members"
+			"Macro Constants"
+			"Function Constants"
+		}
+		"cpp Symbols" menu {
+			"All Symbols"
+			"Macros" menu {
+				"All Macros"
+				"With Formals"
+				"Without Formals"
+			  }
+		}
+	}	
+
+	"Declarations" menu {
+		"All Declarations"
+		"Variables" menu {
+			"All Variables" menu {
+				"All Variables"
+				"Uninitialized Variables"
+				"Initialized Variables"
+			}
+			"Static Variables" menu {
+				"All Statics"
+				"Uninitialized Statics"
+				"Initialized Statics"
+			}
+			"Extern Variables"
+			"Toplevel Variables" menu {
+				"All Toplevels" menu {
+					"All Variables"
+					"Uninitialized Variables"
+					"Initialized Variables"
+				}
+				"Global Variables" menu {
+					"All Globals"
+					"Uninitialized Globals"
+					"Initialized Globals"
+				}
+				"Static Toplevels" menu {
+					"All Statics"
+					"Uninitialized Statics"
+					"Initialized Statics"
+				}
+				"Extern Toplevels"
+			}
+			"Local Variables" menu {
+				"All Locals" menu {
+					"All Locals"
+					"Uninitialized Locals"
+					"Initialized Locals"
+				}
+				"Auto Locals" menu {
+					"All Autos"
+					"Uninitialized Autos"
+					"Initialized Autos"
+				}
+				"Register Locals" menu {
+					"All Registers"
+					"Uninitialized Registers"
+					"Initialized Registers"
+				}
+				"Formals" menu {
+					"All Formals"
+					"In Formals List"
+					"In Formals Declaration" menu {
+						"All Formal Declarations"
+						"Regular Declarations"
+						"register Declarations"
+					}
+				}
+				"Static Locals" menu {
+					"All Statics"
+					"Uninitialized Statics"
+					"Initialized Statics"
+				}
+				"Extern Locals"
+			}
+			"Fields" menu {
+				"All Fields"
+				"Struct Fields" menu {
+					"All Fields"
+					"Regular Fields"
+					"Bitfields"
+				}
+				"Union Fields"
+			}
+		}
+		"Functions" menu {
+			"All Functions" menu {
+				"All Functions"
+				"Functions With Code Body"
+				"Functions Without Code Body"
+			}
+			"Static Functions" menu {
+				"All Statics"
+				"Statics With Code Body"
+				"Statics Without Code Body"
+			}
+			"Extern Functions" menu {
+				"All Externals"
+				"Externals With Code Body"
+				"Externals Without Code Body"
+			}
+			"Implicit Functions" menu {
+				"All Implicits"
+				"Implicits Value Used"
+				"Implicits Value Not Used"
+			}
+			"Top Level Functions" menu {
+				"All Toplevels" menu {
+					"All Functions"
+					"Functions With Code Body"
+					"Functions Without Code Body"
+				}
+				"Global Functions" menu {
+					"All Functions"
+					"Functions With Code Body"
+					"Functions Without Code Body"
+				}
+				"Static Toplevels" menu {
+					"All Statics"
+					"Statics With Code Body"
+					"Statics Without Code Body"
+				}
+				"Extern Toplevels" menu {
+					"All Externals"
+					"Externals With Code Body"
+					"Externals Without Code Body"
+				}
+			}
+			"Local Functions" menu {
+				"All Locals"
+				"Static Locals"
+				"Extern Locals"
+			}
+		}
+		"Typedefs"
+		"Type Tags" menu {
+			"All Tags" menu {
+				"All Tags"
+				"Specified Tags"
+				"Anonymous Tags"
+			}
+			"Struct Tags" menu {
+				"All Tags"
+				"Specified Tags"
+				"Anonymous Tags"
+			}
+			"Union Tags" menu {
+				"All Tags"
+				"Specified Tags"
+				"Anonymous Tags"
+			}
+			"Enum Tags" menu {
+				"All Tags"
+				"Specified Tags"
+				"Anonymous Tags"
+			}
+		}
+		"Labels"
+		"Constants" menu {
+			"All Constants"
+			"Enum Members" menu {
+				"All Members"
+				"Uninitialized Members"
+				"Initialized Members"
+			}
+			"Macro Constants"
+		}
+		"cpp Symbols" menu {
+			"All Symbols"
+			"Macros" menu {
+				"All Macros"
+				"With Formals"
+				"Without Formals"
+				"From #undef"
+			}
+			"Macro Formals"
+		}
+	}
+
+	"References" menu {
+		"All References"
+		"Variables" menu {
+			"All Variables" menu {
+				"All"
+				"Write"
+				"Read"
+				"Read/Write"
+				"Sizeof"
+				"Address of"
+			}
+			"Non-Field Variables" menu {
+				"All"
+				"Write"
+				"Read"
+				"Read/Write"
+				"Sizeof"
+				"Address of"
+			}
+			"Fields" menu {
+				"All Fields" menu {
+					"All"
+					"Write"
+					"Read"
+					"Read/Write"
+					"Sizeof"
+					"Address of"
+				}
+				"Struct Fields" menu {
+					"All Struct Fields" menu {
+						"All"
+						"Write"
+						"Read"
+						"Read/Write"
+						"Sizeof"
+						"Address of"
+					}
+					"Regular Struct Fields" menu {
+						"All"
+						"Write"
+						"Read"
+						"Read/Write"
+						"Sizeof"
+						"Address of"
+					}
+					"Struct Bitfields" menu {
+						"All"
+						"Write"
+						"Read"
+						"Read/Write"
+						"Sizeof"
+					}
+				}
+				"Union Fields" menu {
+					"All"
+					"Write"
+					"Read"
+					"Read/Write"
+					"Sizeof"
+					"Address of"
+				}
+			}
+		}
+		"Functions" menu {
+			"All Functions"
+			"Regular Function Calls" menu {
+				"All"
+				"Return Value Used"
+				"Return Value Not Used"
+			}
+			"Function Calls Using Pointer" menu {
+				"All"
+				"Return Value Used"
+				"Return Value Not Used"
+			}
+			"Function Pointer Assignments"
+		}
+		"Types" menu {
+			"All Types" menu {
+				"All References"
+				"From Declaration"
+				"From Cast"
+				"From Sizeof"
+			}
+			"Builtin Types" menu {
+				"All References"
+				"From Declaration"
+				"From Cast"
+				"From Sizeof"
+			}
+			"Typedefs" menu {
+				"All References"
+				"From Declaration"
+				"From Cast"
+				"From Sizeof"
+			}
+		}
+		"Type Tags" menu {
+			"All Tags" menu {
+				"All References"
+				"From Declaration"
+				"From Cast"
+				"From Sizeof"
+			}
+			"Struct Tags" menu {
+				"All References"
+				"From Declaration"
+				"From Cast"
+				"From Sizeof"
+			}
+			"Union Tags" menu {
+				"All References"
+				"From Declaration"
+				"From Cast"
+				"From Sizeof"
+			}
+			"Enum Tags" menu {
+				"All References"
+				"From Declaration"
+				"From Cast"
+				"From Sizeof"
+			}
+		}
+		"From Declaration" menu {
+			"All Declarations"
+			"Types" menu {
+				"All Types"
+				"Builtin Types"
+				"Typedefs"
+			}
+			"Type Tags" menu {
+				"All Tags"
+				"Struct Tags"
+				"Union Tags"
+				"Enum Tags"
+			}
+		}
+		"From Cast" menu {
+			"All Casts"
+			"Types" menu {
+				"All Types"
+				"Builtin Types"
+				"Typedefs"
+			}
+			"Type Tags" menu {
+				"All Tags"
+				"Struct Tags"
+				"Union Tags"
+				"Enum Tags"
+			}
+		}
+		"From Sizeof" menu {
+			"All Sizeofs"
+			"Types" menu {
+				"All Types"
+				"Builtin Types"
+				"Typedefs"
+			}
+			"Type Tags" menu {
+				"All Tags"
+				"Struct Tags"
+				"Union Tags"
+				"Enum Tags"
+			}
+			"Variables" menu {
+				"All Variables"
+				"Non-Field Variables"
+				"Fields" menu {
+					"All Fields"
+					"Struct Fields" menu {
+						"All Struct Fields"
+						"Regular Struct Fields"
+						"Struct Bitfields"
+					}
+					"Union Fields"
+				}
+			}
+		}
+		"From Address Of" menu {
+			"All Variables"
+			"Non-Field Variables"
+			"Fields" menu {
+				"All Fields"
+				"Struct Fields"
+				"Union Fields"
+			}
+		}
+		"Labels"
+		"Constants" menu {
+			"All Constants"
+			"Enum Members"
+			"Macros"
+		}
+		"cpp Symbols" menu {
+			"All Symbols"
+			"Macros" menu {
+				"All Macros" menu {
+					"All Macros"
+					"From The Source"
+					"From #if..." menu {
+						"All #if..."
+						"From #if"
+						"From #ifdef"
+						"From #ifndef"
+					}
+				}
+				"With Formals"
+				"Without Formals" menu {
+					"All Macros"
+					"From The Source"
+					"From #if..." menu {
+						"All #if..."
+						"From #if"
+						"From #ifdef"
+						"From #ifndef"
+					}
+				}
+			}
+			"Macro Actuals" menu {
+				"All Actuals"
+				"Regular Actuals"
+				"String Actuals"
+			}
+			"Macro Formals"
+			"From Macro Body" menu {
+				"All Body References"
+				"Regular"
+				"Strings"
+			}
+		}
+	}
+
+	"cpp Flow Control" menu {
+		"Active #if/#ifdef/#ifndef blocks"
+		"Inactive #if/#ifdef/#ifndef blocks"
+	}
+
+	"Strings" menu {
+		"All Strings"
+		"Regular Strings"
+		"#include String" menu {
+			"All #include"
+			"#include <>"
+			'#include ""'
+		}
+		"#ident String"
+	}
+
+	grep_menu(/**/)
+
+	CB_MENU_STRING_CBCAT
+	CB_MENU_STRING_CBCHECKCB
+	CB_MENU_STRING_HIDDEN
+}
+
+
+#endif

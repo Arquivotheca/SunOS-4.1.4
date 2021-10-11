@@ -1,0 +1,7 @@
+#! /bin/csh -f
+#
+#	@(#)Do_troff 1.1 94/10/31 SMI; from UCB X.X XX/XX/XX
+#
+set file=$1
+shift
+( echo ".ds Se $file" ; cat Troff.mac ; sed -f Troff.sed $file ) | $* -me

@@ -1,0 +1,137 @@
+| @(#)div.pp.u 1.1 94/10/31 SMI
+
+| Copyright (c) 1985 by Sun Microsystems, Inc.
+
+|      Div.pp.u, modified by stuart levy to also calculate the mod, and leave this quantity in the accumulator.
+|      The only other register that was added was the Mask register, which uses r[1] when the NDvsr is done
+|      with it.  There is some test code for the routine commented out at its head.
+
+
+|   Division.  Unsigned numbers only.
+|   Normalized.
+
+#define Dvsr acc
+#define Mod acc
+#define DLow r[0]
+#define DHigh r[1]
+#define QLow r[2]
+#define QHigh r[3]
+
+|   16 Bit Dividend, 16 Bit Divisor, 16 Bit Quotient.
+
+#define Dvdnd r[0]
+#define NDvsr r[1]
+#define Mask r[1]
+|   Number of bits needed to normalize divisor.
+#define NDvdnd r[4]
+|   Number of bits needed to normalize dividend.  Not r[3] because divlong may call divide.
+#define Quot r[2]
+
+|   test:	movw d,Dvdnd;		450->am;	;				| Dividend is 16 (top).
+|	movw d,Dvsr;		25->am;	;				| Divisor is 3 (bottom).
+|	movw 0,Mask;		;		;				| Does this need to be done ???
+|	;			;		cjs, go divide;			| 
+|	;			;		crtn, go;			| 
+
+divide:	rsubw,s Dvdnd, Dvsr, y;	;		;				| Compare dividend and divisor.
+	priw,s Dvsr, 0, NDvsr;	;		cjp, ~cry divquit0;		| Find highest 1 bit.
+	priw,s Dvdnd, 0, NDvdnd; am->am;	cjp, zer divquit0;		| Find highest 1 bit.
+	subw,s d, NDvsr, y;	am->brreg;	cjp, zer divquit0;		| 
+	sub2nw 0, NDvdnd;	am->nreg;	cjp, neg divquit0;		| 
+	rolw n, Dvdnd, Dvdnd;	;		;				| Normalize Dividend.
+	sub2nw 0, NDvsr;	am->nreg;	;				| 
+	rolw n, Dvsr, Dvsr;	;		;				| Normalize Divisor.
+	movw NDvdnd, y;		am->am;		;				| 
+	movw 0, Quot;		;		push, go;			| Push addr. of divloop on stack and load counter
+
+divloop:rsubw,s Dvdnd, Dvsr, Dvdnd;;		;				| Compare dividend and divisor.
+	sl0w Quot, Quot;	;		cjp, ~cry divneg;		| 
+	incw Quot, Quot;	;		cjp, go divshift;		| 
+divneg:	addw Dvdnd, Dvsr, Dvdnd;;		;				| Restore.
+divshift: sr0w Dvsr, Dvsr;	0x10->am;	rfct;				| 
+	rsubw d, NDvdnd, Mod;	am->nreg;	;				| Shift dividend back down to get remainder.
+	rolw n, Dvdnd, Mod;	;		;				| Rotated, now mask by complement of orig. Ndvdnd.
+	movw 0,Mask;		;		;				| 
+	bsetw n,Mask;		am->am;		;				| Generate mask {[2**(16 - Ndvdnd)] - 1}.
+	sub2nw 0,Mask;		am->am;		;				| 
+	andw d, Mod, Mod;	;		crtn, go;			| Mask remainder and return.
+
+divquit0: movw 0, Quot;		;		;				| 
+	movw Dvdnd,Mod;		;		crtn, go;			| 
+#undef Dvdnd
+#undef Quot
+#undef NDvsr
+#undef NDvdnd
+#undef Mask
+#undef Mod
+
+|   32 Bit Dividend, 16 Bit Divisor, 16 Bit Quotient.  Mod is in r[1].
+#define Mask 	acc
+#define Mod 	r[1]
+#define NDvdnd 	r[4]
+#define NDvsr 	r[3]
+/* Same as QHigh. */
+
+|   divlong: xorw,s DHigh, Dvsr, y;	;		;				| REMOVE THIS PRIOR TO RELEASE !!
+|	movw acc, NDvdnd;	;		cjs, ~neg divl0;		| REMOVE THIS PRIOR TO RELEASE !!
+|	;			;		cjs, go vidoff;			| REMOVE THIS PRIOR TO RELEASE !!
+|	mov2nw 9, acc;		;		cjs, go delay;			| REMOVE THIS PRIOR TO RELEASE !!
+|	movw NDvdnd, acc;	;		cjs, go vidon;			| REMOVE THIS PRIOR TO RELEASE !!
+|   divl0:	priw,s DHigh, 0, NDvdnd; ;		;				| Normalize dividend. Find highest 1 bit.
+divlong: priw,s DHigh, 0, NDvdnd; ;		;				| Normalize dividend. Find highest 1 bit.
+	sub2nw 0, NDvdnd;		am->nreg;	cjp, zer divl16;		| 
+	movw Dvsr, QLow;	;		;				| Save Divisor.
+	mov2nw n, Mask;		;		;				| 
+	sub2nw 0, Mask;		;		;				| 
+	rolw n, DLow, DLow;	am->am;		;				| 
+	rolw n, DHigh, DHigh;	;		;				| 
+|   	romw 0, d, DHigh, Mask;	;		;				| Finish normalize dividend.
+	andw d, Mask, QHigh;	;		;				| ASSEMBLER BUG WORKAROUND
+	compw Mask, Mask;	;		;				| ASSEMBLER BUG WORKAROUND
+	andw DHigh, Mask, Mask;	;		;				| ASSEMBLER BUG WORKAROUND
+	addw QHigh, Mask, DHigh;;		;				| ASSEMBLER BUG WORKAROUND
+	movw QLow, Dvsr;	;		;				| Restore Divisor.
+	priw,s Dvsr, 0, NDvsr;	;		;				| Find highest 1 bit.
+	sub2nw 0, NDvsr;		am->nreg;	cjp, zer divlquit0;		| 
+	rolw n, Dvsr, Dvsr;	;		;				| Normalize Divisor.
+	movw NDvdnd, y;		am->am;		;				| 
+	subw,s d, NDvsr, NDvdnd;=divl1pass->brreg;;				| 
+	addw d, NDvdnd, NDvsr;	16->am;		cjp, neg;			| 
+	movw NDvdnd, y;		am->brreg;	cjp, go divlldct;		| 
+divl1pass:movw NDvsr, y;	am->brreg;	;				| 
+	movw 0, QHigh;		;		;				| 
+divlldct:movw,s 0, QLow;	;		ldct;				| 33rd bit of Dvdnd is 0. Set cc to match.
+
+divlloop:rsubw,s DHigh, Dvsr, DHigh;;		cjp, neg divl33;		| Compare dividend and divisor.
+	sl0w QLow, QLow;	;		cjp, ~cry divlneg;		| 
+	incw QLow, QLow;	;		cjp, go divlshift;		| 
+divl33:	sl1w QLow, QLow;	;		cjp, go divlshift;		| 33rd bit was set.
+divlneg:addw,s DHigh, Dvsr, DHigh;am->am;	;				| Restore and save in d for postloop check.
+divlshift:sl0w DLow, DLow;	;		;				| 
+	slqw DHigh, DHigh;	;		rpct divlloop;			| 
+
+	movw,s NDvdnd,y;	15->brreg;	;				| 
+	;			;		cjp, neg divlmod;		| STUART (no more return, jump to mod calc.
+	bsetw 15, NDvdnd;	;		;				| STUART (down one line).
+	movw QLow, QHigh;	;		ldct;				| 
+	movw,s d,y;		;		cjp, go divlloop;		| Set cc on state of 33rd bit in Dvdnd.
+	
+divlmod: sub2nw 4, NDvdnd, Mod;	am->nreg;	;				| Shift dividend back down to get remainder.
+	rolw n, DLow, Mod;	;		;				| Rotated, now mask by complement of orig. Ndvdnd.
+	movw 0,Mask;		;		;				| 
+	bsetw n,Mask;		am->am;		;				| Generate mask {[2**(16 - Ndvdnd)] - 1}.
+	sub2nw 0,Mask;		am->am;		;				| 
+	andw d, Mod, Mod;	;		crtn, go;			| Mask remainder and return.
+
+	
+
+	;			;		crtn, go;			| 
+divlquit0:movw 0, QHigh;	;		;				| 
+	movw 0, QLow;		;		crtn, go;			| 
+
+divl16:	movw 0, QHigh;		;		cjp, go divide;			| Really only 16 bits.  DLow already in r[0].
+
+#undef Mask
+#undef NDvdnd
+#undef NDvsr
+#undef Mod

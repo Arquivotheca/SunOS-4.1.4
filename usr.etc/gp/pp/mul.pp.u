@@ -1,0 +1,133 @@
+| "@(#)mul.pp.u 1.1 94/10/31 SMI"
+
+| Copyright 1985 by Sun Microsystems, Inc.
+
+|   Multiplier routine.
+|   Multiplier arrives in r[2].  It should have fewer one bits than
+|   multiplicand which arrives in acc.  The result is computed and
+|   in r[0,1] with the low order bits in r[0].  The algorithm is a
+|   simple shift-add.  It was chosen because the majority of
+|   multipliers will not have many bits.
+
+#define Mulcand	acc
+#define Multiplier	r[2]
+#define LoRslt	r[0]
+#define HiRslt	r[1]
+
+
+#define HiBit	r[3]
+#define Mask	r[3]	/* Re-use HiBit register. */
+#define Sign	r[4]
+
+multiply:xorw,s Multiplier, Mulcand, y;;	;				| 
+   	movw 0, Sign;		;		cjp, ~neg mul;			| 
+   	incw 0, Sign;		;		;				| 
+mul:	movw 0, LoRslt;		;		;				| Clear.
+	testw (Multiplier);	=mul2->brreg;	;				| 
+	movw 0, HiRslt;		;		cjp, ~neg mul1;			| 
+	negw Multiplier, Multiplier;;		;				| 
+mul1:	testw (Mulcand);	;		crtn, zer;			| 
+	priw Multiplier, 0, HiBit;16->am;	cjp, ~neg;			| Find highest bit and test Multiplier.
+	negw Mulcand, Mulcand;	;		;				| 
+mul2:	rsubw d, HiBit, HiBit;	am->brreg;	crtn, zer;			| Generate number of times for loop.
+	rolw,s 15, Multiplier, Multiplier;;	push, go;			| Shift Multiplier. Set carry 0.
+| Ld cntr.  Push mulloop on stack.
+
+	;			;		cjp, ~neg mulshift;		| If bit 15 zero skip addition.
+	addw,s HiRslt, Mulcand, HiRslt;;	;				| Add Multiplicand to result.
+mulshift:srcw HiRslt, HiRslt;	;		;				| Shift result.
+	srqw LoRslt, LoRslt;	;		;				| 
+	rolw,s 15, Multiplier, Multiplier;;	rfct;				| Shift Multiplier. Set carry 0.
+
+	incw HiBit, y;		am->nreg;	;				| 
+	movw 0, Mask;		;		;				| 
+	bsetw n, Mask;		;		;				| 
+	decw Mask, Mask;	am->am;		;				| 
+	rolw n, HiRslt, HiRslt;;		;				| Rotate right 1 bit.
+	movw HiRslt, acc;	;		;				| 
+	andw d, HiRslt, HiRslt;	;		;				| Mask is in d.
+	movw LoRslt, y;		am->am;		;				| Save LoRslt in d.
+	romw n, d, acc, Mask;	;		;				| 
+	testw (Sign);		;		;				| 
+	movw acc, LoRslt;	;		crtn, zer;			| 
+	negw,s LoRslt, LoRslt;	;		;				| 
+	compw HiRslt, HiRslt;	;		crtn, ~cry;			| 
+	incw HiRslt, HiRslt;	;		crtn, go;			| 
+
+
+#define Mulcand	acc
+#define Multiplier	r[2]
+#define MulHigh	r[5]
+#define LoRslt	r[0]
+#define HiRslt	r[1]
+
+muldbl:	xorw,s MulHigh, Mulcand, y; ;		;				| 
+	movw 0, Sign;		;		cjp, ~neg muld;			| 
+	incw 0, Sign;		;		;				| 
+muld:	movw 0, LoRslt;		;		;				| Clear
+	testw (MulHigh);	;		;				| 
+	movw 0, HiRslt;		;		cjp, ~zer muldnot0;		| 
+	testw (Multiplier);	;		;				| 
+	testw (Mulcand);	16->am;		crtn, zer;			| 
+	priw Multiplier, 0, HiBit; ;		cjp, neg muldneg;		| 
+	;			;		cjp, go muld2;			| 
+muldnot0: ;			;		cjp, ~neg muld1;		| 
+	negw,s Multiplier, Multiplier; ;	;				| Double precision negate.
+	compw MulHigh, MulHigh;	;		cjp, ~cry muld1;		| 
+	incw MulHigh, MulHigh;	;		;				| 
+muld1:	priw,s MulHigh, 0, HiBit; 32->am;	;				| Find highest bit
+	testw (Mulcand);	;		cjp, ~zer muldznhi;		| 
+	priw Multiplier, 0, HiBit; 16->am;	;				| 
+muldznhi: ;			;		cjp, ~neg muld2;		| 
+muldneg: negw Mulcand, Mulcand;	;		;				| 
+muld2:	rsubw d, HiBit, HiBit;	am->brreg;	crtn, zer;			| Calculate number of loop cycles
+	sr0w MulHigh, MulHigh; ;		;				| Shift multiplier, set carry 0.
+	srqw Multiplier, Multiplier; ;		;				| 
+	rolw 1, MulHigh, MulHigh; ;		;				| Fudge so that next instr. can shift in link bit.
+	srqw,s MulHigh, MulHigh; ;		push, go;			| 
+
+	;			;		cjp, ~neg muldshift;		| If bit 15 zero skip addition.
+	addw,s HiRslt, Mulcand, HiRslt; ;	;				| Add Multiplicand to result.
+muldshift: srcw HiRslt, HiRslt;	;		;				| Shift result.
+	srqw LoRslt, LoRslt;	;		;				| 
+	sr0w MulHigh, MulHigh; ;		;				| Shift multiplier, set carry 0.
+	srqw Multiplier, Multiplier; ;		;				| 
+	rolw 1, MulHigh, MulHigh; ;		;				| 
+	srqw,s MulHigh, MulHigh; ;		rfct;				| 
+
+	subw,s d, HiBit, HiBit;	16->am;		;				| 
+	;			;		cjp, ~neg muldrol;		| 
+	addw d, HiBit, HiBit;	;		;				| 
+muldhi:	movw,s HiRslt, LoRslt;	;		;				| HiBit < 16.
+	movw 0, HiRslt;		;		cjp, ~neg muldrol;		| 
+	decw HiRslt, HiRslt;	;		;				| 
+muldrol: incw HiBit, y;		am->nreg;	;				| 
+	movw 0, Mask;		;		;				| 
+	bsetw n, Mask;		;		;				| 
+	sub2nw,s 0, Mask, Mask;	am->am;		;				| 
+	rolw n, HiRslt, HiRslt;	;		cjp, ~zer muldlt16;		| Rotate right 1 bit.
+	compw 0, Mask;		am->am;		;				| 
+muldlt16: movw HiRslt, acc;	;		;				| 
+	andw d, HiRslt, HiRslt;	;		;				| Mask is in d.
+	movw LoRslt, y;		am->am;		;				| Save LoRslt in d.
+	romw n, d, acc, Mask;	;		;				| 
+	testw (Sign);		;		;				| 
+	movw acc, LoRslt;	;		crtn, zer;			| 
+	negw,s LoRslt, LoRslt;	;		;				| 
+	compw HiRslt, HiRslt;	;		crtn, ~cry;			| 
+	incw HiRslt, HiRslt;	;		crtn, go;			| 
+
+#undef Mask
+#undef HiBit
+
+#ifndef SWIDTH
+#define SWIDTH 1152
+#endif
+
+#if SWIDTH == 1152
+#include "m1152.pp.u"
+#endif
+
+#if SWIDTH == 1024
+#include "m1024.pp.u"
+#endif

@@ -1,0 +1,514 @@
+| "@(#)zbtexvec.pp.u 1.1 94/10/31"
+
+| Copyright 1988 by Sun Microsystems,Inc.
+| Written by Stuart Levy
+
+ 
+|   Expects the following registers to be loaded:
+|   vwrdreg:		color.
+|   vctlreg:		byte mode.
+|   acc:		initial error.
+|   Note: r[0],r[1],and r[2] had to be moved to avoid conflict when multiplying.  Error moved temporarily (setpattern).
+|   r[0], vloareg:	low address. 
+|   r[1], vhiareg:	high address.
+|   r[2]:		number of pixels to draw.
+|   r[3]:		minax (added to error if error is negative).
+|   r[4]:		majax (added to error if error is positive).
+|   r[5]:		reflect (determines which octant:  0 => 0, 1 => 1, 2 => 7, 3 => 6).
+|   r[7]:		options (startpt, endpt, balanced, givenpattern; specified by the user)
+|   r[8]:		stoff (starting offset, specified by the user)
+|   r[9]:		cloff (clipping offset, used by the program)  
+|   r[15]:		numsegs (number of segments, specified by the user)
+|   r[24]:		right (says whether vector is on the right or left side)
+
+|   The options field is broken down as follows:
+|  	 bit 15 - startpt	bit 14 - endpt		bit 13 - balancing	bit 12 - givenpattern
+|  	 bit 11 - fat		bit 10 - poly		bit 9 - mvlist		bit 8 - righthalf
+|   	 bit 7 - close		bit 6 - cliprt		bit 5 - solid		bit 4 - pixrect
+|   	 bit 3 - nosetup	bit 2 - clipbit		bit 1 - firstvec
+
+#define pixrect		4
+#define cliprt		6
+#define right		8
+#define poly		10
+#define fat		11
+#define givenpat	12
+#define endpt		14
+#define startpt		15
+
+#define err acc
+#define addrlo 		r[0]	
+#define addrhi 		r[1]
+#define cnt		r[2]
+#define minax 		r[3]
+#define majax 		r[4]
+#define reflect		r[5]
+#define segaddr 	r[6]
+#define options		r[7]
+#define stoff		r[8]
+#define cloff		r[9]
+#define patln		r[10]
+#define offset		r[11]
+#define zlo		r[12]
+#define zhi		r[13]
+#define seg		r[14]
+#define numsegs		r[15]
+
+#define ghi		r[18]
+#define clo		r[19]		/* if these change, must change vec3.pp.u also */
+#define chi		r[20]
+
+#define savtex		0x120
+#define savnumsegs	0x122
+#define savsegaddr	0x130
+#define savoldpatln	0x131
+#define savfatoff	0x132
+#define savpolyoff	0x133
+
+| The count is 0 based.  Therefore a count of zero will draw 1 pixel.  This differs from the c-code, where the count
+| is 1 based.  If the count is zero, and enters the main loop, it will draw 1 pixel, and then the rfct will detect
+| that the counter is 0, and will not loop, but will jump to the endpoint routine.   
+
+zbtoctdrw: 
+	;			Pickmaybe->scrmemp; ;				| 
+	testw (d);		scrmem->am;	;				| test if (picking_on & 2d_pick_true)
+	;			;		cjp,~zer pkzbtoctdrw;		| jump if pickmaybe is set
+	btstw,s endpt,options;	=zbtoct0176->am; ;				| Test endpoint. Don't touch label!!
+	addw,s d,r[5],y;	am->brreg;	;				| Step on reflect (not needed).
+	btstw,s cliprt,options;	;		;				| Draw endpt if (endpt && !cliprt).
+	btstw,s startpt,options; ;		cjp,~zer;		scrmp 0	| 
+	decws r[2];		;		;				| Decrement count if endpoint needed.
+zbtoctc: btstw,s startpt,options; ;		cjp,~neg;			| Choose octant on reflect if count >= 0.
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Draw endpoint if count was 1.
+
+zbtoct0176: movw r[2],y;	am->brreg;	cjp,go zbtoct0;			| Get ready to ld cntr.
+	movw r[2],y;		am->brreg;	cjp,go zbtoct1;			| Get ready to ld cntr. (dx swapped w/ dy).
+	movw r[2],y;		am->brreg;	cjp,go zbtoct7;			| Get ready to ld cntr.
+	movw r[2],y;		am->brreg;	cjp,go zbtoct6;			| Get ready to ld cntr. (dx swapped w/ dy).
+	movw r[2],y;		am->brreg;	cjp,go zbtoctv;			| Vertical.
+	movw r[2],y;		am->brreg;	cjp,go zbtocth;			| Horizontal.
+
+
+
+zbtoct0: btstw,s right,options;	;		cjp,~zer zbtoct0st;		| Jump if should draw startpoint
+zbtoct0a: movw seg,y;		am->am;		cjp,zer zbtoct0l;		| 
+	btstw,s 0,seg;		=zbtnerr0->brreg; push,go;			| Set cond. code,ld cntr,push loop.
+zbtloop0: ;			;		cjp,zer zbtnwrt0;		| Skip over write if not needed.
+	subw,s d,zhi,y;		gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	;			;		cjp,~cry .+2;			| jump if less than value in buffer
+	;			;		cjp,~zer zbtnwrt0;		| will write if less than or equal to buffer
+	movw zhi,y;		am->gbwdreg;	cjp,~gbr .;			| write new z value into buffer
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| if err < 0 goto negerr0.
+zbtnwrt0: addw d,zlo,zlo;	scrmem->am;	;			scrmp+	| 
+zbtnwrt0a: addcw d,zhi,zhi;	scrmem->am;	;			scrmp+	| 
+	addw d,clo,clo;		scrmem->am;	;			scrmp+	| advance color hi & lo
+	addcw d,chi,chi;	scrmem->am;	;				| 
+	testw (acc);		;		;				| 
+	addw minax,acc,acc;	IncXY->am;	cjp,~neg;			| Jump if error is negative,update error.
+
+zbtperr0: incw,s addrlo,addrlo;	am->vloareg;	;				| Increment x.
+	sub2nw,s 0,offset;	;		cjp,~cry zbtncry0;		| Jump if no carry was generated.
+	incw addrhi,addrhi;	am->vhiareg;	;				| Incrememt high order address
+	incw ghi,ghi;		;		;				| 
+zbtncry0: movw ghi,y ;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw addrlo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| initiate read of next z value
+	movw seg,y;		am->am;		cjp,zer zbtnewseg0;		| Jump if need to fetch new segment.
+	btstw,s 0,seg;		;		rfct;			scrmp 0	| Top of loop if count != 0.
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Test endpoint.
+zbtnewseg0: subw,s d,numsegs,y;	;		;				| Compute (numsegs - seg).
+	btstw,s right,options;	;		cjp,zer zbtfirseg0;		| load scrmemp differently for right & left sides
+	;			;		cjp,~zer .+2;			| jump if right side
+	negw seg,y;		am->am;		;				| seg or (-seg) in d-latch
+	addw d,segaddr,y;	am->scrmemp;	;				| load scrmemp with segment address
+	movw d,offset;		scrmem->am;	;				| Load new pattern length,jump if need first seg.
+	incw seg,seg;		;		;				| 
+	btstw,s 0,seg;		;		rfct;			scrmp 0	| Increment pointer for fetching next segment.
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Test endpt field.
+zbtfirseg0: movw segaddr,y ;	am->scrmemp;	;				| Set new segment address.
+	movw d,offset;		scrmem->am;	;				| 
+	movw,s d,seg;		0x1->am;	rfct;			scrmp 0	| Note: This is same as btstw 0,seg!
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Test endpt field.
+
+zbtnerr0: addw,s d,addrlo,addrlo; am->vloareg;	;				| Error was negative. 
+	addw majax,acc,acc;	;		;				| 
+	sub2nw,s 0,offset;	;		cjp,~cry zbtncry0;		| 
+	incw ghi,ghi;		;		;				| 
+	incw addrhi,addrhi;	am->vhiareg;	cjp,go zbtncry0;		| 
+
+zbtoct0l: btstw,s 0,seg;	=zbtnerr0->brreg; push,go;			| LEFT SIDE
+	;			;		cjp,~zer zbtnwrt0;		| 
+	subw,s d,zhi,y;		gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	;			;		cjp,~cry .+2;			| jump if less than value in buffer
+	;			;		cjp,~zer zbtnwrt0;		| will write if less than or equal to buffer
+	movw zhi,y;		am->gbwdreg;	cjp,~gbr .;			| write new z value into buffer
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| scrmemp=[(segaddr+numsegs-1)-seg]
+	addw d,zlo,zlo;		scrmem->am;	cjp,go zbtnwrt0a;	scrmp+	| 
+
+zbtoct0st: testw (cloff);	;		;				| Draw if (startpt && cloff==0).
+	btstw,s right,options;	;		cjp,~zer zbtoct0a;		| 
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| Draw startpoint.
+	mov2nw 1,y;		am->brreg;	;				| 
+	;			=zbtnerr0->brreg; push,go;			| Put next address on stack.
+	;			;		rpct zbtnwrt0;			| Jump to change err and addresses.
+zbtoct0rt: decws r[2];		am->brreg;	;				| Reload counter & pop stack.
+zbtoct0ra: btstw,s right,options; ;		cjpp,~neg zbtoct0a;		| Finish tex vector if count >= 0
+	btstw,s endpt,options;	;		cjpp,go zbtoctend;		| Go to endpoint routine.
+
+
+zbtoct1: btstw,s right,options;	;		cjp,~zer zbtoct1st;		| Jump if should draw startpoint
+zbtoct1a: movw seg,y;		am->am;		cjp,zer zbtoct1l;		| 
+	btstw,s 0,seg;		=zbtnerr1->brreg; push,go;			| Set cond. code,ld cntr,push loop.
+zbtloop1: ;			;		cjp,zer zbtnwrt1;		| Skip over write if not needed.
+	subw,s d,zhi,y;		gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	;			;		cjp,~cry .+2;			| jump if less than value in buffer
+	;			;		cjp,~zer zbtnwrt1;		| will write if less than or equal to buffer
+	movw zhi,y;		am->gbwdreg;	cjp,~gbr .;			| write new z value into buffer
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| if err < 0 goto negerr1.
+zbtnwrt1: addw d,zlo,zlo;	scrmem->am;	;			scrmp+	| advance color
+zbtnwrt1a: addcw d,zhi,zhi;	scrmem->am;	;			scrmp+	| 
+	addw d,clo,clo;		scrmem->am;	;			scrmp+	| advance color
+	addcw d,chi,chi;	scrmem->am;	;				| 
+	testw (acc);		;		;				| 
+	addw minax,acc,acc;	;		cjp,~neg;			| Jump if error is negative,update error.
+	
+zbtperr1: addw,s d,addrlo,addrlo; SWidth->am;	;				| Increment y.
+	movw addrlo,y;		am->vloareg;	cjp,~cry zbtncry1;		| Jump if no carry was generated.
+	incw addrhi,addrhi;	am->vhiareg;	;				| Incrememt high order address
+	incw ghi,ghi;		;		;				| 
+zbtncry1: movw ghi,y ;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw addrlo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| initiate read of next z value
+	sub2nw,s 0,offset;	;		;				| Decrement segment count.
+	movw seg,y;		am->am;		cjp,zer zbtnewseg1;		| Jump if need to fetch new segment.
+	btstw,s 0,seg;		;		rfct;			scrmp 0	| Top of loop if count != 0.
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Test endpoint.
+zbtnewseg1: subw,s d,numsegs,y;	;		;				| Compute (numsegs - seg).
+	btstw,s right,options;	;		cjp,zer zbtfirseg1;		| load scrmemp differently for right & left sides
+	;			;		cjp,~zer .+2;			| jump if right side
+	negw seg,y;		am->am;		;				| seg or (-seg) in d-latch
+	addw d,segaddr,y;	am->scrmemp;	;				| load scrmemp with segment address
+	movw d,offset;		scrmem->am;	;				| Load new pattern length,jump if need first seg.
+	incw seg,seg;		;		;				| 
+	btstw,s 0,seg;		;		rfct;			scrmp 0	| Increment pointer for fetching next segment.
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Test endpt field.
+zbtfirseg1: movw segaddr,y ;	am->scrmemp;	;				| Set new segment address.
+	movw d,offset;		scrmem->am;	;				| 
+	movw,s d,seg;		0x1->am;	rfct;			scrmp 0	| Note: This is same as btstw 0,seg!
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Test endpt field.
+
+zbtnerr1: addw,s d,addrlo,addrlo; IncXY->am;	;				| Error was negative. 
+	movw addrlo,y;		am->vloareg;	;				| 
+	addw majax,acc,acc;	;		cjp,~cry zbtncry1;		| 
+	incw ghi,ghi;		;		;				| 
+	incw addrhi,addrhi;	am->vhiareg;	cjp,go zbtncry1;		| 
+
+zbtoct1l: btstw,s 0,seg;	=zbtnerr1->brreg; push,go;			| LEFT SIDE
+	;			;		cjp,~zer zbtnwrt1;		| 
+	subw,s d,zhi,y;		gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	;			;		cjp,~cry .+2;			| jump if less than value in buffer
+	;			;		cjp,~zer zbtnwrt1;		| will write if less than or equal to buffer
+	movw zhi,y;		am->gbwdreg;	cjp,~gbr .;			| write new z value into buffer
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 
+	addw d,zlo,zlo;		scrmem->am;	cjp,go zbtnwrt1a;	scrmp+	| 
+
+zbtoct1st: testw (cloff);	;		;				| Draw if (startpt && cloff==0).
+	btstw,s right,options;	;		cjp,~zer zbtoct1a;		| 
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| Draw startpoint.
+	mov2nw 1,y;		am->brreg;	;				| 
+	;			=zbtnerr1->brreg; push,go;			| Put next address on stack.
+	;			;		rpct zbtnwrt1;			| Jump to change err and addresses.
+zbtoct1rt: decws r[2];		am->brreg;	;				| Reload counter & pop stack.
+zbtoct1ra: btstw,s right,options; ;		cjpp,~neg zbtoct1a;		| Finish tex vector if count >= 0.
+	btstw,s endpt,options;	;		cjpp,go zbtoctend;		| Go to endpoint routine.
+
+
+zbtoct7: btstw,s right,options;	;		cjp,~zer zbtoct7st;		| Jump if should draw startpoint
+zbtoct7a: movw seg,y;		am->am;		cjp,zer zbtoct7l;		| 
+	btstw,s 0,seg;		=zbtnerr7->brreg; push,go;			| Set cond. code,ld cntr,push loop.
+zbtloop7: ;			;		cjp,zer zbtnwrt7;		| Skip over write if not needed.
+	subw,s d,zhi,y;		gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	;			;		cjp,~cry .+2;			| jump if less than value in buffer
+	;			;		cjp,~zer zbtnwrt7;		| will write if less than or equal to buffer
+	movw zhi,y;		am->gbwdreg;	cjp,~gbr .;			| write new z value into buffer
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| if err < 0 goto negerr7.
+zbtnwrt7: addw d,zlo,zlo;	scrmem->am;	;			scrmp+	| advance color
+zbtnwrt7a: addcw d,zhi,zhi;	scrmem->am;	;			scrmp+	| 
+	addw d,clo,clo;		scrmem->am;	;			scrmp+	| advance color
+	addcw d,chi,chi;	scrmem->am;	;				| 
+	testw (acc);		;		;				| 
+	addw minax,acc,acc;	IncXDecY->am;	cjp,~neg;			| Jump if error is negative,update error.
+
+zbtperr7: incw,s addrlo,addrlo;	am->vloareg;	;				| Increment y.
+	sub2nw,s 0,offset;	;		cjp,~cry zbtncry7;		| Jump if no carry was generated.
+	incw addrhi,addrhi;	am->vhiareg;	;				| Incrememt high order address
+	incw ghi,ghi;		;		;				| 
+zbtncry7: movw ghi,y ;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw addrlo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| initiate read of next z value
+	movw seg,y;		am->am;		cjp,zer zbtnewseg7;		| Jump if need to fetch new segment.
+	btstw,s 0,seg;		;		rfct;			scrmp 0	| Top of loop if count != 0.
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Test endpoint.
+zbtnewseg7: subw,s d,numsegs,y;	;		;				| Compute (numsegs - seg).
+	btstw,s right,options;	;		cjp,zer zbtirseg7;		| load scrmemp differently for right & left sides
+	;			;		cjp,~zer .+2;			| jump if right side
+	negw seg,y;		am->am;		;				| seg or (-seg) in d-latch
+	addw d,segaddr,y;	am->scrmemp;	;				| load scrmemp with segment address
+	movw d,offset;		scrmem->am;	;				| Load new pattern length,jump if need first seg.
+	incw seg,seg;		;		;				| 
+	btstw,s 0,seg;		;		rfct;			scrmp 0	| Increment pointer for fetching next segment.
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Test endpt field.
+zbtirseg7: movw segaddr,y;	am->scrmemp;	;				| Set new segment address.
+	movw d,offset;		scrmem->am;	;				| 
+	movw,s d,seg;		0x1->am;	rfct;			scrmp 0	| Note: This is same as btstw 0,seg!
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Test endpt field.
+
+zbtnerr7: addw,s d,addrlo,addrlo; am->vloareg;	;				| Error was negative. 
+	addw majax,acc,acc;	;		;				| 
+	sub2nw,s 0,offset;	;		cjp,cry zbtncry7;		| 
+	decw ghi,ghi;		;		;				| 
+	decw addrhi,addrhi;	am->vhiareg;	cjp,go zbtncry7;		| 
+
+zbtoct7l: btstw,s 0,seg;	=zbtnerr7->brreg; push,go;			| LEFT SIDE
+	;			;		cjp,~zer zbtnwrt7;		| 
+	subw,s d,zhi,y;		gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	;			;		cjp,~cry .+2;			| jump if less than value in buffer
+	;			;		cjp,~zer zbtnwrt7;		| will write if less than or equal to buffer
+	movw zhi,y;		am->gbwdreg;	cjp,~gbr .;			| write new z value into buffer
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 
+	addw d,zlo,zlo;		scrmem->am;	cjp,go zbtnwrt7a;	scrmp+	| 
+
+zbtoct7st: testw (cloff);	;		;				| Draw if (startpt && cloff==0).
+	btstw,s right,options;	;		cjp,~zer zbtoct7a;		| 
+	movw chi,y;		am->vwdreg;	;			vmewr	| Draw startpoint.
+	mov2nw 1,y;		am->brreg;	;				| 
+	;			=zbtnerr7->brreg; push,go;			| Put next address on stack.
+	;			;		rpct zbtnwrt7;			| Jump to change err and addresses.
+zbtoct7rt: decws r[2];		am->brreg;	;				| Reload counter & pop stack.
+zbtoct7ra: btstw,s right,options; ;		cjpp,~neg zbtoct7a;		| Finish tex vector if count >= 0.
+	btstw,s endpt,options;	;		cjpp,go zbtoctend;		| Go to endpoint routine.
+
+
+zbtoct6: btstw,s right,options;	;		cjp,~zer zbtoct6st;		| Jump if should draw startpoint
+zbtoct6a: movw seg,y;		am->am;		cjp,zer zbtoct6l;		| 
+	btstw,s 0,seg;		=zbtnerr6->brreg; push,go;			| Set cond. code,ld cntr,push loop.
+zbtloop6: ;			;		cjp,zer zbtnwrt6;		| Skip over write if not needed.
+	subw,s d,zhi,y;		gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	;			;		cjp,~cry .+2;			| jump if less than value in buffer
+	;			;		cjp,~zer zbtnwrt6;		| will write if less than or equal to buffer
+	movw zhi,y;		am->gbwdreg;	cjp,~gbr .;			| write new z value into buffer
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| if err < 0 goto negerr6.
+zbtnwrt6: addw d,zlo,zlo;	scrmem->am;	;			scrmp+	| advance color
+zbtnwrt6a: addcw d,zhi,zhi;	scrmem->am;	;			scrmp+	| 
+	addw d,clo,clo;		scrmem->am;	;			scrmp+	| advance color
+	addcw d,chi,chi;	scrmem->am;	;				| 
+	testw (acc);		;		;				| 
+	addw minax,acc,acc;	;		cjp,~neg;			| Jump if error is negative,update error.
+
+zbtperr6: subw,s d,addrlo,addrlo; SWidth->am;	;				| Decrement y.
+	movw addrlo,y;		am->vloareg;	cjp,cry zbtncry6;		| Jump if no carry was generated.
+	decw addrhi,addrhi;	am->vhiareg;	;				| Incrememt high order address
+	decw ghi,ghi;		;		;				| 
+zbtncry6: movw ghi,y ;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw addrlo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| initiate read of next z value
+	sub2nw,s 0,offset;	;		;				| Decrement segment count.
+	movw seg,y;		am->am;		cjp,zer zbtnewseg6;		| Jump if need to fetch new segment.
+	btstw,s 0,seg;		;		rfct;			scrmp 0	| Top of loop if count != 0.
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Test endpoint.
+zbtnewseg6: subw,s d,numsegs,y;	;		;				| Compute (numsegs - seg).
+	btstw,s right,options;	;		cjp,zer zbtfirseg6;		| load scrmemp differently for right & left sides
+	;			;		cjp,~zer .+2;			| jump if right side
+	negw seg,y;		am->am;		;				| seg or (-seg) in d-latch
+	addw d,segaddr,y;	am->scrmemp;	;				| load scrmemp with segment address
+	movw d,offset;		scrmem->am;	;				| Load new pattern length,jump if need first seg.
+	incw seg,seg;		;		;				| 
+	btstw,s 0,seg;		;		rfct;			scrmp 0	| Increment pointer for fetching next segment.
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Test endpt field.
+zbtfirseg6: movw segaddr,y ;	am->scrmemp;	;				| Set new segment address.
+	movw d,offset;		scrmem->am;	;				| 
+	movw,s d,seg;		0x1->am;	rfct;			scrmp 0	| Note: This is same as btstw 0,seg!
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Test endpt field.
+
+zbtnerr6: addw,s d,addrlo,addrlo; IncXDecY->am;	;				| Error was negative. 
+	movw addrlo,y;		am->vloareg;	;				| 
+	addw majax,acc,acc;	;		cjp,cry zbtncry6;		| 
+	decw ghi,ghi;		;		;				| 
+	decw addrhi,addrhi;	am->vhiareg;	cjp,go zbtncry6;		| 
+
+zbtoct6l: btstw,s 0,seg;	=zbtnerr6->brreg; push,go;			| LEFT SIDE
+	;			;		cjp,~zer zbtnwrt6;		| 
+	subw,s d,zhi,y;		gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	;			;		cjp,~cry .+2;			| jump if less than value in buffer
+	;			;		cjp,~zer zbtnwrt6;		| will write if less than or equal to buffer
+	movw zhi,y;		am->gbwdreg;	cjp,~gbr .;			| write new z value into buffer
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 
+	addw d,zlo,zlo;		scrmem->am;	cjp,go zbtnwrt6a;	scrmp+	| 
+
+zbtoct6st: testw (cloff);	;		;				| Draw if (startpt && cloff==0).
+	btstw,s right,options;	;		cjp,~zer zbtoct6a;		| 
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| Draw startpoint.
+	mov2nw 1,y;		am->brreg;	;				| 
+	;			=zbtnerr6->brreg; push,go;			| Put next address on stack.
+	;			;		rpct zbtnwrt6;			| Jump to change err and addresses.
+zbtoct6rt: decws r[2];		am->brreg;	;				| Reload counter & pop stack.
+zbtoct6ra: btstw,s right,options; ;		cjpp,~neg zbtoct6a;		| Finish tex vector if count >= 0.
+	btstw,s endpt,options;	;		cjpp,go zbtoctend;		| Go to endpoint routine.
+
+
+|   Horizontal vectors
+zbtocth: btstw,s right,options;	;		cjp,~zer zbtocthst;		| Jump if should draw startpoint
+zbtoctha: movw seg,y;		am->am;		cjp,zer zbtocthl;		| 
+	btstw,s 0,seg;		;		push,go;			| Set cond. code,ld cntr,push loop.
+zbtlooph: ;			;		cjp,zer zbtnwrth;		| Skip over write if not needed.
+	subw,s d,zhi,y;		gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	;			;		cjp,~cry .+2;			| jump if less than value in buffer
+	;			;		cjp,~zer zbtnwrth;		| will write if less than or equal to buffer
+	movw zhi,y;		am->gbwdreg;	cjp,~gbr .;			| write new z value into buffer
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 
+zbtnwrth: addw d,zlo,zlo;	scrmem->am;	;			scrmp+	| 
+zbtnwrtha: addcw d,zhi,zhi;	scrmem->am;	;			scrmp+	| 
+	addw d,clo,clo;		scrmem->am;	;			scrmp+	| 
+	addcw d,chi,chi;	scrmem->am;	;			scrmp+	| 
+	incw,s addrlo,addrlo;	am->vloareg;	;				| Increment x.
+	sub2nw,s 0,offset;	;		cjp,~cry zbtncryh;		| Jump if no carry was generated.
+	incw addrhi,addrhi;	am->vhiareg;	;				| Incrememt high order address
+	incw ghi,ghi;		;		;				| 
+zbtncryh:movw ghi,y ;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw addrlo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| initiate read of next z value
+	movw seg,y;		am->am;		cjp,zer zbtnewsegh;		| Jump if need to fetch new segment.
+	btstw,s 0,seg;		;		rfct;			scrmp 0	| Top of loop if count != 0.
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Test endpoint.
+zbtnewsegh: subw,s d,numsegs,y;	;		;				| Compute (numsegs - seg).
+	btstw,s right,options;	;		cjp,zer zbtirsegh;		| load scrmemp differently for right & left sides
+	;			;		cjp,~zer .+2;			| jump if right side
+	negw seg,y;		am->am;		;				| seg or (-seg) in d-latch
+	addw d,segaddr,y;	am->scrmemp;	;				| load scrmemp with segment address
+	movw d,offset;		scrmem->am;	;				| Load new pattern length,jump if need first seg.
+	incw seg,seg;		;		;				| 
+	btstw,s 0,seg;		;		rfct;			scrmp 0	| Increment pointer for fetching next segment.
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Test endpt field.
+zbtirsegh: movw segaddr,y ;	am->scrmemp;	;				| Set new segment address.
+	movw d,offset;		scrmem->am;	;				| 
+	movw,s d,seg;		0x1->am;	rfct;			scrmp 0	| Note: This is same as btstw 0,seg!
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Test endpt field.
+
+zbtocthl: btstw,s 0,seg;	;		push,go;			| LEFT SIDE
+	;			;		cjp,~zer .+2;			| 
+	subw,s d,zhi,y;		gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	;			;		cjp,~cry .+2;			| jump if less than value in buffer
+	;			;		cjp,~zer zbtnwrth;		| will write if less than or equal to buffer
+	movw zhi,y;		am->gbwdreg;	cjp,~gbr .;			| write new z value into buffer
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 
+	addw d,zlo,zlo;		scrmem->am;	cjp,go zbtnwrtha;	scrmp+	| 
+
+zbtocthst: testw (cloff);	;		;				| Draw if (startpt && cloff==0).
+	btstw,s right,options;	;		cjp,~zer zbtoctha;		| 
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| Draw startpoint.
+	mov2nw 1,y;		am->brreg;	;				| 
+	;			;		push,go;			| Put next address on stack.
+	;			;		rpct zbtnwrth;		scrmp 0	| Jump to change err and addresses.
+zbtocthrt: decws r[2];		am->brreg;	;				| Reload counter & pop stack.
+zbtocthra: btstw,s right,options; ;		cjpp,~neg zbtoctha;		| Finish tex vector if count >= 0.
+	btstw,s endpt,options;	;		cjpp,go zbtoctend;		| Go to endpoint routine.
+
+
+|   Vertical vectors
+zbtoctv: btstw,s right,options;	;		cjp,~zer zbtoctvst;		| Jump if should draw startpoint
+zbtoctva: movw seg,y;		am->am;		cjp,zer zbtoctvl;		| 
+	btstw,s 0,seg;		;		push,go;			| Set cond. code,ld cntr,push loop.
+zbtloopv: ;			;		cjp,zer zbtnwrtv;		| Skip over write if not needed.
+	subw,s d,zhi,y;		gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	;			;		cjp,~cry .+2;			| jump if less than value in buffer
+	;			;		cjp,~zer zbtnwrtv;		| will write if less than or equal to buffer
+	movw zhi,y;		am->gbwdreg;	cjp,~gbr .;			| write new z value into buffer
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 
+zbtnwrtv: addw d,zlo,zlo;	scrmem->am;	;			scrmp+	| 
+zbtnwrtva: addcw d,zhi,zhi;	scrmem->am;	;			scrmp+	| 
+	addw d,clo,clo;		scrmem->am;	;			scrmp+	| 
+	addcw d,chi,chi;	scrmem->am;	;			scrmp+	| 
+	addw,s d,addrlo,addrlo;	SWidth->am;	;				| Increment x.
+	movw addrlo,y;		am->vloareg;	;				| 
+	sub2nw,s 0,offset;	;		cjp,~cry zbtncryv;		| Jump if no carry was generated.
+	incw addrhi,addrhi;	am->vhiareg;	;				| Incrememt high order address
+	incw ghi,ghi;		;		;				| 
+zbtncryv: movw ghi,y ;		am->gbhiptr;	cjp,~gbr .;			| 
+	movw addrlo,y;		am->gbloptr;	cjp,~gbr .;		gbrd	| initiate read of next z value
+	movw seg,y;		am->am;		cjp,zer zbtnewsegv;		| Jump if need to fetch new segment.
+	btstw,s 0,seg;		;		rfct;			scrmp 0	| Top of loop if count != 0.
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Test endpoint.
+zbtnewsegv: subw,s d,numsegs,y;	;		;				| Compute (numsegs - seg).
+	btstw,s right,options;	;		cjp,zer zbtirsegv;		| load scrmemp differently for right & left sides
+	;			;		cjp,~zer .+2;			| jump if right side
+	negw seg,y;		am->am;		;				| seg or (-seg) in d-latch
+	addw d,segaddr,y;	am->scrmemp;	;				| load scrmemp with segment address
+	movw d,offset;		scrmem->am;	;				| Load new pattern length,jump if need first seg.
+	incw seg,seg;		;		;				| 
+	btstw,s 0,seg;		;		rfct;			scrmp 0	| Increment pointer for fetching next segment.
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Test endpt field.
+zbtirsegv: movw segaddr,y ;	am->scrmemp;	;				| Set new segment address.
+	movw d,offset;		scrmem->am;	;				| 
+	movw,s d,seg;		0x1->am;	rfct;			scrmp 0	| Note: This is same as btstw 0,seg!
+	btstw,s endpt,options;	;		cjp,go zbtoctend;		| Test endpt field.
+
+zbtoctvl: btstw,s 0,seg;	;		push,go;			| LEFT SIDE
+	;			;		cjp,~zer .+2;			| 
+	subw,s d,zhi,y;		gbrdreg->am;	cjp,~gbr .;			| compare z with z-buffer value
+	;			;		cjp,~cry .+2;			| jump if less than value in buffer
+	;			;		cjp,~zer zbtnwrtv;		| will write if less than or equal to buffer
+	movw zhi,y;		am->gbwdreg;	cjp,~gbr .;			| write new z value into buffer
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| 
+	addw d,zlo,zlo;		scrmem->am;	cjp,go zbtnwrtva;	scrmp+	| 
+
+zbtoctvst: testw (cloff);	;		;				| Draw if (startpt && cloff==0).
+	btstw,s right,options;	;		cjp,~zer zbtoctva;		| 
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| Draw startpoint.
+	mov2nw 1,y;		am->brreg;	;				| 
+	;			;		push,go;			| Put next address on stack.
+	;			;		rpct zbtnwrtv;		scrmp 0	| Jump to change err and addresses.
+zbtoctvrt: decws r[2];		am->brreg;	;				| Reload counter & pop stack.
+zbtoctvra: btstw,s right,options; ;		cjpp,~neg zbtoctva;		| Finish tex vector if count >= 0.
+	btstw,s endpt,options;	;		cjpp,go zbtoctend;		| Go to endpoint routine.
+
+
+zbtoctend: ;			savoldpatln->scrmemp; ;				| 
+	movw patln,y;		am->scrmem;	cjp,zer zbtoctenda;		| Store oldpatln & jump to treset.
+	btstw,s cliprt,options;	;		;				| Draw endpt if (endpt && !cliprt).
+	movw chi,y;		am->vwdreg;	cjp,~vir .;		vmewr	| Draw endpoint.
+zbtoctenda: ;			;		jmap tdcoct_ret;		| Jmap back to other bank
+
+
+#undef pixrect
+#undef cliprt
+#undef right
+#undef poly	
+#undef fat	
+#undef givenpat	
+#undef endpt	
+#undef startpt	
+
+#undef err
+#undef addrlo 
+#undef addrhi 
+#undef cnt	
+#undef minax 	
+#undef majax 	
+#undef reflect	
+#undef segaddr 	
+#undef options	
+#undef stoff	
+#undef cloff	
+#undef patln	
+#undef offset	
+#undef zlo
+#undef zhi
+#undef seg	
+#undef numsegs
+
+#undef ghi
+#undef clo	
+#undef chi	
+
+#undef savtex
+#undef savnumsegs
+#undef savsegaddr
+#undef savoldpatln
+#undef savfatoff
+#undef savpolyoff
+

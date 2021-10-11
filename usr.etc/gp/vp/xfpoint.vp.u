@@ -1,0 +1,1033 @@
+| Copyright (c) 1988 by Sun Microsystems, Inc.
+| @(#)xfpoint.vp.u 1.1 94/10/31 SMI
+
+#define scale		r[23]
+#define zbdcln		r[25]
+#define polyshadestyle	r[24]	
+#define K		r[24]
+#define J		r[23]
+#define I		r[22]
+#define mtype		r[22]
+#define xoff		r[21]
+#define yoff		r[20]
+#define mroutine	r[19]
+#define attr_vec	r[18]	/* bit 0 - float	bit 1 - 3D */
+#define veccmd 		r[17]
+#define shadestyle	r[16]
+
+#define inptr 		r[15]
+#define tempop		r[15]
+#define outptr 		r[14]
+#define op 		r[13]
+#define polycolorop	r[13]
+#define color 		r[12]
+#define clipplanes 	r[11]
+#define temp10		r[10]	/* used in markerline routine */
+#define clpplns 	r[10]
+#define temp		r[9]
+#define dz		r[8]	/* temporary register holds z value */
+#define dx		r[7]
+#define dy		r[6]
+#define x0		r[5]
+#define y0		r[4]
+#define radius		r[3]	/* same as x1 */
+#define x1		r[3]
+#define sx		r[3]
+#define s0		r[2]	/* same as y1 */
+#define y1		r[2]
+#define sy		r[2]
+#define recaddr		r[2]	/* necessary for recip routine */
+#define loopc		r[1]
+#define pkon		r[0]
+
+#define offsetx		r[11]	/* these offsets are used only in markerpolyinit2 */
+#define offsety		r[10]
+
+#define lastedg		r[9]	/* pointers into the fpregs */
+#define pet		r[9]
+#define edgptr		r[8]
+
+#define X1		2	/* offsets into initial edge structure */
+#define X0		3
+
+#define Z13		3	/* offsets into 3D edge structure */
+#define X03		5
+#define Z03		6
+
+#define FZ		5
+#define FCOLOR		6
+#define SavePts		7	/* temporary storage while picking */
+	/* locations 36-47 used by depth cueing code
+	 * and 84-87 used by zbline code
+	 */				 
+#define RecAddr		90	/* reciprocal of w */
+#define SavRegs		91	/* temporary storage while call recip routine */
+#define LinePts		100	/* store descriptionfor line markers */
+#define EDGETAB		128	/* edge table start */
+#define POLYGON2	1168	/* beginning of 2D polygon marker description in fpregs, maxedges = 207 */
+#define POLYGON3	1424	/* beginning of 3D polygon marker description in fpregs, maxedges = 143 */
+
+#define Z1SCL		44	/* these are used by depthcue.vp.u for color calculations */ 
+#define mark		2	/* bit in hidden surf for xfpoint commands */
+#define zbuf		1	/* bits in zbdcln */
+#define dcue		0	
+
+#define depcue		2	/* used for depth-cued, no hidden surf primitives, since become 2d */
+#define xf3d		1
+#define flt		0
+
+
+XF_POINT_2D:
+	movw 0,polyshadestyle;	;		cjs,go markerinit; ;			| scale marker and call init routine
+	;			;		cjs,go xfptinit2; ;			| init matrix and viewport scaling parameters
+	movw d,loopc;		shmem->am;	;		;		shp+	| set up loop counter
+pt2next: add2nw 2,cmdptr;	;		ldct 1;		;			| (cmdptr += 2*sizeof(int)), set up counter for shm_to_fpr
+	movw 0,inptr;		am->fpdp;	cjs,go shm_to_fpr; ;			| move point to fpr[0]
+	btstw,s flt,attr_vec;	;		ldct xf2;	;			| floating or int coords?
+	mov2nw 4,y;		am->fpbp;	jsrp,zer xfint2; ;			| xform pt and store result at (outptr == fpr[2])
+	testw (clipplanes);	;		;		;			| 
+	movw outptr,y;		am->fpap;	cjs,~zer clppt2; ;			| clip to view volume
+	incw pkcntlo,pkcntlo;	0->am;		;		;			| update pick count
+	addcw d,pkcnthi,pkcnthi; ;		cjp,~zer pt2dn;	;			| clppt2 will return cc zer for points ok (0 if clipoff also)
+	mov2nw 5,acc;		am->fpbp;	cjs,go vwpspt2;	;			| scale to viewport
+	movw inptr,y;		am->fpap;	;		;			| 
+	movw outptr,y;		am->fpdp;	;		;			| 
+	;			fpregh->fpregh;	;		;			| save floating point version of x for markerpoly2
+	;			fpregl->fpregl;	;		;			| 
+	movw mroutine,y;	am->brreg;	cjs,go fltoint2; ;			| convert float res to int, inptr points to coords
+	btstw,s depcue,attr_vec; ;		cjs,go;		;			| send marker to PP, test for depth cueing in filled circles
+pt2dn:	sub2nw,s 0,loopc;	;		;		;			| decrement loop counter
+	testw (pkon);		;		cjp,~zer pt2next; ;			| test if picking is on
+	incw cmdptr,cmdptr;	;		cjp,~zer pickup; ;			| cmdptr++
+	;			;		cjp,go pu_off;	;			| jmap getcmd from here
+
+XF_POINT_3D:
+	bsetw xf3d,attr_vec;	;		cjs,go markerinit; ;			| scale marker and call init routine
+	;			;		cjs,go xfptinit3; ;			| init matrix and viewport scaling parameters
+	movw d,loopc;		shmem->am;	;		;		shp+	| set up loop counter
+pt3next: addw cmdptr,6,cmdptr;	;		;		;			| (cmdptr += 3*sizeof(int))
+	IMM;			;		ldct 2;		;			| set up counter for shm_to_fpr
+	movw 0,inptr;		am->fpdp;	cjs,go shm_to_fpr; ;			| move point to fpr[0]
+	movw 0,y;		am->fpregl;	ldct xf3;	;			| set w = 1.0
+	btstw,s flt,attr_vec;	0x3F80->fpregh;	;		;			| floating or int coords?
+	mov2nw 4,y;		am->fpap;	jsrp,zer xfint3; ;			| xform pt and store result at (outptr == fpr[4])
+	testw (clipplanes);	;		;		;			| 
+	movw outptr,y;		am->fpap;	cjs,~zer clppt3; ;			| clip to view volume (returns 0 if point ok)
+	incw pkcntlo,pkcntlo;	0->am;		;		;			| update pick count
+	addcw d,pkcnthi,pkcnthi; ;		cjp,~zer pt3dn;	;			| clppt3 will return cc zer for points ok (0 if clipoff also)
+	mov2nw 5,acc;		am->fpbp;	cjs,go vwpspt3;	;			| scale to viewport
+	movw inptr,y;		am->fpap;	;		;			| 
+	movw outptr,y;		am->fpdp;	;		;			| 
+	;			fpregh->fpregh;	;		;			| save floating point version of x for markerpoly3
+	addw inptr,2,y;		fpregl->fpregl;	;		;		dp+	| 
+	IMM;			am->fpap;	;		;			| 
+	;			fpregh->fpregh;	;		;			| save floating point version of z for markerpoly3
+	;			fpregl->fpregl;	;		;			| 
+	movw mroutine,y;	am->brreg;	cjs,go fltoint3; ;			| convert float res to int, inptr points to coords
+	btstw,s dcue,zbdcln;	;		cjs,go;		;			| send marker to PP, test if dcueing enabled
+pt3dn:	sub2nw,s 0,loopc;	;		;		;			| decrement loop counter
+	testw (pkon);		;		cjp,~zer pt3next; ;			| test if picking is on
+	incw cmdptr,cmdptr;	;		cjp,~zer pickup; ;			| increment cmdptr for npts
+	;			;		cjp,go pu_off;	;			| jmap getcmd from here
+	
+
+
+|   In this routine the concept of outptr and inptr will be reversed
+|   	Input parameters:	outptr -- points to coords to be scaled
+|   				inptr -- points to a place to deposit the scaled coords
+|   				fpbp,acc -- points to the viewport parameters
+|   
+vwpspt2: movw outptr,y;		am->fpap;	;		lmode rn,ai,pipe,fast;	| fpap points to coords
+	;			;		;		maba,lab,hi;		| x * VWPXSCL
+	add2nw 1,acc;		am->fpbp;	;		;		ap+	| 
+	mov2nw 0,y;		am->brreg;	;		maba,lab,hi;		| y * VWPYSCL
+	;			;		push,go;	;			| 
+	;			;		;		pa,hi;			| loop twice
+	;			;		rfct;		;			| 
+	;			;		;		pa,m,hi;		| 
+	sub2nw 0,acc;		am->fpbp;	;		;			| fpbp points to XOFF
+	;			;		;		addr,lab,m,hi;		| (x * VWPXSCL) + VWPXOFF
+	add2nw 1,acc;		am->fpbp;	;		;			| 
+	mov2nw 0,y;		am->brreg;	;		addr,lab,hi;		| (y * VWPYSCL) + VWPYOFF
+	;			;		push,go;	;			| 
+	;			;		;		pa,hi;			| loop twice
+	;			;		rfct;		;			| 
+	;			;		;		pa,a,hi;		| 
+	movw inptr,y;		am->fpdp;	;		;			| 
+	;			;		;		pa,a,st,hi;		| 
+	;			;		;		;		dp+	|
+	;			;		;		noflop,st,hi;		| 
+	;			;		crtn,go;	;			| 	
+
+
+|   In this routine the concept of outptr and inptr will be reversed
+|   	Input parameters:	outptr -- points to coords to be scaled
+|   				inptr -- points to a place to deposit the scaled coords
+|   				fpbp,acc -- points to the viewport parameters
+|   
+|   First take recip of w, multiply by x, y & z, and then scale result.
+|   Xformed w is @ fpr[7], put recip @ RecAddr 
+vwpspt3: ;			SavRegs->fpdp;	;		;			| store reg[0,1,2] before calling
+	movw r[0],y;		am->fpregh;	;		;			| save away r[0,1,2]
+	movw r[1],y;		am->fpregl;	;		;		dp+	| 
+	movw r[2],y;		am->fpregh;	;		;			| 
+	movw RecAddr,recaddr;	7->fpap;	;		;			| waddr->fpap, store address to put recip in reg
+	IMM;			;		cjs,go recip;	;			| compute 1/w
+	;			SavRegs->fpap;	;		;			| 
+	movw d,r[0];		fpregh->am;	;		;			| restore registers
+	movw d,r[1];		fpregl->am;	;		;		ap+	| 
+	movw d,r[2];		fpregh->am;	;		;			| 
+	;			RecAddr->fpbp;	;		;			| address of 1/w
+	movw outptr,y;		am->fpap;	;		lmode rn,ai,pipe,fast;	| fpap points to coords
+	mov2nw 0,y;		am->brreg;	;		maba,lab,hi;		| x * 1/w
+	;			;		push,go;	;		ap+	| 
+	;			;		;		maba,lab,hi;		| y * 1/w, z * 1/w (loop twice)
+	;			;		rfct;		;		ap+	| 
+	;			;		;		pa,hi;			| 
+	;			;		;		;			| fpdp <- z1scale (used by depthcue.vp.u)
+	;			;		;		pa,m,hi;		| 
+	mov2nw 5,acc;		am->fpbp;	;		;			| fpbp points to XSCL
+	;			;		;		mabr,lab,m,hi;		| x' * VWPXSCL
+	add2nw 1,acc;		am->fpbp;	;		;		ap+	| 
+	;			;		;		mabr,lab,m,hi;		| y' * VWPYSCL
+	add2nw 1,acc;		am->fpbp;	;		;		ap+	| 
+	;			;		;		mabr,lab,hi;		| z' * VWPZSCL
+	;			;		;		;			| 
+	movw Z1SCL,y;		;		;		pa,hi;			| 
+	IMM;			am->fpdp;	;		;			| fpdp <- z1scale (used by depthcue.vp.u)
+	rsubw acc,3,acc;	;		;		pa,m,hi;		| 
+	IMM;			am->fpbp;	;		;			| fpbp points to XOFF
+	;			;		;		addr,lab,m,hi;		| (x * VWPXSCL) + VWPXOFF 
+	add2nw 1,acc;		am->fpbp;	;		;			| 
+	;			;		;		addr,lab,m,hi;		| (y * VWPYSCL) + VWPYOFF
+	add2nw 1,acc;		am->fpbp;	;		;			| 
+	;			;		;		addr,lab,st,hi;		| (z * VWPZSCL) + VWPZOFF 
+	;			;		;		;			| 
+	;			;		;		pa,hi;			| 
+	;			;		;		;			| 
+	mov2nw 0,y;		am->brreg;	;		pa,a,hi;		| 
+	movw inptr,y;		am->fpdp;	push,go;	;			| 
+	;			;		;		pa,a,st,hi;		| store x, y (loop twice)
+	;			;		rfct;		;		dp+	| 
+	;			;		;		noflop,st,hi;		| store z
+	;			;		crtn,go;	;			| 
+
+
+
+clppt2:	movw 0,y;		am->fpdp;	;		lmode rn,ai,pipe,fast;	| 
+	rolw 14,clipplanes,clpplns; 0x3F80->fpregh; ;		;			| fpreg[0] = 1.0
+	;			0x0->fpregl;	;		;			| clpplns is 2-D version of clipplanes
+	movw 0,temp;		am->fpbp;	;		adda,lab,hi;		| 1+x0
+	;			;		;		;			| 
+	;			;		;		rsuba,la,hi;		| 1-x0
+	;			;		;		;		ap+	| 
+	;			;		;		adda,la,hi;		| 1+y0
+	;			;		;		;			| 
+	;			;		;		rsuba,la,hi;		| 1-y0
+	;			;		;		;			| 
+	;			;		;		pa,a,hi;		| 
+	;			;		;		;			| 
+	;			;		;		pa,a,hi;		| 
+	sl0b d,y;		fpstreg->am;	;		;			| 
+	slqw temp,temp;		;		;		pa,a,hi;		| 
+	sl0b d,y;		fpstreg->am;	;		;			| 
+	slqw temp,temp;		;		;		pa,a,hi;		| 
+	sl0b d,y;		fpstreg->am;	;		;			|  
+	slqw temp,temp;		;		;		noflop,hi;		| 
+	sl0b d,y;		fpstreg->am;	;		;			| 
+	slqw temp,temp;		am->am;		;		;			| 
+	andw,s d,clpplns,y;	;		;		;			| 
+	compw,s 0,y;		;		crtn,zer;	;			| 
+	movw,s 0,y;		;		crtn,go;	;			| 
+
+clppt3:	movw 0,y;		am->fpdp;	;		lmode rn,ai,pipe,fast;	| 
+	;			0x3F80->fpregh;	;		;			| fpreg[0] = 1.0
+	;			0x0->fpregl;	;		;		dp+	| 
+	;			0x0->fpregh;	;		;			| fpreg[1] = 0.0
+	;			0x0->fpregl;	;		;			| 
+	movw 0,temp;		am->fpbp;	;		adda,lab,hi;		| 1+x0
+	;			;		;		;			| 
+	;			;		;		rsuba,la,hi;		| 1-x0
+	;			;		;		;		ap+	| 
+	;			;		;		adda,la,hi;		| 1+y0
+	;			;		;		;			| 
+	;			;		;		rsuba,la,hi;		| 1-y0
+	;			;		;		;		abp+	| 
+	;			;		;		suba,lab,a,hi;		| z0-0
+	movw 0,y;		am->fpbp;	;		;			| 
+	mov2nw 1,y;		am->brreg;	;		rsuba,lab,a,hi;		| 1-z0
+	sl0b d,y;		fpstreg->am;	push,go;	;			| 
+	slqw temp,temp;		;		;		pa,a,hi;		| loop 3 times
+	sl0b d,y;		fpstreg->am;	rfct;		;			| 
+	slqw temp,temp;		;		;		pa,a,hi;		| 
+	sl0b d,y;		fpstreg->am;	;		;			|   
+	slqw temp,temp;		;		;		noflop,hi;		|
+	sl0b d,y;		fpstreg->am;	;		;			|    
+	slqw temp,temp;		am->am;		;		;			| 
+	andw,s d,clipplanes,y;	;		;		;			| 
+	compw,s 0,y;		;		crtn,zer;	;			| return non-zero if fails
+	movw,s 0,y;		;		crtn,go;	;			| return zero if ok
+
+
+xfptinit2:
+	addw frameptr,MATRIXPTR_FRMOFF,y ; ;	;		;			| 
+	IMM;			am->shmemp;	;		;			| shmemp <- addr of matrixptr
+	mov2nw 1,outptr;	shmem->shmemp;	ldct 5;		;			| shmemp <- addr of matrix; outptr <- 2
+	mov2nw 4,y;		am->fpdp;	cjs,go shm_to_fpr;;			| move matrix to fpr[16]
+	addw d,frameptr,acc;	VWPXSCL_FRMOFF->am; ;		;			| 
+	movw acc,y;		am->shmemp;	ldct 3;		;			| move viewport parameters to fpr[32]
+	mov2nw 5,y;		am->fpdp;	cjs,go shm_to_fpr; ;			| 
+	movw PPSETZBLINE,acc;	;		;		;			| 
+	IMM;			am->fifo1;	cjs,f1f wrfifo;	;			| 
+	movw 0,zbdcln;		am->fifo1;	cjp,f1f .;	;			| disable 3d capability on vp & pp
+	incw cmdptr,cmdptr;	am->shmemp;	crtn,go;	;			| shmptr =npts
+
+
+xfptinit3: 
+	addw frameptr,MATRIXPTR_FRMOFF,y ; ;	;		;			| 
+	IMM;			am->shmemp;	;		;			| shmemp <- addr of matrixptr
+	mov2nw 2,outptr;	shmem->shmemp;	ldct 15;	;			| shmemp <- addr of matrix; outptr <- 4
+	mov2nw 4,y;		am->fpdp;	cjs,go shm_to_fpr;;			| move matrix to fpr[16]
+	addw d,frameptr,acc;	VWPXSCL_FRMOFF->am; ;		;			| 
+	movw acc,y;		am->shmemp;	ldct 5;		;			| move viewport parameters to fpr[32]
+	mov2nw 5,y;		am->fpdp;	cjs,go shm_to_fpr; ;			| 
+|   For markers, if we only send z-buffering value to pp.  If only depth-cueing, replace color and give
+|   normal pp commands (since color is constant).	
+	addw frameptr,HIDDENSURF_FRMOFF,y; ;	;		;			| prepare zbdcln
+	IMM;			am->shmemp;	cjs,go check3d;	;			| check if gb present
+	;			shmem->am;	cjp,~zer .+2;	;			| jump if ok
+	;			0->am;		;		;			| 
+	sr0w d,zbdcln;		;		push,~go;	;			| word is now zb.hs (shift mark param into line att)
+	;			PPSETZBLINE->fifo1; loop,f1nf;	;			| 
+	bclrw dcue,zbdcln;	am->fifo1;	cjp,f1f .;	;			| clear depth cueing bit, make word zb.0
+	addw frameptr,DEPTHCUE_FRMOFF,y; ;	;		;			| 
+	IMM;			am->shmemp;	;		;			| 
+	orw d,zbdcln,zbdcln;	shmem->am;	;		;			| or in depth cueing bit
+	testw (d);		;		;		;			| 
+	;			;		cjs,~zer dcinit_jmap; ;			| initialize depth cueing params if enabaled
+	addw frameptr,PICK_FRMOFF,y; ;		;		;			| DEBUG (restore pkon)
+	IMM;			am->shmemp;	;		;			 
+	movw d,pkon;		shmem->am;	;		;		shp+	| pkon holds picking status
+	incw cmdptr,cmdptr;	am->shmemp;	crtn,go;	;			| shmptr = npts
+
+|   This is called by both the 2D & 3D routines.
+markerinit: movw d,scale;	shmem->am;	;		;		shp+	| get marker scale factor
+	movw d,xoff;		shmem->am;	;		;		shp+	| get marker X offset
+	movw d,yoff;		shmem->am;	;		;		shp+	| get marker Y offset
+	movw d,mtype;		shmem->am;	;		;		shp+	| get type of marker
+	addw d,mtype,acc;	=markertype->am; ;		;			| get address of marker type in table
+	movw acc,y;		am->brreg;	;		;			| add 5 to cmdptr for these args
+	addw d,cmdptr,cmdptr;	5->am;		cjp,go;		;			| scale and translate marker coordinates
+markertype: movw d,loopc;	shmem->am;	cjp,go markerlineinit; ;	shp+	| line markers, npts-1 -> loop counter
+	btstw,s xf3d,attr_vec;	;		cjp,go markerpolyinit; ;		| poly markers
+	sub2nw,s 0,scale;	am->brreg;	cjp,go markercircinit; ;		| circle markers, scale will not be used again
+	sub2nw,s 0,scale;	am->brreg;	cjp,go markerfcircinit; ;		| filled circle markers
+
+
+markerlineinit:
+	sub2nw 0,loopc,loopc;	LinePts->fpdp;	;		;			| storage for scaled marker
+	movw loopc,y;		am->fpregh;	;		;			| save npts-1 in high of fpreg[LinePts]
+mlinext: movw,s scale,acc;	shmem->fpregl;	;		;		shp+	| save mvlist in low portion of fpreg
+	sub2nw 0,acc;		am->brreg;	cjs,~zer ptscale; ;		dp+	| loop 'scale' times (don't jump if scale is zero)
+	;			;		cjp,~zer .+2;	;			| 
+	movw 0,acc;		;		;		;			| scale factor was zero
+	addw xoff,acc,y;	am->fpregh;	;		;		shp+	| store point.x
+	movw,s scale,acc;	;		;		;			| 
+	sub2nw 0,acc;		am->brreg;	cjs,~zer ptscale; ;			| loop 'scale' times
+	;			;		cjp,~zer .+2;	;			| 
+	movw 0,acc;		;		;		;			| 
+	addw yoff,acc,y;	am->fpregl;	;		;		shp+	| store point.y
+	sub2nw,s 0,loopc,loopc;	3->am;		;		;		dp+	| decrement loop counter, increment fpdp
+	addw d,cmdptr,cmdptr;	;		cjp,~neg mlinext; ;			| add 3 to cmdptr (mvlist,x,y)
+	movw d,mroutine;	=markerline->am; ;		;			| cmdptr points at npts
+	;			;		cjp,go vec_attr; ;			| will return from vec_attr DEBUG
+
+|   This routine also applies for all 2 & 3D marker primitives.
+markerline:
+	movw inptr,y;		am->fpap;	;		;			| location of transformed points -> fpap
+	movw d,dx;		fpregl->am;	;		;		ap+	| get dx
+	movw d,dy;		fpregl->am;	;		;		ap+	| get dy
+	movw d,dz;		fpregl->am;	cjs,~zer mline_dcue; ;			| get z, and compute color if depth cueing enabled
+	movw xoff,y;		am->am;		;		;			| 
+	movw d,x0;		LinePts->fpap;	;		;			| location of marker def -> fpap
+	movw yoff,y;		am->am;		;		;			| 
+	movw d,y0;		fpregh->brreg;	;		;			| npts-1 -> brreg
+	;			;		push,go;	;			| load count and push address
+	testw (d);		fpregl->am;	;		;		ap+	| test mvlist
+	movw d,x1;		fpregh->am;	cjp,~zer mlmove; ;			| jump if mvlist indicates a move, get x from fpregs
+	movw d,y1;		fpregl->am;	;		;		ap+	| get y from fpregs
+	movw dy,acc ;		;		;		;			| dy in acc
+	movw dx,y;		am->am;		;		;			| dx in d latch
+	movw veccmd,y;		am->fifo1;	cjp,f1f .;	;			| send vector command
+	addw d,x0,y;		am->fifo1;	cjp,f1f .;	;			| 
+	addw y0,acc,y;		am->fifo1;	cjp,f1f .;	;			| 
+	addw d,x1,y;		am->fifo1;	cjp,f1f .;	;			| 
+	addw y1,acc,y;		am->fifo1;	cjp,f1f .;	;			|  
+	movw op,y;		am->fifo1;	cjp,f1f .;	;			| 
+	movw color,y;		am->fifo1;	cjp,f1f .;	;			| 
+
+mltstpk: testw (pkon) ;		;		;		;			| 
+	movw x1,x0;		;		cjp,zer mlzbtst; ;			| 
+ 	movw pkcnthi,y;		am->fifo1;	cjp,f1f .;	;			| send pickcount
+ 	movw pkcntlo,y;		am->fifo1;	cjp,f1f .;	;			| 
+mlzbtst: btstw,s zbuf,zbdcln;	;		;		;			| jump if disabled & test if picking is on
+	movw y1,y0;		;		cjp,zer mlloop;	;			| 
+	
+|   Now we know that z-buffering is enabled (if only depth cueing, give normal commands).
+	;			;		cjs,go markzbdc; ;			| send z and color parameters to pp
+
+mlloop:	;			;		rfct;		;			| 
+	;			;		crtn,go;	;			| 
+	
+mlmove:	movw d,x0;		fpregh->am;	;		;			| 
+	movw d,y0;		fpregl->am;	rfct;		;		ap+	| 
+	;			;		crtn,go;	;			| 
+	
+mlcompdc:
+	movw pkon,temp10;	;		cjs,go zbdc;	;			| call depth cueing code, will return here
+	movw,s temp10,pkon;	;		cjp,go mltstpk;	;			| restore reg, set cc, and return to main loop
+
+|   Jmap to the other bank, and compute the depth cued color we'll use for the marker.
+mline_dcue:
+	;			;		jmap dcue_mark;	;			| 
+mldc_ret: ;			;		crtn,go;	;			| 
+
+
+|   Markerpolyinit takes the marker description, and stores it in the floating point registers.  They are stored
+|   towards the end of the registers.  The xformed points are later added to these values, and an edge table is
+|   constructed from this.
+
+|   When we jump here, we first test if we are doing 3d operation.  If so, and hiddensurf is disabled, we make this
+|   bit 2d, and set another bit indicating that we were doing 3d, so that we still depth cue.	We do the same thing
+|   if the gbuffer is not mated to this board.  Most of this code used to reside in markerpolyinit3.
+markerpolyinit:
+	addw d,frameptr,acc;	HIDDENSURF_FRMOFF->am;;		;			| compute hiddensurf frame offset
+	movw acc,y;		am->shmemp;	cjp,zer mpi2d;	;			| jump if only doing 2d
+	btstw,s mark,d;		shmem->am;	;		;			| test flag to see if zbuffering markers
+	addw frameptr,DEPTHCUE_FRMOFF,y; ;	;		;			| 
+	IMM;			am->shmemp;	;		;			| 
+	btstw,s dcue,d;		shmem->am;	cjp,~zer mpi3d;	;			| 
+|   Hidden surf off, check if depth-cueing	
+	bclrw xf3d,attr_vec;	;		cjp,zer mpi2d;	;			| clear 3d bit used for edge tables, jump if dc is off
+	bsetw depcue,attr_vec;	;		cjp,go mpi2d;	;			| 
+|   Hidden surf on, check if gb linked to this fb.
+mpi3d:	;			;		cjs,go gb_board_inq; ;			| check GB status  
+	xorw,s fbindx,acc,y;	;		cjp,neg mpinogb; ;			| 2D if there is no GB
+	;			;		cjp,zer mpi2d; ;			| Jump if true 3d (everythink ok)
+|   Either there is no gb, or it is not linked to this fb.  Therefore this is 2d also.
+mpinogb: addw frameptr,DEPTHCUE_FRMOFF,y; ;	;		;			| 
+	IMM;			am->shmemp;	;		;			| 
+	btstw,s dcue,d;		shmem->am;	;		;			| 
+	bclrw xf3d,attr_vec;	;		cjp,zer mpi2d;	;			| 
+	bsetw depcue,attr_vec;	;		;		;			| set bit for markerpoly2
+
+mpi2d:	movw xoff,y;		am->am;		;		;			| 
+	movw d,offsetx;		;		;		;			| this is done for txpt2
+	movw yoff,y;		am->am;		;		;			| 
+	movw d,offsety;		;		;		;			| 
+	btstw,s xf3d,attr_vec;	;		;		;			| 
+	movw cmdptr,y;		am->shmemp;	;		;			| 
+	movw d,edgptr;		POLYGON2->am;	;		;			| 
+	movw scale,acc;		POLYGON2->fpdp;	;		;			| 2D table
+	movw,s d,I;		shmem->am;	cjp,zer .+3;	;		shp+	| fetch nbnds
+	movw d,edgptr;		POLYGON3->am;	;		;			| 
+	;			POLYGON3->fpdp;	;		;			| 3D table
+	sub2nw 0,acc;		0xffff->fpregl;	;		;			| initialize dummy pointer, acc = scale-1
+mpiforI: movw d,J;		shmem->am;	cjp,zer mpiflxs; ;		shp+	| J = npts[nbds-I], bail if nbnds == 0
+	subw,s d,J,y;		3->am;		;		;			| if npts < 3 skip to next bound
+	movw,s acc,y;		am->brreg;	cjp,neg mpinxtbnd; ;			| prepare to transform vertex
+	addw d,cmdptr,cmdptr;	;		cjs,go txpt2;	;			| bump command pointer, transform vertex
+	movw y0,sy;		am->fpregh;	;		;			| 
+	addw edgptr,X0,y;	;		;		;		shp+	| shmemp points at x of next vertex
+	IMM;			am->fpdp;	;		;			| dp->edgptr.x0
+	movw,s x0,sx;		am->fpregl;	;		;			| save first vertex to close polygon
+	movw 0,y;		am->fpregh;	cjp,~neg .+2;	;			| extend sign bit
+	;			0xffff->fpregh;	;		;			| 
+	sub2nw 0,J;		;		;		;			| J needs to be npts[nbnds-I] - 1
+	
+mpiforJ: movw,s acc,y;		am->brreg;	cjs,go txpt2;	;			| transform vertex, dp->edgptr.x1
+	addw edgptr,X1,y;	;		;		;			| 
+	IMM;			am->fpdp;	;		;			| dp->edgptr.x1
+	movw,s x0,y;		am->fpregl;	;		;			| edgptr.x1 = transform(x)
+	movw 0,y;		am->fpregh;	cjp,~neg .+2;	;		shp+	| shmemp points at x of next vertex
+	;			0xffff->fpregh;	;		;			| extend sign bit
+	incw edgptr,y;		am->fpdp;	;		;			| dp->edgptr.y1
+	movw y0,y;		am->fpregh;	;		;			| edgptr.y1 = transform(y)
+	movw edgptr,lastedg;	am->fpap;	;		;			| lastedg = edgptr, ap->lastedg.y0
+	subw,s d,y0,y;		fpregh->am;	;		;		ap+	| test (lastedg.y0 == lastedg.y1), ap->lastedge.y1
+	movw edgptr,y;		am->fpdp;	cjp,zer .+2;	;			| edge is horizontal, don't bump edge table pointer, dp->edgptr.y0
+	add2nw 2,edgptr;	am->fpdp;	;		;			| edgptr++
+	;			fpregh->fpregh;	;		;			| edgptr.y0 = lastedg.y1
+	addw edgptr,X0,y;	X1->am;		;		;			| 
+	IMM;			am->fpdp;	;		;			| dp->edgptr.x0
+	addw d,lastedg,y;	am->fpap;	;		;			| ap->lastedg.x1
+	sub2nw,s 0,J;		fpregh->fpregh;	;		;			| edgptr.x0 = lastedg.x1, J--
+	add2nw 1,cmdptr;	fpregl->fpregl;	;		;			| command pointer points to next x coord
+	movw lastedg,y;		am->fpdp;	;		;			| dp->lastedg.(y0/nxt)
+	movw edgptr,y;		am->fpregl;	;		;			| lastedg.nxt = edgptr
+	addw edgptr,X0,y;	;		;		;			| 
+	IMM;			am->fpdp;	cjp,~zer mpiforJ; ;			| dp->edgptr.x0
+	
+	movw edgptr,y;		am->fpap;	;		;			| ap->edgptr.y0
+	subw,s d,sy,y;		fpregh->am;	;		;			| test (edgptr.y0 == sy)
+	sub2nw,s 0,I;		;		cjp,~zer mpilastedg; ;			| I--
+	movw edgptr,y;		am->fpdp;	ldct mpiflxs;	;			| dp->lastedg.(y0/nxt)
+	compw 0,y;		am->fpregl;	jrp,~zer mpiforI; ;			| edgptr.nxt = (-1)
+
+mpilastedg: incw edgptr,y;	am->fpdp;	;		;			| dp->edgptr.y1
+	movw sy,y;		am->fpregh;	;		;			| edgptr.y1 = sy
+	addw edgptr,X1,y;	;		;		;			| 
+	IMM;			am->fpdp;	;		;			| dp->edgptr.x0
+	movw,s sx,y;		am->fpregl;	;		;			| edgptr.x1 = sx
+	movw 0,y;		am->fpregh;	cjp,~neg .+2;	;			| extend sign bit
+	;			0xffff->fpregh;	;		;			| 
+	movw edgptr,y;		am->fpdp;	;		;			| 
+	add2nw 2,edgptr;	am->fpregl;	;		;			| 
+	movw edgptr,y;		am->fpdp;	;		;			| 
+	testw(I);		0xffff->fpregl;	;		;			| 
+	;			;		cjp,~zer mpiforI; ;			| 
+
+mpiflxs: btstw,s xf3d,attr_vec;	;		;		;			| 3D?
+	movw d,edgptr;		POLYGON2->am;	;		;			| edgptr = &POLYGON2
+	movw edgptr,y;		am->fpap;	cjp,zer .+3;	;			| ap->edgptr.(y0/nxt)
+	movw d,edgptr;		POLYGON3->am;	;		;			| edgptr = &POLYGON3
+mpiflxsnxtedg: 
+	movw edgptr,y;		am->fpap;	;		;			| ap->edgptr.(y0/nxt)
+	testw(d);		fpregl->am;	;		;			| test edgptr.nxt
+	addw edgptr,X1,y;	;		;		;			| 
+	IMM;			am->fpap;	cjp,neg mpidone; ;			| ap->edgptr.x1
+	;			;		;		lmode rn,ai,pipe,fast;	| 
+	;			;		;		floata,la,hi;		| x0
+	;			;		;		;		ap+
+	;			;		;		floata,la,hi;		| x1
+	;			;		;		;
+	;			;		;		pa,hi;
+	;			;		;		;
+	;			;		;		pa,hi;
+	;			;		;		;
+	addw edgptr,X1,y;	;		;		pa,a,hi;		| 
+	IMM;			am->fpdp;	;		;			| 
+	;			;		;		pa,a,st,hi;		| overwrite x1
+	;			;		;		;		dp+
+	;			;		;		noflop,st,hi;		| overwrite x0
+	;			;		;		;			| 
+	add2nw 2,edgptr;	;		cjp,go mpiflxsnxtedg; ;			| 
+
+mpinxtbnd: ;			;		;		;			| 
+
+mpidone:	
+	addw d,frameptr,acc;	CLPPLNS_FRMOFF->am; ;		;			| 
+	movw acc,y;		am->shmemp;	;		;			| set up clipplanes
+	movw d,clipplanes;	shmem->am;	;		;			| 
+
+	btstw,s xf3d,attr_vec;	=polygon_attr_2D_orig->brreg; ;	;			| prepare for polygons
+	movw 0,r[1];		;		;		;			| flag to tell attributes that we're doing markers
+	movw d,mroutine;	=markerpoly2->am; cjp,zer;	;			| 
+|   Fall through to here if doing true 3d.	
+markerpolyinit3:
+	movw d,mroutine;	=markerpoly3->am; ;		;			| 
+	;			;		cjp,go polygon_attr_3D_orig; ;		| 3D if all goes well
+
+markerpoly2: 
+|   We can land here even though we specified a 3d point.  Therefore, we must check for this case, and depth
+|   cue if necessary.  The main difference lies in the fact that the xformed points are stored at a different
+|   location than for the 2d case.  We must know this to build the edge table correctly.
+	btstw,s depcue,attr_vec; PPSETPICKMODE->am; ;		;			| 
+	;			;		cjp,zer mp2nodc; ;			| 
+	;			;		cjs,go mline_dcue; ;			| 
+	rolw 5,color,acc;	;		;		;			| shift color up 5 bits
+	romw 0, polycolorop,acc,0x701f; ;	;		;			| merge new color into polycolorop
+	IMM;			PPSETPICKMODE->am; ;		;			| 
+	movw acc,polycolorop;	;		;		;			| 
+mp2nodc: movw d,y;		am->fifo1;	cjp,f1f .;	;			| 
+	movw,s pkon,y;		am->fifo1;	cjp,f1f .;	;			| 
+	;			;		cjp,zer mp2nopk; ;			|
+	;			PPSETPICKCNT->am; ;		;			|  
+	movw d,y;		am->fifo1;	cjp,f1f .;	;			| 
+	movw pkcnthi,y;		am->fifo1;	cjp,f1f .;	;			| 
+	movw pkcntlo,y;		am->fifo1;	cjp,f1f .;	;			| 
+mp2nopk: ;			SavePts->fpdp;	;		;			| 
+	movw mroutine,y;	am->fpregh;	;		;			| save some needed registers
+	movw attr_vec,y;	am->fpregl;	;		;		dp+	| 
+	movw loopc,y;		am->fpregh;	;		;			| 
+	movw pkon,y;		am->fpregl;	;		;		dp+	| 
+	movw color,y;		am->fpregh;	;		;			| 
+	movw polycolorop,y;	am->fpregl;	;		;		dp+	| 
+	movw outptr,y;		am->fpregh;	;		;			| 
+	incw inptr,y;		am->fpap;	;		;			| ap->y0
+	movw d,dy;		fpregl->am;	;		;			| dy = y0
+	movw outptr,y;		am->fpbp;	;		;			| bp->(float)x0 before outptr stepped on
+	movw d,r[14];		EDGETAB->am;	;		;			| pointer to edge table for polyscan
+	movw polycolorop,r[15];	;		;		;			| move polycolorop to the location that polyscan knows about
+	movw d,acc;		POLYGON2->fpap;	;		;			| ap->2D.EDGETABLE
+	add2nw 2,acc;		am->fpdp;	;		;			| dp->EDGETABLE+4
+	incw acc,pet;		am->fpregl;	;		;			| pet = dummy pointer = EDGETAB+5
+mp2nxtedg: testw(d);		fpregl->am;	;		;		dp+	| test edgptr.nxt
+	;			fpregh->am;	cjp,neg mp2doscan; ;		ap+	| 
+	addw d,dy,y;		am->fpregh;	;		;		dp+	| calculate pet.y0
+	;			fpregh->am;	;		;		ap+	| 
+	addw d,dy,y;		am->fpregh;	;		;		dp+	| calculate pet.y1
+	;			;		;		lmode rn,ai,pipe,fast;	| 
+	;			;		;		adda,lab,hi;		| 
+	;			;		;		;		ap+	| 
+	mov2nw 0,y;		am->brreg;	;		adda,lab,hi;		| 
+	;			;		push,go;	;		ap+	| 
+	;			;		;		pa,hi;			| loop twice
+	;			;		rfct;		;			| 
+	;			;		;		pa,a,hi;		| 
+	;			;		;		;			| 
+	;			;		;		pa,a,st,hi;		| 
+	;			;		;		;		dp+	| store pet.x1
+	;			;		;		noflop,st,hi;		| 
+	addw pet,5,pet;		;		;		;		dp+	| store pet.x0
+	IMM;			am->fpregl;	cjp,go mp2nxtedg; ;			| pet += sizeof(struct edge)
+mp2doscan: sub2nw 0,pet;	am->fpdp;	;		;			| 
+	movw 0,y;		am->fpregl;	jmap markerpolyscan; ;			| indicate end of edge table
+
+retfrompolyscan:
+	;			SavePts->fpap;	;		;			| restore some registers and return
+	movw d,mroutine;	fpregh->am;	;		;			| 
+	movw d,attr_vec;	fpregl->am;	;		;		ap+	| 
+	movw d,loopc;		fpregh->am;	;		;			| 
+	movw d,pkon;		fpregl->am;	;		;		ap+	| 
+	movw d,color;		fpregh->am;	;		;			| 
+	movw d,polycolorop;	fpregl->am;	;		;		ap+	| 
+	movw d,outptr;		fpregh->am;	;		;			| 
+	;			;		crtn,go;	;			| 
+
+	
+markerpoly3: 
+	;			;		cjp,zer mp3nodc; ;			| 
+	;			;		cjs,~zer mline_dcue; ;			| 
+	rolw 5,color,acc;	;		;		;			| shift color up 5 bits
+	romw 0, polycolorop,acc,0x701f; ;	;		;			| merge new color into polycolorop
+	IMM;			;		;		;			| 
+	movw acc,polycolorop;	;		;		;			| 
+mp3nodc: ;			PPSETPICKMODE->am; ;		;			|  
+	movw d,y;		am->fifo1;	cjp,f1f .;	;			| 
+	movw,s pkon,y;		am->fifo1;	cjp,f1f .;	;			| 
+	;			;		cjp,zer mp3nopk; ;			| 
+	;			PPSETPICKCNT->am; ;		;			|  
+	movw d,y;		am->fifo1;	cjp,f1f .;	;			| 
+	movw pkcnthi,y;		am->fifo1;	cjp,f1f .;	;			| 
+	movw pkcntlo,y;		am->fifo1;	cjp,f1f .;	;			| 
+mp3nopk: rolw 11,polycolorop,acc; FCOLOR->fpdp;	;		;			| 
+	;			0x1fe->am;	;		;			| mask out non-color bits
+	andw d,acc,y;		am->fpregl;	;		;			| float color for polyscan3
+	;			0->fpregh;	;		;			| 
+	movw SavePts,y;		FCOLOR->fpap;	;		;			| 
+	IMM;			am->fpdp;	;		lmode rn,ai,flow,fast;	| 
+	movw mroutine,y;	am->fpregh;	;		floata,la,hi;		| save some needed registers
+	movw attr_vec,y;	am->fpregl;	;		;		dp+	| 
+	movw loopc,y;		am->fpregh;	;		;			| 
+	movw pkon,y;		am->fpregl;	;		;		dp+	| 
+	movw color,y;		am->fpregh;	;		;			| 
+	movw polycolorop,y;	am->fpregl;	;		;		dp+	| 
+	movw pkcnthi,y;		am->fpregh;	;		;			| 
+	movw pkcntlo,y;		am->fpregl;	;		;		dp+	| 
+	movw clipplanes,y;	am->fpregh;	;		;			| 
+	movw outptr,y;		am->fpregl;	;		;			| NEW 
+	movw FCOLOR,y;		;		;		noflop,a,hi;		| 
+	IMM;			am->fpdp;	;		;			| 
+	incw inptr,y;		am->fpap;	;		noflop,st,hi;		| ap->y0
+	movw d,dy;		fpregl->am;	;		;			| dy = y0
+	movw d,shadestyle;	0x100->am;	;		;			| shadestyle = 3D solid (for polyscan3)
+	movw d,r[14];		EDGETAB->am;	;		;			| pointer to edge table for polyscan3
+	movw d,acc;		;		;		;			| 
+	movw polycolorop,r[15];	POLYGON3->am;	;		;			| move polycolorop to the location that polyscan3 knows about
+	movw d,edgptr;		am->fpap;	;		;			| ap->3D.EDGETABLE
+	add2nw 3,acc;		am->fpdp;	;		;			| dp->EDGETABLE+8
+	incw acc,pet;		am->fpregl;	;		;			| pet = dummy pointer = EDGETAB+9
+	mov2nw 2,y;		am->fpbp;	;		;			| bp->(float)x0
+mp3nxtedg: testw(d);		fpregl->am;	;		;		dp+	| test edgptr.nxt, dp->EDGTAB.Y0
+	;			fpregh->am;	cjp,neg mp3doscan; ;		ap+	| ap->POLYGON3.Y1
+	addw d,dy,y;		am->fpregh;	;		;		dp+	| calculate pet.y0, dp->EDGTAB.Y1
+	;			fpregh->am;	;		;		ap+	| ap->POLYGON3.X1
+	addw d,dy,y;		am->fpregh;	;		;		dp+	| calculate pet.y1, dp->EDGTAB.X1
+	;			;		;		lmode rn,ai,pipe,fast;	| 
+	;			;		;		adda,lab,hi;		| 
+	;			;		;		;		ap+	| ap->POLYGON3.X0
+	mov2nw 0,y;		am->brreg;	;		adda,lab,hi;		| 
+	;			;		push,go;	;		ap+	| ap->POLYGON3.Y0
+	;			;		;		pa,hi;			| loop twice
+	;			;		rfct;		;			| 
+	;			;		;		pa,a,hi;		| 
+	;			;		;		;			| 
+	addw pet,X03,y;		;		;		pa,a,st,hi;		| 
+	IMM;			am->fpdp;	;		;			| store pet.x1, dp->EDGTAB.X0
+	addw pet,Z13,y;		;		;		noflop,st,hi;		| 
+	IMM;			am->fpdp;	;		;			| store pet.x0, dp->EDGTAB.Z1
+	;			FZ->fpap;	;		;			| ap->(float)Z
+	;			fpregh->fpregh;	;		;			| pet.z1 = z
+	;			fpregl->fpregl; ;		;		adp+	| ap->(float)color, dp->EDGTAB.color1
+	;			fpregh->fpregh;	;		;			| pet.color1 = (float)color
+	;			fpregl->fpregl;	;		;		dp+	| dp->EDGTAB.X0
+	addw pet,Z03,y;		FZ->fpap;	;		;			| ap->(float)color
+	IMM;			am->fpdp;	;		;			| dp->EDGTAB.Z0
+	;			fpregh->fpregh;	;		;			| pet.z0 = z
+	;			fpregl->fpregl; ;		;		adp+	| 
+	;			fpregh->fpregh;	;		;			| pet.color0 = color
+	;			fpregl->fpregl;	;		;		dp+	| dp->nxt
+	add2nw 2,edgptr;	am->fpap;	;		;			| edgtab += sizeof(struct edgein)
+	addw pet,9,pet;		;		;		;			| 
+	IMM;			am->fpregl;	cjp,go mp3nxtedg; ;			| pet += sizeof(struct edgeout)
+mp3doscan: sub2nw 0,pet;	am->fpdp;	;		;			| 
+	movw 0,y;		am->fpregl;	jmap markerpolyscan3; ;			| indicate end of edge table
+
+retfrompolyscan3:
+	;			SavePts->fpap;	;		;			| restore some registers and return
+	movw d,mroutine;	fpregh->am;	;		;			| 
+	movw d,attr_vec;	fpregl->am;	;		;		ap+	| 
+	movw d,loopc;		fpregh->am;	;		;			| 
+	movw d,pkon;		fpregl->am;	;		;		ap+	| 
+	movw d,color;		fpregh->am;	;		;			| 
+	movw d,polycolorop;	fpregl->am;	;		;		ap+	|
+	movw d,pkcnthi;		fpregh->am;	;		;			| 
+	movw d,pkcntlo;		fpregl->am;	;		;		ap+	| 
+	movw d,clipplanes;	fpregh->am;	;		;			| 
+	movw d,outptr;		fpregl->am;	crtn,go;	;			| 
+ 
+
+markercircinit:
+	movw 0,acc;		;		cjs,~neg ptscale; ;			| scale radius
+	movw d,mroutine;	=markercirc->am; ;		;			| set marker routine pointer
+	movw acc,radius;	;		cjp,go vec_attr; ;			| save radius and prepare for vectors
+
+markercirc: 
+	movw inptr,y;		am->fpap;	;		;			| location of transformed point -> fpap
+	addw d,xoff,acc;	fpregl->am;	;		;		ap+	| compute dx
+	movw acc,dx;		;		;		;			| 
+	addw d,yoff,acc;	fpregl->am;	;		;		ap+	| compute dy, fpap now points to z0
+	movw acc,dy;		;		;		;			| 
+	movw d,dz;		fpregl->am;	cjs,~zer mline_dcue; ;			| pull xformed z0 value
+	movw radius,y0;		am->am;		;		;			| y0 = radius
+	movw 0,x0;		;		;		;			| x0 = 0
+	sl0w d,acc;		;		;		;			| 2*radius
+	rsubw d,acc,s0;		3->am;		;		;			| s0=3-(2*radius)
+mcdo:	mov2nw 1,I;		;		cjs,go mcpoint;	;			| do
+	testw(s0);		;		;		;			| {
+	movw x0,y;		am->am;		;		;			|   mcpoint(x0, y0)
+	incw x0,x0;		;		cjp,~neg mcelse; ;			|   if (s0 < 0)
+	sl0w d,acc;		;		;		;			| 
+	sl0w acc,acc;		6->am;		;		;			| 
+	addw d,acc,acc;		;		;		;			| 
+	addw s0,acc,s0;		;		cjp,go mcwhile;	;			|     s0+=4*(x++)+6
+mcelse:	rsubw d,y0,acc;		;		;		;			|   else
+	sub2nw 0,y0;		;		;		;			| 
+	sl0w acc,acc;		;		;		;			| 
+	sl0w acc,acc;		10->am;		;		;			|
+	addw d,acc,acc;		;		;		;			| 
+	addw s0,acc,s0;		;		;		;			|     s+=4*((x++)-(y--))+10
+mcwhile: movw y0,acc;		;		;		;			| } while (y0 > x0)
+	rsubw,s x0,acc,y;	;		;		;			| 
+	;			;		cjp,neg mcdo;	;			|
+	mov2nw 0,I;		;		cjs,zer mcpoint; ;			| 
+	;			;		crtn,go;	;			| 
+	
+
+|   this code is based on this 'c' loop construct:
+|   
+|   for (i=2; i>0; i--)
+|   {
+|   	for (j=2; j>0; j--)
+|   	{
+|   	    for (k=2; k>0; k--)
+|   	    {
+|   		point(x0+dx, y0+dy)
+|   		negate(x0)
+|   	    }
+|   	    negate(y0)
+|   	}
+|   	swap(x0, y0)
+|   }
+|   
+|   it performs the reflections necessary to repeat a point in each of the 
+|   eight octants, leaving the x0 and y0 arguments with their original values
+|   
+mcpoint: movw dx,y;		am->am;		;		;			| dx in d latch
+mcpforI: movw dy,acc;		;		;		;			| dy in acc
+	testw(y0);		;		;		;			| 
+	mov2nw 0,J;		;		cjp,zer .+2;	;			| 
+	mov2nw 1,J;		;		;		;			| J=2
+mcpforJ: testw(x0);		;		;		;			| 
+	mov2nw 0,K;		;		cjp,zer .+2;	;			| K=2
+	mov2nw 1,K;		;		;		;			| 
+mcpforK: movw veccmd,y;		am->fifo1;	cjp,f1f .;	;			| send vector command
+	addw d,x0,y;		am->fifo1;	cjp,f1f .;	;			|
+	addw y0,acc,y;		am->fifo1;	cjp,f1f .;	;			|
+	addw d,x0,y;		am->fifo1;	cjp,f1f .;	;			|
+	addw y0,acc,y;		am->fifo1;	cjp,f1f .;	;			|  
+	movw op,y;		am->fifo1;	cjp,f1f .;	;			| 
+	movw color,y;		am->fifo1;	cjp,f1f .;	;			|
+mctstpk: testw(pkon);		;		;		;			| test if picking is on
+	;			;		cjp,zer mczbdc;	;			| K--
+	movw pkcnthi,y;		am->fifo1;	cjp,f1f .;	;			| send pickcount
+ 	movw pkcntlo,y;		am->fifo1;	cjp,f1f .;	;			| 
+
+|   Test if z buffering is enabled (dc only uses normal vector commands)
+mczbdc:	btstw,s zbuf,zbdcln;	;		;		;			| 
+	sub2nw,s 0,K;		;		cjs,~zer markzbdc; ;			| send z and dc parameters if necessary
+
+	negw x0,x0;		;		cjp,~zer mcpforK; ;			| x0 = (-x0)
+	sub2nw,s 0,J;		;		;		;			| J--
+	negw y0,y0;		;		cjp,~zer mcpforJ; ;			| y0 = (-y0)
+	movw x0,acc;		;		;		;			| do not swap if x0==y0
+	movw y0,x0;		;		;		;			| swap(x0, y0)
+	sub2nw,s 0,I;		;		;		;			| I--
+	movw acc,y0;		;		cjp,~zer mcpforI; ;			| 
+	;			;		crtn,go;	;			| 
+	
+	
+markerfcircinit:
+	movw 0,acc;		;		cjs,~neg ptscale; ;			| scale radius
+	btstw,s xf3d,attr_vec;	;		;		;			| 
+	movw acc,radius;	;		;		;			| 
+	movw d,mroutine;	=markerfcirc->am; ;		;			| set marker routine pointer
+	addw d,frameptr,acc;	CLPPLNS_FRMOFF->am; ;		;			| 
+	movw acc,y;		am->shmemp;	;		;			| set up clipplanes
+	movw d,clipplanes;	shmem->am;	;		;			| 
+	movw 0,r[1];		;		cjp,zer polygon_attr_2D_orig; ;		| flag to tell attributes that we're doing markers 
+|   3D data
+	addw d,frameptr,acc;	HIDDENSURF_FRMOFF->am;;		;			| compute hiddensurf frame offset
+	movw acc,y;		am->shmemp;	;		;			| shmemp -> hidden surf flag
+	btstw,s mark,d;		shmem->am;	;		;			| test flag to see if z-buffering markers
+	addw frameptr,DEPTHCUE_FRMOFF,y; ;	;		;			| 
+	IMM;			am->shmemp;	;		;			| 
+	btstw,s dcue,d;		shmem->am;	cjp,~zer mfci3d; ;			| 
+|   3D data, no hidden surf, check if depth cueing enabled	
+	bclrw xf3d,attr_vec;	;		cjp,zer polygon_attr_2D_orig; ;		| jump if dc disabled
+	bsetw depcue,attr_vec;	;		cjp,go polygon_attr_2D_orig; ;		| set depth cue bit
+|   Hidden surf on, check if gb linked to this fb
+mfci3d:	;			;		cjs,go gb_board_inq; ;			| 
+	xorw,s fbindx,acc,y;	;		cjp,neg mfcinogb; ;			| 2d if there is no gb
+	bsetw xf3d,attr_vec;	;		cjp,zer polygon_attr_3D_orig; ;		| 3d if all goes well
+mfcinogb: addw frameptr,DEPTHCUE_FRMOFF,y; ;	;		;			| THIS is necessary functionality to have!
+	IMM;			am->shmemp;	;		;			| 
+	btstw,s dcue,d;		shmem->am;	;		;			| 
+	bclrw xf3d,attr_vec;	;		cjp,zer polygon_attr_2D_orig; ;		| 
+	bsetw depcue,attr_vec;	;		cjp,go polygon_attr_2D_orig; ;		| set depth cue bit
+	
+	
+markerfcirc:
+	;			;		cjp,zer mfcnodc; ;			| jump if dc is off
+	;			;		cjs,~zer mline_dcue; ;			| 
+	rolw 5,color,acc;	;		;		;			| shift color up 5 bits
+	romw 0, polycolorop,acc,0x701f; ;	;		;			| merge new color into polycolorop
+	IMM;			;		;		;			| 
+	movw acc,polycolorop;	;		;		;			| 
+mfcnodc: ;			PPSETPICKMODE->am; ;		;			| 
+	movw d,y;		am->fifo1;	cjp,f1f .;	;			| 
+	movw,s pkon,y;		am->fifo1;	cjp,f1f .;	;			| 
+	;			;		cjp,zer mfcnopk; ;			| 
+	;			PPSETPICKCNT->am; ;		;			|
+	movw d,y ;		am->fifo1;	cjp,f1f .;	;			| 
+	movw pkcnthi,y ;	am->fifo1;	cjp,f1f .;	;			| 
+	movw pkcntlo,y ;	am->fifo1;	cjp,f1f .;	;			| 
+mfcnopk: btstw,s xf3d,attr_vec;	PPSHINIT->am;	;		;			| 
+	sr0w op, temp;		;		cjp,zer mfc2D;	;			| 
+	movw d, y;		am->fifo1;	cjp, f1f .;	;			| Send plhinit command (#19) to pp.
+	andw d, temp, temp;	0xf->am;	;		;			| 
+| PIXOP_NEEDS_DST (op << 1)= (op^(op << 1)) & 0xa
+	movw temp, acc;		;		;		;			| 
+	sl0w acc, acc;		;		;		;			| 
+	xorw temp, acc, acc;	;		;		;			| 
+	andw,s d, acc, acc;	0xa->am;	;		;			| 
+	;			;		cjp, zer mfcnodst; ;			| 
+	;			3->am;		;		;			| SWWPIX
+	;			;		cjp, go mfcropreg; ;			| 
+mfcnodst: ;			1->am;		;		;			| SRWPIX
+mfcropreg: movw d, y;		am->fifo1;	cjp, f1f .;	;			| RopMode
+	movw temp, y;		am->fifo1;	cjp, f1f .;	;			| Op
+	;			;		ldct 6;		;			| 
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| Patt, Mask2, Mask1, Width, Opcnt, Shift, PrimeSrc2
+	;			;		rpct .-1;	;			| loop till send all 7 values to pp
+mfc2D:	andw d,polycolorop,acc;	0x1FE0->am;	;		;			| mask off color bits from polycolorop
+	rolw 11,acc,color;	;		;		;			| rotate color into lower 8 bits
+	movw inptr,y;		am->fpap;	;		;			| location of transformed point -> fpap
+	addw d,xoff,acc;	fpregl->am;	;		;		ap+	| compute dx
+	movw acc,dx;		;		;		;			| 
+	addw d,yoff,acc;	fpregl->am;	;		;		ap+	| compute dy, fpap now points to z value
+	movw acc,dy;		;		;		;			| 
+	movw inptr,acc;		;		;		;			| 
+	andw d,op,tempop;	0x1F->am;	;		;			| mask out op (already in lower 8 bits)
+	add2nw 1,acc;		am->fpdp;	;		;			| address of z0
+	movw radius,y0;		am->am;		;		;			| x0 = radius
+	movw 0,x0;		;		;		;			| y0 = 0
+	sl0w d,acc;		;		;		;			| 2*radius
+	rsubw d,acc,s0;		3->am;		;		;			| s0=3-(2*radius)
+mfcdo:	movw y0,acc;		;		;		;			| do { save x0 for mfcpoint
+	movw x0,temp;		;		;		;			|      save y0 for mfcpoint
+	btstw,s xf3d,attr_vec;	;		ldct mfcpoint2;	;			|      test 2/3D
+	mov2nw 1,I;		;		jsrp,~zer mfcpoint3; ;			|      mcpoint(x0, y0)
+	testw(s0);		;		;		;			| 
+	movw x0,y;		am->am;		;		;			| 
+	incw x0,x0;		;		cjp,~neg mfcelse; ;			|      if (s0 < 0)
+	
+	sl0w d,acc;		;		;		;			| 
+	sl0w acc,acc;		;		;		;			| 
+	addw d,acc,acc;		6->am;		;		;			| 
+	addw s0,acc,s0;		;		cjp,go mfcwhile; ;			|        s0+=4*(x++)+6
+	
+mfcelse: movw y0,temp;		;		;		;			|      else
+	movw d,acc;		;		;		;			|      {
+	btstw,s xf3d,attr_vec;	;		ldct mfcpoint2;	;			|        test 2/3D
+	mov2nw 1,I;		;		jsrp,~zer mfcpoint3; ;			|        mcpoint(y0, x0)
+
+	subw temp,acc,temp;	;		;		;			| 
+	sub2nw 0,y0;		;		;		;			|
+	sl0w temp,temp;		;		;		;			| 
+	sl0w temp,temp;		;		;		;			|
+	addw d,temp,acc;	10->am;		;		;			|        s+=4*((x++)-(y--))+10
+	addw s0,acc,s0;		;		;		;			|      }
+	
+mfcwhile: movw y0,acc;		;		;		;			| } while (y0 <= x0)
+	rsubw,s x0,acc,y;	;		;		;			| 
+	;			;		cjp,neg mfcdo;	;			| 
+	movw x0,acc;		;		crtn,~zer;	;			| 
+	movw y0,temp;		;		;		;			| 
+	btstw,s xf3d,attr_vec;	;		ldct mfcpoint2;	;			| 
+	mov2nw 1,I;		;		jsrp,~zer mfcpoint3; ;			| 
+	;			;		crtn,go;	;			| 
+
+
+|   x0 is in acc, y0 in temp
+mfcpoint2:  
+	;			PPPLGFILL->am;	;		;			| 
+	movw d,y;		am->fifo1;	cjp,f1f .;	;			| send polygon command to PP
+	movw temp,y ;		am->am;		;		;			| d latch = y0
+	addw d,dy,y;		am->fifo1;	cjp,f1f .;	;			| y0
+	rsubw dx,acc,y;		am->fifo1;	cjp,f1f .;	;			| x0
+	addw dx,acc,temp;	;		;		;			| the PP doesn't draw the last pixel so we will fool it
+	incw temp,y;		am->fifo1;	cjp,f1f .;	;			| x1
+	movw color,y;		am->fifo1;	cjp,f1f .;	;			| color
+	movw tempop,y;		am->fifo1;	cjp,f1f .;	;			| op
+	sub2nw,s 0,I;		;		;		;			| I--
+	negw,s d,temp;		;		crtn,zer;	;			| negate y0 and repeat once
+	;			;		cjp,~zer mfcpoint2; ;			| 
+	;			;		crtn,go;	;			| 
+
+
+|   x0 is in acc, y0 in temp
+mfcpoint3: 
+	;			PPPLHSH->am;	;		;			| 3D flat polygons
+	movw d,y;		am->fifo1;	cjp,f1f .;	;			| send polygon command to PP
+	movw temp,y;		am->am;		;		;			| d latch = y0
+	addw d,dy,y;		am->fifo1;	cjp,f1f .;	;			| y0
+	rsubw dx,acc,y;		am->fifo1;	cjp,f1f .;	;			| x0
+	addw dx,acc,temp;	;		;		;			| the PP doesn't draw the last pixel so we will fool it
+	incw temp,y;		am->fifo1;	cjp,f1f .;	;			| x1 
+	movw tempop,y;		am->fifo1;	cjp,f1f .;	;			| op
+	;			fpregl->fifo1;	cjp,f1f .;	;			| zhi from fpregs
+	;			;		cjs,go xfwrzero3; ;			| zlo, dzhi & dzlo
+	movw color,y;		am->fifo1;	cjp,f1f .;	;			| color hi
+	;			;		cjs,go xfwrzero3; ;			| color lo, dchi & dclo
+	sub2nw,s 0,I;		;		;		;			| I--
+	negw,s d,temp;		;		crtn,zer;	;			| negate y0 and repeat once
+	;			;		cjp,~zer mfcpoint3; ;			| if y==0 quit now to avoid drawing this scanline twice
+	;			;		crtn,go;	;			|
+	
+
+
+|   This routine sends some depth cueing and z-buffering values to the painting processor
+markzbdc: movw dz,y;		am->fifo1;	cjp,f1f .;	;			| z1hi, no need to offset z values
+	movw 0,y;		am->fifo1;	cjp,f1f .;	;			| z1lo
+	movw dz,y;		am->fifo1;	cjp,f1f .;	;			| z2hi
+	;			;		cjs,go xfwrzero3; ;			| z2lo, dzhi & dzlo
+markdc:	movw color,y;		am->fifo1;	cjp,f1f .;	;			| chi, either gotten from the context or computed
+	;			;		cjp,go xfwrzero3; ;			| clo, dchi & dclo & return
+
+
+|   this routine will scale what the shmemp points at and leave it in the acc
+|   it expects scalefactor-1 in the brreg
+ptscale: movw 0,acc;		;		push,go;	;			| 
+	addw d,acc,acc;		shmem->am;	rfct;		;			| point' = (scale*point)
+	;			;		crtn,go;	;			| 
+
+|   this routine will scale the 2D point the shmemp points at and leave it in the x0,y0
+|   it expects scalefactor-1 in the brreg
+txpt2:	movw offsety,y0;	;		cjp,neg tx2sc0;	;			| jump if scale factor is 0
+	movw offsetx,x0;	;		push,go;	;			| 
+	addw d,x0,x0;		shmem->am;	;		;		shp+	| 
+	addw d,y0,y0;		shmem->am;	rfct;		;		shp-	| point' = (scale*point)+offset
+	;			;		crtn,go;	;		shp+	| shmemp -> y0
+tx2sc0:	movw offsetx,x0;	;		crtn,go;	;			| 
+
+
+xfwrzero3:
+	movw 0,y;		am->fifo1;	cjp,f1f .;	;			| 
+	movw 0,y;		am->fifo1;	cjp,f1f .;	;			| 
+	movw 0,y;		am->fifo1;	cjp,f1f .;	;			| 
+	;			;		crtn,go;	;			| 
+
+#undef scale		
+#undef polyshadestyle	
+#undef K		
+#undef J		
+#undef I		
+#undef mtype		
+#undef xoff		
+#undef yoff		
+#undef m
+#undef att
+#undef veccmd 		
+#undef shadestyle	
+
+#undef inpt
+#undef tempop		
+#undef outpt
+#undef op 		
+#undef polycolo
+#undef colo
+#undef clipplanes 	
+#undef temp10
+#undef clpplns 	
+#undef temp		
+#undef dx		
+#undef dy		
+#undef x0		
+#undef y0		
+#undef radius
+#undef x1		
+#undef sx		
+#undef s0		
+#undef y1		
+#undef sy		
+#undef recaddr
+#undef loopc		
+#undef pkon		
+
+#undef offsetx		
+#undef offsety		
+
+#undef lastedg		
+#undef pet		
+#undef edgpt
+
+#undef zbdcln
+#undef dz
+
+#undef X1		
+#undef X0		
+
+#undef Z13		
+#undef X03		
+#undef Z03		
+
+#undef FZ		
+#undef FCOLOR		
+#undef SavePts		
+#undef LinePts
+#undef RecAddr
+#undef SavRegs
+#undef EDGETAB		
+#undef POLYGON2	1168	
+#undef POLYGON3	
+
+#undef Z1SCL
+#undef dcue
+#undef mark
+#undef zbuf
+#undef depcue
+#undef xf3d
+#undef flt
+

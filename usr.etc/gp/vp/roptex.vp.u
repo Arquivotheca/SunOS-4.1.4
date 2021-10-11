@@ -1,0 +1,368 @@
+| Copyright (c) 1986 by Sun Microsystems, Inc.
+|  @(#)roptex.vp.u 1.1 94/10/31 SMI
+
+|   Textured area rasterops:  pr_replrop ().
+
+#define LMaskTable	4096	/* vpprom address. */
+#define RMaskTable	4112	/* 4096 + 16 */
+/* Move these two to vp.h and take out of ropnull and ropfb. */
+
+#define colorop	r[16]	/* Initially color and op in PR_ROPTEX1. */
+#define op	r[17]
+#define color	r[18]
+#define ropmode	r[19]
+#define w	r[20]
+#define FBHi	r[21]
+#define prime	r[22]
+#define nodst	r[23]
+#define StripWidth r[24]
+#define TexWidth r[25]
+
+|   Depth, Width, Height, Words, Rows must match SET_TEX.
+#define Depth	r[15]
+#define Width	r[14]
+#define Height	r[13]
+#define Words	r[12]
+#define Rows	r[11]
+
+/* Regs 0 thru 7 identical to ropnull.vp.u so that call can be made to prclip2 there. */
+#define dstx	r[0]
+#define dsty	r[1]
+#define dstwid	r[2]
+#define dstht	r[3]
+#define recx	r[4]
+#define recy	r[5]
+#define recwid	r[6]
+#define recht	r[7]
+
+#define sx	r[8]
+#define sy	r[9]
+#define junk	r[10]
+
+#define shift	r[11]		/* Reuse Rows register. */
+#define addrhi	r[12]		/* Reuse Words register after Words copied to TexWords. Location forced by usage in ropnull.vp.u. */
+#define addrlo	r[13]		/* Reuse Height register after sent thru fifo.  Location forced by usage in ropnull.vp.u. */
+#define Multiplier r[14]	/* Location forced by usage in ropnull.vp.u. */
+#define TexWords r[15]		/* Reuse Depth.  Copy Words in. */
+
+
+#define PWWWRD 2		/* Raster op modes */
+#define PRWWRD 0
+
+
+#define RT1
+#ifdef RT1
+|   Follows code for cg2_rop.c, case 2d.2, memory to cg2.
+|   Do texture in vertical strips maximum width of a strip is width of texture.  PP gets one strip at time.
+|   A strip on the left or the right can be less wide.
+rt1setup: 
+	movw,s sx, acc;		;		;		;			| (sx mod Width).
+	addw,s Width, acc, acc; ;		cjp, neg .;	;			| sx might be negative.
+	subw,s Width, acc, acc; ;		cjp, ~neg .;	;			| 
+	addw Width, acc, acc;	;		;		;			| 
+	addw Width, acc, sx;	am->am;		cjs, go rt1stripw; ;			| cjs Calculate strip width.
+	movw,s sy, acc;		;		;		;			| (sy mod Height).
+	addw,s Height, acc, acc; ;		cjp, neg .;	;			| sy might be negative.
+	subw,s Height, acc, acc; ;		cjp, ~neg .;	;			| 
+	addw Height, acc, acc;	;		;		;			| 
+	addw Height, acc, sy;	;		;		;			| 
+
+	movw PPROPTEX1, acc;	=wrfifo->brreg;	;		;			| 
+	IMM;			am->fifo1;	cjs, f1f;	;			| pp command
+	movw dstx, acc;		;		;		;			| dst.pos.x += dbd->cgpr_offset.x
+	addw recx, acc, recx;	;		;		;			| Now have screen coord recx.
+	movw dsty, acc;		;		;		;			| dst.pos.y += dbd->cgpr_offset.y
+	addw recy, acc, recy;	;		cjs, go rt1w;	;			| Calculate prime, w, and shift.
+	rolw 11, colorop, color; ;		;		;			| color= PIX_COLOR (op) = (op >> 5) & 0xff
+	andw,s d, color, color;	0xff->am;	;		;			| 
+	sr0w colorop, op;	;		cjp, ~zer .+2;	;			| op= (op >> 1) & 0xf
+	movw d, color;		0xff->am;	;		;			| if (color == 0) color= -1
+	andw d, op, op;		0xf->am;	;		;			| 
+	movw op, acc;		;		;		;			| PIXOP_NEEDS_DST (op<<1)= (op^(op<<1)) &0xa
+	sl0w acc, acc;		;		;		;			| 
+	xorw op, acc, acc;	=wrfifo->brreg;	;		;			| 
+	andw,s d, acc, acc;	0xa->am;	;		;			| ropmode depends on nodst
+	movw d, ropmode;	PWWWRD->am;	;		;			| PWWWRD->am
+	movw 0, nodst;		;		cjp, ~zer rt1rop; ;			| nodst= 0
+	incw 0, nodst;		;		;		;			| nodst= 1
+	movw d, ropmode;	PRWWRD->am;	;		;			| PRWWRD->am
+rt1rop:	movw d, acc;		PWWWRD->am;	cjs, go;	;			| PWWWRD->fifo1.  First of pp ropreg values.
+| cg2_setfunction (fb, CG2_ALLROP, op)
+	movw op, y;		am->fifo1;	cjp, f1f .;	;			| op -> fifo1 
+	movw 0, acc;		am->fifo1;	cjs, f1f;	;			| RRPattern= 0
+	;			;		cjs, go rt1mask; ;			| Set right and left mask and send to pp.
+	movw w, y;		am->fifo1;	cjp, f1f .;	;			| cg2_setwidth (fb, CG2_ALLROP, w, ...)
+	movw w, y;		am->fifo1;	cjp, f1f .;	;			| cg2_setwidth (,,, w)
+	movw shift, y;		am->fifo1;	cjp, f1f .;	;			| RRShift
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| Dummy src2
+|   End of pp ropreg subroutine fifo values.
+	incw Words, y;		am->fifo1;	cjp, f1f .;	;			| texture width in Words.
+	movw Words, TexWords;	;		;		;			| Copy Words before it is clobbered.
+	movw Height, y;		am->fifo1;	cjp, f1f .;	;			| texture height.
+	movw ropmode, y;	am->fifo1;	cjp, f1f .;	;			| 
+	movw recht, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw nodst, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw color, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw w, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw op, y;		am->fifo1;	cjp, f1f .;	;			| DEBUG
+|   Loop back to here.
+rt1strip: movw prime, y;	am->fifo1;	cjp, f1f .;	;			| 
+	incw TexWords, acc;	;		;		;			| src= (Words + 1) * sy + (sx >> 4)
+	movw recx, junk;	;		;		;			| move recx out of the way of multiply.
+	movw sy, r[2];		;		cjs, go multiply; ;			| 
+	rolw 12, sx, acc;	;		;		;			| 
+	andw d, acc, acc;	0xfff->am;	;		;			| 
+	addw r[0], acc, y;	am->fifo1;	cjp, f1f .;	;			| Src address.
+	movw junk, recx;	;		cjs, go fbaddr;	;			| recx was saved in junk before multiply
+	movw acc, FBHi;		;		;		;			| 
+	movw recy, Multiplier;	;		cjs, go MulSWWid;;			| by= cg2_ropwordaddr (fb,0,recx,recy)
+	rolw 13, recx, acc;	;		;		;			| 
+	andw d, acc, acc;	0x1fff->am;	;		;			| recx >> 3 (byte addressing)
+	addw addrlo, acc, y;	am->fifo1;	cjp, f1f .;	;			| physical fb hi addr dest. 
+	addcw d, FBHi, acc;	0x20->am;	;		;			| RopFB->am
+	addw addrhi, acc, y;	am->fifo1;	cjp, f1f .;	;			| physical fb lo addr dest. 
+|   Compute new values for next pp strip or exit from here if all strips done.
+	movw StripWidth, acc;	;		;		;			| 
+	addw recx, acc, recx;	;		;		;			| recx += StripWidth
+	subw,s recwid, acc, recwid; ;		;		;			| recwid = StripWidth - recwid.
+	negw recwid, recwid;	;		cjp, ~neg rt1end0; ;			| recwid = -recwid. (recwid - StripWidth)
+	addw sx, acc, sx;	am->am;		;		;			| sx += StripWidth
+	rsubw,s d, TexWidth, y;	;		;		;			| if (sx >= TexWidth)
+	movw TexWidth, acc;	;		cjp, neg .+2;	;			| 
+	rsubw sx, acc, sx;	am->am;		;		;			| sx -= TexWidth
+	;			;		cjs, go rt1stripw; ;			| 
+	;			;		cjs, go rt1w;	;			| Calculate prime, w, and shift.
+	;			;		cjs, go rt1mask; ;			| Set right and left mask and send to pp.
+	movw shift, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw w, y;		am->fifo1;	cjp, f1f .;	;			| Send w (w, RRWidth, RROpCount)
+	;			;		cjp, go rt1strip; ;			| 
+
+
+rt1end0: compw 0, y;		am->fifo1;	cjp, f1f .;	;			| Send pp end of cmd flag.
+rt1end:addw d, cmdptr, cmdptr;	16->am;		;		;			| 16:Cmd,fb,op,2 rects,sd,sw,sh,sx,sy.
+	;			;		jmap getcmd;	;			| 
+|   if adding 16 collapse two previous lines.
+
+
+|   Calculate strip width.  Expects sx in the d latch.
+rt1stripw: subw d, TexWidth, StripWidth; ;	;		;			| StripWidth= TexWidth - sx
+	movw recwid, acc;	;		;		;			| 
+	subw,s StripWidth, acc, y; ;		;		;			| if (StripWidth > recwid) StripWidth=recwid
+	;			;		crtn, ~neg;	;			| 
+	movw acc, StripWidth;	;		crtn, go;	;			| 
+	
+
+rt1w:
+#define ww acc
+#define skew shift
+	andw d, recx, ww;	0xf->am;	;		;			| w= cg2_prskew (dst.pos.x) == recx & 15
+	andw d, sx, skew;	;		;		;			| skew= mprs_skew (sx + (src offset x == 0))
+	subw,s skew, ww, shift; ;		;		;			| prime= (skew >= w). Shift= (w-skew) & 15
+#undef skew
+	incw 0, prime;		;		cjp, zer .+3;	;			| 
+	;			;		cjp, neg .+2;	;			| 
+	movw 0, prime;		;		;		;			| 
+	subw d, ww, acc;	1->am;		;		;			| w= (dst.size.x + w - 1) >> 4.
+#undef ww
+	addw StripWidth, acc, acc; ;		;		;			| First Strip (use StripWidth as dst.size.x)
+	rolw 12, acc, w;	;		;		;			| >> 4
+	andw d, w, w;		0xfff->am;	;		;			| 
+	andw d, shift, shift;	0xf->am;	;		;			| 
+	addw d, shift, shift;	0x100->am;	crtn, go;	;			| 
+
+
+rt1mask: subw d, StripWidth, acc; 1->am;	;		;			| RRMask2= mrc_rmasktable []
+	addw recx, acc, acc;	;		;		;			| [(dst.pos.x + dst.size.x - 1) & 0xF]
+	andw d, acc, acc;	0xf->am;	;		;			| 
+	addw d, acc, acc;	RMaskTable->am;	;		;			| 
+	movw acc, y;		am->vppromp;	;		;			| 
+	;			;		;		;			| Wait for vpprom?
+	;			;		;		;			| Wait for vpprom?
+	movw recx, acc;		vpprom->fifo1;	cjp, f1f .;	;			| RRMask2
+	andw d, acc, acc;	0xf->am;	;		;			| RRMask1= mrc_lmasktable [dst.pos.x & 0xF]
+	addw d, acc, acc;	LMaskTable->am;	;		;			| 
+	movw acc, y;		am->vppromp;	;		;			| 
+	;			;		;		;			| Wait for vpprom?
+	;			;		cjp, f1f .;	;			| Wait for vpprom?
+	;			vpprom->fifo1;	crtn, go;	;			| RRMask1
+
+
+#endif RT1
+
+#undef ropmode
+#undef Multiplier
+#undef shift
+#undef junk
+
+
+|   PR_ROP_TEX:
+|   Can't use r[0] until later parts of PR_ROPTEX.
+|   #define cmd	r[0]
+
+
+|	subw,s d, fbindx, y;	shmem->am;	jmap PR_ROP_TEX; ;			|
+PR_ROP_TEX:movw d, acc;		shmem->am;	cjs, ~zer getfbaddr; ;		shp+	| if fb index has changed get new address.
+	movw PPMASK, acc;	=wrfifo->brreg;	;		;			| 
+	IMM;			am->fifo1;	cjs, f1f;	;			| 
+	andw d, cmd, acc;	0xff->am;	cjs, go;	;			| 
+	movw d, colorop;	shmem->am;	cjs, go roprect; ;		shp+	| dst pixrect and region
+	;			;		cjs, go prclip2; ;			| prclip2 mustn't alter brreg.
+	;			;		cjs, go stprep;	;			| get texture size and calcs wordwidth
+	negw,s recwid, y;	;		;		;			| if (dst.size.x <= 0) || (y <= 0) return
+	negw,s recht, y;	;		cjp, ~neg prrtzip; ;			| 
+	;			;		cjp, neg prrtprep; ;			| 
+prrtzip: movw Rows, r[2];	;		;		;			| "consume" texture words from cmd buffer.
+	incw Words, acc;	;		cjs, go multiply; ;			| Words is less one due to push, rfct.
+	movw r[0], acc;		;		;		;			| 
+	addw cmdptr, acc, cmdptr; ;		cjp, go prrtend; ;			| 
+
+prrtprep: movw d, acc;		PPLDTEX->am;	;		;			| Assumes prclip2 hasn't altered brreg.
+	movw acc, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw Width, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw Height, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw Height, Rows;	;		;		;			| 
+	movw Depth, y;		am->fifo1;	cjp, f1f .;	;			| 
+
+prrtld:	sub2nw,s 0, Rows, Rows;	;		push, go;	;			| 
+	;			shmem->fifo1;	cjp, f1f .;	;			| 
+   	incw cmdptr, cmdptr;	;		rfct;		;		shp+	| 
+   	movw Words, y;		am->brreg;	cjp, ~zer prrtld; ;			| 
+
+	movw d, sx;		shmem->am;	;		;		shp+	| 
+	movw d, sy;		shmem->am;	;		;		shp+	| 
+	;			TEX2DPPFRM_GL->shmemp; ;	;			| Set PP tex block ptr to PIXRECT type.
+	movw Width, acc;	0xffff->shmem;	;		;			| Always load texture if -1 is block ptr.
+
+#ifdef RT1
+	btstw,s 0, Depth;	;		;		;			| 
+	movw acc, TexWidth;	;		cjp, ~zer rt1setup; ;			| 
+#endif RT1
+
+rt8:	;			=wrfifo->brreg;	;		;			| 
+	movw d, acc;		PPSTCLIP->am;	cjs, go;	;			| LATER make loading 1 clip rect a routine?
+	incw 0, y;		am->fifo1;	cjp, f1f .;	;			| 1 clip rect.
+	movw dstx, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw dsty, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw dstwid, y;		am->fifo1;	cjp, f1f .;	;			| send dst pixrect x size
+	movw dstht, y;		am->fifo1;	cjp, f1f .;	;			| send dst pixrect y size
+	movw d, acc;		PPSHINIT->am;	cjs, go;	;			| 
+	movw dstx, y;		am->am;		;		;			| Make x1
+	addw d, recx, recx;	;		;		;			| 
+	sr0w colorop, op;	;		;		;			| 
+	andw d, op, op;		0xf->am;	;		;			| 
+| PIXOP_NEEDS_DST (op << 1)= (op^(op << 1)) & 0xa
+	movw op, acc;		;		;		;			| 
+	sl0w acc, acc;		;		;		;			| 
+	xorw op, acc, acc;	;		;		;			| 
+	andw,s d, acc, acc;	0xa->am;	;		;			| 
+	;			;		cjp, zer prrtnodst; ;			| 
+	;			3->am;		;		;			| SWWPIX
+	;			;		cjp, go prrtropreg; ;			| 
+prrtnodst: ;			1->am;		;		;			| SRWPIX
+prrtropreg: movw d, y;		am->fifo1;	cjp, f1f .;	;			| RopMode
+	movw dsty, y;		am->am;		;		;			| Make y1
+	addw d, recy, recy;	;		;		;			| 
+	movw op, y;		am->fifo1;	cjp, f1f .;	;			| Op
+	movw recx, y;		am->am;		;		;			| Make x2
+	addw d, recwid, recwid;	;		;		;			| 
+	movw d, acc;		0->am;		cjs, go;	;			| Patt
+	movw d, acc;		0->am;		cjs, go;	;			| Mask2
+	movw d, acc;		0->am;		cjs, go;	;			| Mask1
+	movw d, acc;		0->am;		cjs, go;	;			| Width
+	movw d, acc;		0->am;		cjs, go;	;			| OpCnt
+	movw d, acc;		0->am;		cjs, go;	;			| Shift
+	movw d, acc;		0->am;		cjs, go;	;			| PrimeSrc2
+
+	btstw,s 0, Depth;	;		;		;			| 
+	;			;		cjp, zer prrtpp8; ;			| 
+
+	rolw 11, colorop, acc;	;		;		;			| color= PIX_COLOR(op) = (op>>5) & 0xff
+	andw,s d, acc, color;	0x7ff->am;	;		;			| if (color == 0) color= all ones.
+	;			;		cjp, ~zer .+2;	;			| 
+	movw d, color;		0xffff->am;	;		;			| 
+	andw d, colorop, op;	0x1f->am;	;		;			| 
+prrtpp1:sub2nw,s 0, recht, recht; =wrfifo->brreg; ;		;			| 
+	;			;		cjp, neg prrtend; ;			| 
+	movw d, acc;		PPPLGTEX1->am;	cjs, go;	;			| 
+	movw recy, y;		am->fifo1;	cjp, f1f .;	;			| 
+	incw recy, recy;	;		;		;			| 
+	movw recx, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw recwid, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw color, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw 0, y;		am->fifo1;	cjp, f1f .;	;			| color0= 0
+	movw op, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw sx, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw sy, sy;		am->fifo1;	cjp, f1f .;	;			| 
+	incw sy, sy;		;		cjp, go prrtpp1; ;			| 
+
+#ifdef PRRT8LOOP
+prrtpp8:movw sx, acc;		;		;		;			| 
+	addw recx, acc, sx;	;		;		;			| 
+	movw sy, acc;		;		;		;			| 
+	addw recy, acc, sy;	=wrfifo->brreg;	;		;			| 
+prrtpp8a: sub2nw,s 0, recht, recht; ;		;		;			| 
+	;			;		cjp, zer prrtend; ;			| 
+	movw d, acc;		PPPLGTEX8->am;	cjs, go;	;			| 
+	movw recy, y;		am->fifo1;	cjp, f1f .;	;			| 
+	incw recy, recy;	;		;		;			| 
+	movw recx, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw recwid, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw colorop, acc;	;		;		;			| 
+	sr0w acc, acc;		;		;		;			| op= (op >> 1) & 0xf
+	andw d, acc, acc;	0xf->am;	cjs, go;	;			| 
+	movw sx, acc;		am->fifo1;	cjp, f1f .;	;			| 
+	movw sy, acc;		am->fifo1;	cjp, f1f .;	;			| 
+	incw sy, sy;		;		cjp, go prrtpp8a; ;			| 
+#else
+prrtpp8:;			=wrfifo->brreg;	;		;			| 
+	movw d, acc;		PPROPTEX8->am;	cjs, go;	;			| PP command.
+	movw recx, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw recy, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw recwid, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw recht, y;		am->fifo1;	cjp, f1f .;	;			| 
+	movw colorop, y;	am->fifo1;	cjp, f1f .;	;			| 
+	movw sx, acc;		am->fifo1;	cjp, f1f .;	;			| 
+	movw sy, acc;		am->fifo1;	cjp, f1f .;	;			| 
+#endif PRRT8LOOP
+
+prrtend: add2nw 4, cmdptr, cmdptr; ;		jmap getcmd;	;			| 16:Cmd,fb,op,2 rects,sd,sw,sh,sx,sy.
+
+
+#ifdef GPPLUS		/* need a stprep routine on this bank for polygon commands */
+|   stprep does not adjust cmdptr,which must account for 3 items (d,w,h) taken from shared memory.
+stprep:	movw d,Depth;		shmem->am;	;		;		shp+	| 
+	movw d,Width;		shmem->am;	;		;		shp+	| 
+	movw d,Height;		shmem->am;	;		;		shp+	| 
+	btstw,s 3,Depth;	=stex8->brreg;	;		;			| 
+	andw,s d,Width,y;	0xf->am;	cjp,~zer;	;			| Is Width a multiple of 16?
+	rolw 12,Width,Words;	0xfff->am;	;		;			| Words= Width >> 4
+	andw d,Words,Words;	am->brreg;	cjp,~zer .+2;	;			| 
+	sub2nw 0,Words;		am->brreg;	;		;			| If (Width not a multiple of 16) Words++
+	movw Height,Rows;	TempFPAddr->fpdp; crtn,go;	;			| Really decrement Words for loop.
+stex8:	sub2nw 0,Width,Words;	;		;		;			| 
+	sr0w Words,Words;	am->brreg;	;		;			| Packed 2 per 16 bit word.
+	movw Height,Rows;	TempFPAddr->fpdp; crtn,go;	;			| TempFPAddr to avoid matrices.
+#endif GPPLUS
+
+#undef colorop
+#undef op
+#undef color
+
+#undef Depth
+#undef Width
+#undef Height
+#undef Words
+#undef Rows
+#undef dstx
+#undef dsty
+#undef dstwid
+#undef dstht
+#undef recx
+#undef recy
+#undef recwid
+#undef recht
+#undef sx
+#undef sy
+
+#undef PWWWRD 
+#undef PRWWRD 

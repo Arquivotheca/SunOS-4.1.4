@@ -1,0 +1,441 @@
+| "@(#)texvec.pp.u 1.1 94/10/31"
+
+| Copyright 1986 by Sun Microsystems, Inc.
+| Written by Stuart Levy
+
+ 
+
+|   Octant subroutine:  chooses octant (one of four) to draw in
+|   and generates the points.
+|   Expects the following registers to be loaded:
+|   vwrdreg:		color.
+|   vctlreg:		byte mode.
+|   acc:		initial error.
+|   Note: r[0], r[1], and r[2] had to be moved to avoid conflict when multiplying.  Error moved temporarily (setpattern).
+|   r[0], vloareg:	low address. 
+|   r[1], vhiareg:	high address.
+|   r[2]:		number of pixels to draw.
+|   r[3]:		minax (added to error if error is negative).
+|   r[4]:		majax (added to error if error is positive).
+|   r[5]:		reflect (determines which octant:  0 => 0, 1 => 1, 2 => 7, 3 => 6).
+|   r[7]:		options (startpt, endpt, balanced, givenpattern; specified by the user)
+|   r[8]:		stoff (starting offset, specified by the user)
+|   r[9]:		cloff (clipping offset, used by the program)  
+|   r[15]:		numsegs (number of segments, specified by the user)
+|   r[24]:		right (says whether vector is on the right or left side)
+
+|   The options field is broken down as follows:
+|  	 bit 15 - startpt	bit 14 - endpt		bit 13 - balancing	bit 12 - givenpattern
+|  	 bit 11 - fat		bit 10 - poly		bit 9 - mvlist		bit 8 - righthalf
+|   	 bit 7 - close		bit 6 - cliprt		bit 5 - solid		bit 4 - pixrect
+|   	 bit 3 - nosetup	bit 2 - clipbit		bit 1 - firstvec
+
+#define pixrect		4
+#define cliprt		6
+#define right		8
+#define poly		10
+#define fat		11
+#define givenpat	12
+#define endpt		14
+#define startpt		15
+
+#define err acc
+#define addrlo 		r[0]	
+#define addrhi 		r[1]
+#define cnt		r[2]
+#define minax 		r[3]
+#define majax 		r[4]
+#define reflect		r[5]
+#define segaddr 	r[6]
+#define options		r[7]
+#define stoff		r[8]
+#define cloff		r[9]
+#define patln		r[10]
+#define offset		r[11]
+#define seg		r[14]
+#define numsegs		r[15]
+
+#define savtex		0x120
+#define savnumsegs	0x122
+#define savsegaddr	0x130
+#define savoldpatln	0x131
+#define savfatoff	0x132
+#define savpolyoff	0x133
+
+
+| The count is 0 based.  Therefore a count of zero will draw 1 pixel.  This differs from the c-code, where the count
+| is 1 based.  If the count is zero, and enters the main loop, it will draw 1 pixel, and then the rfct will detect
+| that the counter is 0, and will not loop, but will jump to the endpoint routine.   
+toctant: btstw,s fat,options;	savtex->scrmemp; ;				| Test if fat (no < correction nec).
+	movw d,stoff;		scrmem->am;	cjp, ~zer toctfat;	scrmp+	| Restore stoff, jump if fat vector..
+	movw d,patln;		scrmem->am;	;			scrmp+	| Restore patln. 
+	btstw,s pixrect,options; =toctltst->brreg; ;				| Check if called from pixrects.
+	movw d,numsegs;		scrmem->am;	cjp, zer toctxf;	scrmp+	| Restore numsegs. Jump if not pixrect.
+	movw d,segaddr;		0x150->am;	cjp, go;			| Store address of xform pattern.
+toctxf:	movw d,segaddr;		0x600->am;	;				| Store address of pixrect pattern.
+toctltst: btstw,s right,options; ;		;				| Test if should write pattern backwards.
+	;			;		cjp, ~zer tocta;		| Write in pattern reversed if on left side.
+toctlft: addw d,numsegs,segaddr; ;		;				| LEFT SIDE. 
+	decw segaddr;		am->scrmemp;	;				| segaddr += numsegs - 1.
+	btstw,s startpt,options; ;		;				| Swapping start & end pts if on left.
+	btstw,s endpt,options;	;		cjp, zer tlftns;		| Jump if no startpoint.
+	bsetw endpt,options;	;		cjp, go tlftb1;			| Set endpoint, jump to next bit.
+tlftns:	bclrw endpt,options;	;		;				| Clear endpoint field.
+tlftb1:	bclrw startpt,options;	;		cjp, zer tocta;			| Clear startpoint.
+	bsetw startpt,options;	;		;				| Set startpoint.
+tocta:	btstw,s poly,options;	savpolyoff->scrmemp; ;				| Test if polyline.
+	;			;		cjp, zer toctnp;		| Jump if not polyline
+	movw d,stoff;		scrmem->am;	cjp, go toctang;		| stoff = polyoff.
+toctnp:	;			savoldpatln->scrmemp; ;				| Is not a polyline.
+	movw patln,y;		am->scrmem;	;				| oldpatln = patln.
+toctang: subw,s d,reflect,y;	0x4->am;	;				| Test if hor or vert by testing reflect <= 3.
+	btstw,s givenpat,options; ;		cjp, ~neg toctoff;		| Test givenpattern field.
+toctset: btstw,s pixrect,options; ;		cjs, zer setinit;		| Call setpat if necessary.
+toctoff: ;			savfatoff->scrmemp; ;				| 
+	movw stoff,y;		am->scrmem;	cjp, go offinit;		| tex->fat_off = stoff.
+toctdrw: btstw,s endpt,options;	=toct0176->am;	;				| Test endpoint. Don't touch label!!
+	addw,s d,r[5],y;	am->brreg;	cjp, zer toctc;			| Step on reflect (not needed).
+	btstw,s cliprt,options;	;		;				| Draw endpt if (endpt && !cliprt).
+	btstw,s startpt,options; ;		cjp, ~zer;			| 
+	decws r[2];		;		;				| Decrement count if endpoint needed.
+toctc:	btstw,s startpt,options; ;		cjp, ~neg;			| Choose octant on reflect if count >= 0.
+	btstw,s endpt,options;	;		cjp, go toctend;		| Draw endpoint if count was 1.
+
+toct0176: movw r[2],y;		am->brreg;	cjp, go toct0;			| Get ready to ld cntr.
+	movw r[2],y;		am->brreg;	cjp, go toct1;			| Get ready to ld cntr. (dx swapped w/ dy).
+	movw r[2],y;		am->brreg;	cjp, go toct7;			| Get ready to ld cntr.
+	movw r[2],y;		am->brreg;	cjp, go toct6;			| Get ready to ld cntr. (dx swapped w/ dy).
+	movw r[2],y;		am->brreg;	cjp, go toctv;			| Vertical.
+	movw r[2],y;		am->brreg;	cjp, go tocth;			| Horizontal.
+	
+|   Toctfat is reached for fat vectors, after the first one is drawn, and therefore no angle correction is necessary. 
+|   Offset calculation is still necessary because of clipping.   This makes the fucker rip!!!
+toctfat: ;			savsegaddr->scrmemp; ;				| MAKE sure initial segaddr right for all vectors!!
+	movw d,segaddr;		scrmem->am;	;				| Restore segaddr. 
+	;			savoldpatln->scrmemp; ;				| 
+	movw d,patln;		scrmem->am;	;			scrmp+	| patln = oldpatln.
+	movw d,stoff;		scrmem->am;	;				| stoff = tex->fat_off.
+	;			savnumsegs->scrmemp; ;				| 
+	movw d,numsegs;		scrmem->am;	cjp, go toctoff;		| Restore numsegs & jump to offset calc.
+
+|   testing (-acc) < 0 is equivalent to testing (acc) > 0.
+|   Main vector drawing loop.  Octant 0.
+
+toct0:	btstw,s right,options;	;		cjp, ~zer toct0st;		| Jump if should draw startpoint
+toct0a:	movw seg,y;		am->am;		cjp, zer toct0l;		| 
+	btstw,s 0,seg;		=tnegerr0->brreg; push, go;			| Set cond. code, ld cntr, push loop.
+tvloop0: testw (acc);		;		cjp, zer tnwrt0;		| Skip over write if not needed.
+	testw (acc);		;		cjp, ~vir .;		vmewr	| if err < 0 goto negerr0.
+tnwrt0:	addw minax,acc,acc;	IncXY->am;	cjp, ~neg;			| Jump if error is negative, update error.
+	incw,s addrlo,addrlo;	am->vloareg;	;				| Increment x.
+tnwrt0a: sub2nw,s 0,offset;	;		cjp, ~cry tncry0;		| Jump if no carry was generated.
+	incw addrhi,addrhi;	am->vhiareg;	;				| Incrememt high order address
+tncry0:	movw seg,y;		am->am;		cjp, zer newseg0;		| Jump if need to fetch new segment.
+	btstw,s 0,seg;		;		rfct;				| Top of loop if count != 0.
+	btstw,s endpt,options;	;		cjp, go toctend;		| Test endpoint.
+newseg0: subw,s d,numsegs,y;	;		;				| Compute (numsegs - seg).
+	movw d,offset;		scrmem->am;	cjp, zer firseg0;		| Load new pattern length, jump if need first seg.
+	incw seg,seg;		am->am;		;				| Increment segment count.
+	btstw,s 0,seg;		;		rfct;			scrmp+	| Increment pointer for fetching next segment.
+	btstw,s endpt,options;	;		cjp, go toctend;		| Test endpt field.
+firseg0: movw segaddr,y ;	am->scrmemp;	;				| Set new segment address.
+	movw d,offset;		scrmem->am;	;				| 
+	movw,s d,seg;		0x1->am;	rfct;			scrmp+	| Note: This is same as btstw 0,seg!
+	btstw,s endpt,options;	;		cjp, go toctend;		| Test endpt field.
+
+tnegerr0: addw,s d,addrlo,addrlo; am->vloareg;	;				| Error was negative. 
+	addw majax,acc,acc;	;		;				| 
+	sub2nw,s 0,offset;	;		cjp, ~cry tncry0;		| 
+	incw addrhi,addrhi;	am->vhiareg;	cjp, go tncry0;			| 
+	
+toct0l:	btstw,s 0,seg;		=tnegerr0->brreg; push, go;			| LEFT SIDE
+	subw d,segaddr,y;	am->scrmemp;	;				| 
+	testw (acc);		;		cjp, ~zer tnwrt0;		| 
+	;			;		cjp, ~vir .;		vmewr	| scrmemp=[(segaddr+numsegs-1)-seg]
+	addw minax,acc,acc;	IncXY->am;	cjp, ~neg;			| 
+	incw,s addrlo,addrlo;	am->vloareg;	cjp, go tnwrt0a;		| 
+
+toct0st: testw (cloff);		;		;				| Draw if (startpt && cloff==0).
+	btstw,s right,options;	;		cjp, ~zer toct0a;		| 
+	mov2nw 1,y;		am->brreg;	cjp, ~vir .;		vmewr	| Draw startpoint.
+	;			=tnegerr0->brreg; push, go;			| Put next address on stack.
+	testw (acc);		;		rpct tnwrt0;			| Jump to change err and addresses.
+toct0rt: decws r[2];		am->brreg;	;				| Reload counter & pop stack.
+toct0ra: btstw,s right,options;	;		cjpp, ~neg toct0a;		| Finish tex vector if count >= 0
+	btstw,s endpt,options;	;		cjpp, go toctend;		| Go to endpoint routine.
+
+
+toct1:	btstw,s right,options;	;		cjp, ~zer toct1st;		| Jump if should draw startpoint
+toct1a:	movw seg,y;		am->am;		cjp, zer toct1l;		| 
+	btstw,s 0,seg;		=tnegerr1->brreg; push, go;			| Set cond. code, ld cntr, push loop.
+tvloop1: testw (acc);		;		cjp, zer tnwrt1;		| Skip over write if not needed.
+	testw (acc);		;		cjp, ~vir .;		vmewr	| if err < 0 goto negerr1.
+tnwrt1:	addw minax,acc,acc;	;		cjp, ~neg;			| Jump if error is negative, update error.
+	addw,s d,addrlo,addrlo;	SWidth->am;	;				| Increment y.
+	movw addrlo,y;		am->vloareg;	cjp, ~cry tncry1;		| Jump if no carry was generated.
+	incw addrhi,addrhi;	am->vhiareg;	;				| Incrememt high order address
+tncry1:	sub2nw,s 0,offset;	;		;				| Decrement segment count.
+	movw seg,y;		am->am;		cjp, zer newseg1;		| Jump if need to fetch new segment.
+	btstw,s 0,seg;		;		rfct;				| Top of loop if count != 0.
+	btstw,s endpt,options;	;		cjp, go toctend;		| Test endpoint.
+newseg1: subw,s d,numsegs,y;	;		;				| Compute (numsegs - seg).
+	movw d,offset;		scrmem->am;	cjp, zer firseg1;		| Load new pattern length, jump if need first seg.
+	incw seg,seg;		am->am;		;				| Increment segment count.
+	btstw,s 0,seg;		;		rfct;			scrmp+	| Increment pointer for fetching next segment.
+	btstw,s endpt,options;	;		cjp, go toctend;		| Test endpt field.
+firseg1: movw segaddr,y ;	am->scrmemp;	;				| Set new segment address.
+	movw d,offset;		scrmem->am;	;				| 
+	movw,s d,seg;		0x1->am;	rfct;			scrmp+	| Note: This is same as btstw 0,seg!
+	btstw,s endpt,options;	;		cjp, go toctend;		| Test endpt field.
+
+tnegerr1: addw,s d,addrlo,addrlo; IncXY->am;	;				| Error was negative. 
+	movw addrlo,y;		am->vloareg;	;				| 
+	addw majax,acc,acc;	;		cjp, ~cry tncry1;		| 
+	incw addrhi,addrhi;	am->vhiareg;	cjp, go tncry1;			| 
+	
+toct1l:	btstw,s 0,seg;		=tnegerr1->brreg; push, go;			| LEFT SIDE
+	subw d,segaddr,y;	am->scrmemp;	;				| 
+	testw (acc);		;		cjp, ~zer tnwrt1;		| 
+	;			;		cjp, ~vir .;		vmewr	| 
+	addw minax,acc,acc;	;		cjp, ~neg;			| 
+	addw,s d,addrlo,addrlo;	SWidth->am;	;				| Different from octant 0 !!
+	movw addrlo,y;		am->vloareg;	cjp, ~cry tncry1;		| 
+	incw addrhi,addrhi;	am->vhiareg;	cjp, go tncry1;			| 
+
+toct1st: testw (cloff);		;		;				| Draw if (startpt && cloff==0).
+	btstw,s right,options;	;		cjp, ~zer toct1a;		| 
+	mov2nw 1,y;		am->brreg;	cjp, ~vir .;		vmewr	| Draw startpoint.
+	;			=tnegerr1->brreg; push, go;			| Put next address on stack.
+	testw (acc);		;		rpct tnwrt1;			| Jump to change err and addresses.
+toct1rt: decws r[2];		am->brreg;	;				| Reload counter & pop stack.
+toct1ra: btstw,s right,options;	;		cjpp, ~neg toct1a;		| Finish tex vector if count >= 0.
+	btstw,s endpt,options;	;		cjpp, go toctend;		| Go to endpoint routine.
+
+
+toct7:	btstw,s right,options;	;		cjp, ~zer toct7st;		| Jump if should draw startpoint
+toct7a:	movw seg,y;		am->am;		cjp, zer toct7l;		| 
+	btstw,s 0,seg;		=tnegerr7->brreg; push, go;			| Set cond. code, ld cntr, push loop.
+tvloop7: testw (acc);		;		cjp, zer tnwrt7;		| Skip over write if not needed.
+	testw (acc);		;		cjp, ~vir .;		vmewr	| if err < 0 goto negerr7.
+tnwrt7:	addw minax,acc,acc;	IncXDecY->am;	cjp, ~neg;			| Jump if error is negative, update error.
+	incw,s addrlo,addrlo;	am->vloareg;	;				| Increment y.
+	sub2nw,s 0,offset;	;		cjp, ~cry tncry7;		| Jump if no carry was generated.
+	incw addrhi,addrhi;	am->vhiareg;	;				| Incrememt high order address
+tncry7:	movw seg,y;		am->am;		cjp, zer newseg7;		| Jump if need to fetch new segment.
+	btstw,s 0,seg;		;		rfct;				| Top of loop if count != 0.
+	btstw,s endpt,options;	;		cjp, go toctend;		| Test endpoint.
+newseg7: subw,s d,numsegs,y;	;		;				| Compute (numsegs - seg).
+	movw d,offset;		scrmem->am;	cjp, zer firseg7;		| Load new pattern length, jump if need first seg.
+	incw seg,seg;		am->am;		;				| Increment segment count.
+	btstw,s 0,seg;		;		rfct;			scrmp+	| Increment pointer for fetching next segment.
+	btstw,s endpt,options;	;		cjp, go toctend;		| Test endpt field.
+firseg7: movw segaddr,y;	am->scrmemp;	;				| Set new segment address.
+	movw d,offset;		scrmem->am;	;				| 
+	movw,s d,seg;		0x1->am;	rfct;			scrmp+	| Note: This is same as btstw 0,seg!
+	btstw,s endpt,options;	;		cjp, go toctend;		| Test endpt field.
+
+tnegerr7: addw,s d,addrlo,addrlo; am->vloareg;	;				| Error was negative. 
+	addw majax,acc,acc;	;		;				| 
+	sub2nw,s 0,offset;	;		cjp, cry tncry7;		|
+	decw addrhi,addrhi;	am->vhiareg;	cjp, go tncry7;			| 
+	
+toct7l:	btstw,s 0,seg;		=tnegerr7->brreg; push, go;			| LEFT SIDE
+	subw d,segaddr,y;	am->scrmemp;	;				| 
+	testw (acc);		;		cjp, ~zer tnwrt7;		| 
+	;			;		cjp, ~vir .;		vmewr	| 
+	addw minax,acc,acc;	IncXDecY->am;	cjp, ~neg;			| 
+	incw,s addrlo,addrlo;	am->vloareg;	;				| 
+	sub2nw,s 0,offset;	;		cjp, ~cry tncry7;		| 
+	incw addrhi,addrhi;	am->vhiareg;	cjp, go tncry7;			| 
+	
+toct7st: testw (cloff);		;		;				| Draw if (startpt && cloff==0).
+	btstw,s right,options;	;		cjp, ~zer toct7a;		| 
+	mov2nw 1,y;		am->brreg;	cjp, ~vir .;		vmewr	| Draw startpoint.
+	;			=tnegerr7->brreg; push, go;			| Put next address on stack.
+	testw (acc);		;		rpct tnwrt7;			| Jump to change err and addresses.
+toct7rt: decws r[2];		am->brreg;	;				| Reload counter & pop stack.
+toct7ra: btstw,s right,options;	;		cjpp, ~neg toct7a;		| Finish tex vector if count >= 0.
+	btstw,s endpt,options;	;		cjpp, go toctend;		| Go to endpoint routine.
+
+
+toct6:	btstw,s right,options;	;		cjp, ~zer toct6st;		| Jump if should draw startpoint
+toct6a:	movw seg,y;		am->am;		cjp, zer toct6l;		| 
+	btstw,s 0,seg;		=tnegerr6->brreg; push, go;			| Set cond. code, ld cntr, push loop.
+tvloop6: testw (acc);		;		cjp, zer tnwrt6;		| Skip over write if not needed.
+	testw (acc);		;		cjp, ~vir .;		vmewr	| if err < 0 goto negerr6.
+tnwrt6: addw minax,acc,acc;	;		cjp, ~neg;			| Jump if error is negative, update error.
+	subw,s d,addrlo,addrlo;	SWidth->am;	;				| Decrement y.
+	movw addrlo,y;		am->vloareg;	cjp, cry tncry6;		| Jump if no carry was generated.
+	decw addrhi,addrhi;	am->vhiareg;	;				| Incrememt high order address
+tncry6:	sub2nw,s 0,offset;	;		;				| Decrement segment count.
+	movw seg,y;		am->am;		cjp, zer newseg6;		| Jump if need to fetch new segment.
+	btstw,s 0,seg;		;		rfct;				| Top of loop if count != 0.
+	btstw,s endpt,options;	;		cjp, go toctend;		| Test endpoint.
+newseg6: subw,s d,numsegs,y;	;		;				| Compute (numsegs - seg).
+	movw d,offset;		scrmem->am;	cjp, zer firseg6;		| Load new pattern length, jump if need first seg.
+	incw seg,seg;		am->am;		;				| Increment segment count.
+	btstw,s 0,seg;		;		rfct;			scrmp+	| Increment pointer for fetching next segment.
+	btstw,s endpt,options;	;		cjp, go toctend;		| Test endpt field.
+firseg6: movw segaddr,y ;	am->scrmemp;	;				| Set new segment address.
+	movw d,offset;		scrmem->am;	;				| 
+	movw,s d,seg;		0x1->am;	rfct;			scrmp+	| Note: This is same as btstw 0,seg!
+	btstw,s endpt,options;	;		cjp, go toctend;		| Test endpt field.
+
+tnegerr6: addw,s d,addrlo,addrlo; IncXDecY->am;	;				| Error was negative. 
+	movw addrlo,y;		am->vloareg;	;				| 
+	addw majax,acc,acc;	;		cjp, cry tncry6;		| 
+	decw addrhi,addrhi;	am->vhiareg;	cjp, go tncry6;			| 
+	
+toct6l:	btstw,s 0,seg;		=tnegerr6->brreg; push, go;			| LEFT SIDE
+	subw d,segaddr,y;	am->scrmemp;	;				| 
+	testw (acc);		;		cjp, ~zer tnwrt6;		| 
+	;			;		cjp, ~vir .;		vmewr	| 
+	addw minax,acc,acc;	;		cjp, ~neg;			| 
+	subw,s d,addrlo,addrlo;	SWidth->am;	;				| 
+	movw addrlo,y;		am->vloareg;	cjp, cry tncry6;		| 
+	decw addrhi,addrhi;	am->vhiareg;	cjp, go tncry6;			| 
+	
+toct6st: testw (cloff);		;		;				| Draw if (startpt && cloff==0).
+	btstw,s right,options;	;		cjp, ~zer toct6a;		| 
+	mov2nw 1,y;		am->brreg;	cjp, ~vir .;		vmewr	| Draw startpoint.
+	;			=tnegerr6->brreg; push, go;			| Put next address on stack.
+	testw (acc);		;		rpct tnwrt6;			| Jump to change err and addresses.
+toct6rt: decws r[2];		am->brreg;	;				| Reload counter & pop stack.
+toct6ra: btstw,s right,options;	;		cjpp, ~neg toct6a;		| Finish tex vector if count >= 0.
+	btstw,s endpt,options;	;		cjpp, go toctend;		| Go to endpoint routine.
+
+
+
+|   Horizontal and vertical vector routines
+
+tocth:	btstw,s right,options;	;		cjp, ~zer tocthst;		| Jump if should draw startpoint
+toctha:	movw seg,y;		am->am;		cjp, zer tocthl;		| 
+	btstw,s 0,seg;		;		push, go;			| Set cond. code, ld cntr, push loop.
+tvlooph: ;			;		cjp, zer tnwrth;		| Skip over write if not needed.
+	;			;		cjp, ~vir .;		vmewr	| 
+tnwrth:	incw,s addrlo,addrlo;	am->vloareg;	;				| Increment x.
+tnwrtha: sub2nw,s 0,offset;	;		cjp, ~cry tncryh;		| Jump if no carry was generated.
+	incw addrhi,addrhi;	am->vhiareg;	;				| Incrememt high order address
+tncryh:	movw seg,y;		am->am;		cjp, zer newsegh;		| Jump if need to fetch new segment.
+	btstw,s 0,seg;		;		rfct;				| Top of loop if count != 0.
+	btstw,s endpt,options;	;		cjp, go toctend;		| Test endpoint.
+newsegh: subw,s d,numsegs,y;	;		;				| Compute (numsegs - seg).
+	movw d,offset;		scrmem->am;	cjp, zer firsegh;		| Load new pattern length, jump if need first seg.
+	incw seg,seg;		am->am;		;				| Increment segment count.
+	btstw,s 0,seg;		;		rfct;			scrmp+	| Increment pointer for fetching next segment.
+	btstw,s endpt,options;	;		cjp, go toctend;		| Test endpt field.
+firsegh: movw segaddr,y ;	am->scrmemp;	;				| Set new segment address.
+	movw d,offset;		scrmem->am;	;				| 
+	movw,s d,seg;		0x1->am;	rfct;			scrmp+	| Note: This is same as btstw 0,seg!
+	btstw,s endpt,options;	;		cjp, go toctend;		| Test endpt field.
+	
+tocthl:	btstw,s 0,seg;		;		push, go;			| LEFT SIDE
+	subw d,segaddr,y;	am->scrmemp;	cjp, ~zer tnwrth;		| 
+	;			;		cjp, ~vir .;		vmewr	| 
+	incw,s addrlo,addrlo;	am->vloareg;	cjp, go tnwrtha;		| 
+
+tocthst: testw (cloff);		;		;				| Draw if (startpt && cloff==0).
+	btstw,s right,options;	;		cjp, ~zer toctha;		| 
+	mov2nw 1,y;		am->brreg;	cjp, ~vir .;		vmewr	| Draw startpoint.
+	;			;		push, go;			| Put next address on stack.
+	testw (acc);		;		rpct tnwrth;			| Jump to change err and addresses.
+tocthrt: decws r[2];		am->brreg;	;				| Reload counter & pop stack.
+tocthra: btstw,s right,options;	;		cjpp, ~neg toctha;		| Finish tex vector if count >= 0.
+	btstw,s endpt,options;	;		cjpp, go toctend;		| Go to endpoint routine.
+
+
+
+toctv:	btstw,s right,options;	;		cjp, ~zer toctvst;		| Jump if should draw startpoint
+toctva:	movw seg,y;		am->am;		cjp, zer toctvl;		| 
+	btstw,s 0,seg;		;		push, go;			| Set cond. code, ld cntr, push loop.
+tvloopv: ;			;		cjp, zer tnwrtv;		| Skip over write if not needed.
+	;			;		cjp, ~vir .;		vmewr	| 
+tnwrtv:	addw,s d,addrlo,addrlo;	SWidth->am;	;				| Increment x.
+	movw addrlo,y;		am->vloareg;	;				| 
+tnwrtva: sub2nw,s 0,offset;	;		cjp, ~cry tncryv;		| Jump if no carry was generated.
+	incw addrhi,addrhi;	am->vhiareg;	;				| Incrememt high order address
+tncryv:	movw seg,y;		am->am;		cjp, zer newsegv;		| Jump if need to fetch new segment.
+	btstw,s 0,seg;		;		rfct;				| Top of loop if count != 0.
+	btstw,s endpt,options;	;		cjp, go toctend;		| Test endpoint.
+newsegv: subw,s d,numsegs,y;	;		;				| Compute (numsegs - seg).
+	movw d,offset;		scrmem->am;	cjp, zer firsegv;		| Load new pattern length, jump if need first seg.
+	incw seg,seg;		am->am;		;				| Increment segment count.
+	btstw,s 0,seg;		;		rfct;			scrmp+	| Increment pointer for fetching next segment.
+	btstw,s endpt,options;	;		cjp, go toctend;		| Test endpt field.
+firsegv: movw segaddr,y ;	am->scrmemp;	;				| Set new segment address.
+	movw d,offset;		scrmem->am;	;				| 
+	movw,s d,seg;		0x1->am;	rfct;			scrmp+	| Note: This is same as btstw 0,seg!
+	btstw,s endpt,options;	;		cjp, go toctend;		| Test endpt field.
+	
+toctvl:	btstw,s 0,seg;		;		push, go;			| LEFT SIDE
+	subw d,segaddr,y;	am->scrmemp;	cjp, ~zer tnwrtv;		| 
+	;			;		cjp, ~vir .;		vmewr	| 
+	addw,s d,addrlo,addrlo;	SWidth->am;	;				| 
+	movw addrlo,y;		am->vloareg;	cjp, go tnwrtva;		| 
+
+toctvst: testw (cloff);		;		;				| Draw if (startpt && cloff==0).
+	btstw,s right,options;	;		cjp, ~zer toctva;		| 
+	mov2nw 1,y;		am->brreg;	cjp, ~vir .;		vmewr	| Draw startpoint.
+	;			;		push, go;			| Put next address on stack.
+	testw (acc);		;		rpct tnwrtv;			| Jump to change err and addresses.
+toctvrt: decws r[2];		am->brreg;	;				| Reload counter & pop stack.
+toctvra: btstw,s right,options;	;		cjpp, ~neg toctva;		| Finish tex vector if count >= 0.
+	btstw,s endpt,options;	;		cjpp, go toctend;		| Go to endpoint routine.
+
+
+toctend: ;			savoldpatln->scrmemp; ;				| 
+#ifndef GPPLUS
+	movw patln,y;		am->scrmem;	cjp, zer treset;		| Store oldpatln & jump to treset.
+#else GPPLUS
+	movw patln,y;		am->scrmem;	cjp, zer toctendtst;		| Store oldpatln & jump to treset.
+#endif GPPLUS
+	btstw,s cliprt,options;	;		;				| Draw endpt if (endpt && !cliprt).
+#ifndef GPPLUS
+	;			;		cjp, ~zer treset;		| 
+#else GPPLUS
+	;			;		cjp, ~zer toctendtst;		| 
+#endif GPPLUS
+toctenda: ;			;		cjp, ~vir .;		vmewr	| Draw endpoint.
+#ifndef GPPLUS
+	;			;		cjp, go treset;			| Jump to treset.
+#else GPPLUS
+toctendtst: btstw,s pixrect,options; ;		;				| return if pixrects, else, jump to treset
+	;			;		crtn, ~zer;			| 
+	;			;		cjp,go treset;			| 
+#endif GPPLUS
+
+
+#undef pixrect
+#undef cliprt
+#undef right
+#undef poly	
+#undef fat	
+#undef givenpat	
+#undef endpt	
+#undef startpt	
+
+#undef err
+#undef addrlo 
+#undef addrhi 
+#undef cnt	
+#undef minax 	
+#undef majax 	
+#undef reflect	
+#undef segaddr 	
+#undef options	
+#undef stoff	
+#undef cloff	
+#undef patln	
+#undef offset	
+#undef seg	
+#undef numsegs
+
+#undef savtex
+#undef savnumsegs
+#undef savsegaddr
+#undef savoldpatln
+#undef savfatoff
+#undef savpolyoff
+
+#include "setpat.pp.u"
+#include "offset.pp.u"

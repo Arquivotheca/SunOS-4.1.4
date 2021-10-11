@@ -1,0 +1,65 @@
+#! /bin/sh
+#	@(#)TEST_MESSAGES	1.1	10/31/94
+
+# Rough test of assembler's error messages.
+
+CLEANUP="rm -f TEST.in  TEST.out"
+ERROR='echo FAILURE: test \"${TEST}\". ; ${CLEANUP} ; exit 1 '
+AS=./as
+
+${CLEANUP}
+
+
+#=================== errors caught in check_list_for_errors() ================
+TEST="Label in delay slot OK"
+if [ `echo " b,a label; lbl: nop" |${AS} -o /dev/null - 2>&1 |grep warning:|wc -l` -ne 0 ]
+then	eval "${ERROR}"
+fi
+TEST="Label in delay slot"
+if [ `echo " b label; lbl: nop"   |${AS} -o /dev/null - 2>&1 |grep warning:|wc -l` -ne 1 ]
+then	eval "${ERROR}"
+fi
+
+TEST="Set in delay slot OK"
+if [ `echo " b,a label; set label,%r4" |${AS} -o /dev/null - 2>&1 |grep warning:|wc -l` -ne 0 ]
+then	eval "${ERROR}"
+fi
+TEST="Set in delay slot"
+if [ `echo " b label; set label,%r4"   |${AS} -o /dev/null - 2>&1 |grep warning:|wc -l` -ne 1 ]
+then	eval "${ERROR}"
+fi
+
+TEST="RETT preceeded by JMP OK"
+if [ `echo " jmp %r1; rett %r2" |${AS} -o /dev/null - 2>&1 |grep error:|wc -l` -ne 0 ]
+then	eval "${ERROR}"
+fi
+TEST="RETT preceeded by JMP"
+if [ `echo " nop; rett %r2"   |${AS} -o /dev/null - 2>&1 |grep error:|wc -l` -ne 1 ]
+then	eval "${ERROR}"
+fi
+
+TEST="JMPL rs1,rd,n OK"
+if [ `echo " jmpl %r5,%r3,4; nop" |${AS} -o /dev/null - 2>&1 |grep error:|wc -l` -ne 0 ]
+then	eval "${ERROR}"
+fi
+TEST="JMPL rs1,%g0,n OK"
+if [ `echo " jmpl %r5,%r0,4; nop" |${AS} -o /dev/null - 2>&1 |grep error:|wc -l` -ne 1 ]
+then	eval "${ERROR}"
+fi
+
+TEST="Delay slot OK at end of segment"
+if [ `echo " b,a label" |${AS} -o /dev/null - 2>&1 |grep warning:|wc -l` -ne 0 ]
+then	eval "${ERROR}"
+fi
+TEST="Delay slot at end of segment"
+if [ `echo " b label"   |${AS} -o /dev/null - 2>&1 |grep warning:|wc -l` -ne 1 ]
+then	eval "${ERROR}"
+fi
+
+#==============================================================================
+
+# all tests have passed if we get to here.
+echo "****** SUCCESS:  ASSEMBLER WARNINGS/ERRORS SEEM OK."
+echo "******           [note: warning/error testing still incomplete]"
+${CLEANUP}
+exit 0

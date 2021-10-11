@@ -1,0 +1,422 @@
+| "@(#)fatvec.pp.u 1.1 94/10/31"
+
+| Copyright 1986 by Sun Microsystems, Inc.
+| Written by Stuart "I don't know what I'm doing" Levy
+
+|   The options field is broken down as follows:
+|  	 bit 15 - startpt	bit 14 - endpt		bit 13 - balancing	bit 12 - givenpattern
+|  	 bit 11 - fat		bit 10 - poly		bit 9 - mvlist		bit 8 - righthalf
+|   	 bit 7 - close		bit 6 - cliprt		bit 5 - solid		bit 4 - pixrect
+|   	 bit 3 - nosetup	bit 2 - clipbit		bit 1 - firstvec
+
+
+#define solid		5
+#define fat		11
+ 
+#define dvsr		acc
+#define err		acc
+#define diagsq		r[0]
+#define loreslt		r[0]
+#define dvdnd		r[0]
+#define hireslt		r[1]
+#define divhigh		r[1]
+#define p0x		r[1]
+#define p1x		r[2]
+#define lomult		r[2]
+#define quot		r[2]
+#define p0y		r[3]
+#define p1y		r[4]
+#define squares		r[5]
+#define dxprime		r[5]
+#define olderr		r[5]
+#define segerr		r[6]
+#define dyprime		r[6]
+#define sqhigh		r[6]
+#define tmperr		r[7]
+#define vecl		r[7]
+#define minax		r[8]
+#define majax		r[9]
+|   r[10] through r[15] & r[24] are set by texvector.pp.u
+#define dy		r[10]
+#define dx		r[11]
+#define y1		r[12]
+#define x1		r[13]
+#define y0		r[14]
+#define x0		r[15]
+
+#define minsq		r[16]
+#define majsq		r[17]
+#define mincnt		r[18]
+#define majcnt		r[19]
+#define arrcnt		r[20]
+#define width		r[21]
+#define poslope		r[22]
+|   Segaddr is set by texvec, and stored (at savsegaddr) by fatvec.pp.u.
+#define segaddr		r[6]
+|   These vectors are in storage at savetex for texvec.pp.u
+#define stoff		r[8]
+#define patln		r[10]
+#define numsegs		r[15]
+|   r[24] is options, and shouldn't be stepped on (defined in texvector.pp.u)
+#define options		r[24]
+#define temp		r[25]		
+#define ptscnter	r[25]		
+|   Space where vector endpoints are stored.
+#define savpts		0x0
+|   Space reserved for saving parameters when width > 64 & calling texvec.
+#define savfat		0x101
+#define savtex		0x120
+|   Space where segaddr is stored after first call to texvec routine.
+#define savsegaddr	0x130
+
+
+fatcheck: sub2nw,s 1,width,r[16]; ;		ldct vop0;			| Sub 2 from width, r[16] scratch reg.
+	btstw,s solid,options;	;		cjp, ~neg fatstart;		| Jump if fat vector.
+fatthin: bclrw fat,options;	;		jrp, zer top0;			| Jump textured if zero, solid if 1.
+
+fatstart: bclrw fat,options;	;		;				| tex->options.fat = 0.
+	movw d,minsq;		0x1->am;	;				| Initialize registers.
+	movw d,majsq;		0x1->am;	;				| 
+	movw 0,majcnt;		;		;				| 
+	movw 0,mincnt;		;		;				| 
+	movw 0,segerr;		;		;				| 
+	movw dx,acc;		;		;				| Dx in acc for testing.
+	orw,s dy,acc,y;		;		;				| Test if (dx==0 && dy==0).
+	xorw,s dy,acc,y;	;		cjp, zer fatpoint;		| Jump if fat, single point.
+	movw 0,poslope;		;		cjp, neg fatdx;			| Jump if not same (slope is negative).
+	incw 0,poslope;		;		;				| Slope is positive.
+fatdx:	testw (dx);		;		;				| 
+	testw (dy);		;		cjp, ~neg fatdy;		| Jump if dx is positive.
+	negw dx,dx;		;		;				| Negate dx. 
+fatdy:	movw dx,acc;		;		cjp, ~neg fatmain;		| Get ready for vecl, jump if dy positive.
+	negw dy,dy;		;		;				| Negate dy.
+fatmain: movw dx,lomult;	;		cjs, go multiply;		| Compute dx*dx.
+	movw loreslt,squares;	;		;				| vecl = sqrt (dx*dx + dy*dy).
+	movw hireslt,sqhigh;	;		;				| 
+	movw dy,acc;		;		;				| 
+	movw dy,lomult;		;		cjs, go multiply;		| Compute dy*dy.
+	movw loreslt,y;		am->am;		;				| 
+	addw,s d,squares,squares; ;		;				| Add dx**2 + dy**2.
+	movw hireslt,y;		am->am;		;				| 
+	addw d,sqhigh,sqhigh;	;		cjp, ~cry fatsqrt;		| Jump if no carry generated.
+	incw sqhigh,sqhigh;	;		;				| 
+fatsqrt: testw (squares);	;		cjs, go sqrt;			| Compute square root (vecl).
+	movw width,acc;		;		;				| dyprime = [(dx * width) / vecl] >> 1.
+	movw dx,lomult;		;		cjs, go multiply;		| 
+	testw (hireslt);	;		ldct divlong;			| Will call divlong if 32 bit result.
+	movw vecl,dvsr;		;		jsrp, zer divide;		| Reslt & dvdnd && hireslt & divhi same reg.
+	sr0w quot,dyprime;	;		;				| 
+	movw width,acc;		;		;				| dxprime = [(dy * width) / vecl] >> 1.
+	movw dy,lomult;		;		cjs, go multiply;		| 
+	testw (hireslt);	;		ldct divlong;			| Will call divlong if 32 bit result.
+	movw vecl,dvsr;		;		jsrp, zer divide;		| Reslt & dvdnd && hireslt & divhi same reg.
+	sr0w quot,dxprime;	am->am;		;				| 
+	subw,s d,dyprime,y;	;		;				| if (dxprime > dyprime)
+fmajy:	sl0w dyprime,minax;	am->am;		cjp, ~neg fmajx;		| Y is major axis.  minax = 2*dyprime.
+	rsubw d,dxprime,tmperr;	;		;				| error = 2*dyprime - dxprime.
+	decw tmperr;		;		;				| Subtract 1, so testing >= 0 == > 0.
+	sl0w dxprime,majax;	;		;				| majax = 2*dxprime
+	movw width,acc;		;		;				| 
+	movw acc,lomult;	;		cjs, go multiply;		| diag_sq = width * width.
+	testw (poslope);	;		;				| 
+	movw dxprime,y;		am->am;		;				| Compute addresses after mults.
+	subw d,x0,p0x;		;		;				| p0x = x0 - dxprime.
+	subw d,x1,p1x;		;		;				| p1x = x1 - dxprime.
+fypslo:	movw dyprime,y;		am->am;		cjp, zer fynslo;		| 
+	addw d,y0,p0y;		;		;				| p0y = y0 + dyprime. Slope positive.
+	addw d,y1,p1y;		;		cjp, go fysgerr;		| p1y = y1 + dyprime.
+fynslo: subw d,y0,p0y;		;		;				| p0y = y0 - dyprime. Slope negative.
+	subw d,y1,p1y;		;		;				| p1y = y1 - dyprime.
+fysgerr: movw d,arrcnt;		64->am;		;				| Arrcnt = 64 (only used for very fat).
+	movw minsq,acc;		;		;				| segerr - diagsq - (majsq + minsq).
+	addw majsq,acc,acc;	;		;				| 
+	rsubw diagsq,acc,segerr; ;		;				| 
+	movw tmperr,err;	savpts->scrmemp; ;				| Load address where to store coords.
+fyloop:	decws arrcnt;		;		cjs, go fatarray;		| Store endpoints in scratchpad mem.
+	incw p0x,p0x;		;		;				| p0x++
+	incw p1x,p1x;		;		;				| p1x++
+	incw majcnt,majcnt;	;		;				| majcnt++
+	sl1w majcnt,temp;	am->am;		;				| majsq += majcnt + majcnt + 1.
+	addw,s minax,err,err;	;		;				| error += minax
+	addw d,majsq,majsq;	;		cjp, neg fyerr;			| Jump if (error > 0) [effectively].
+fymin:	decws arrcnt;		;		cjs, go fatarray;		| Store endpoints in scratchpad mem.
+	testw (poslope);	;		;				| 
+	incw mincnt,mincnt;	;		cjp, zer fyminn;		| Jump if slope is negative.
+fyminp: decw p0y;		;		;				| p0y--.
+	decw p1y;		;		cjp, go fymin2;			| p1y--.
+fyminn: incw p0y,p0y;		;		;				| p0y++.
+	incw p1y,p1y;		;		;				| p1y++.
+fymin2:	sl1w mincnt,temp;	am->am;		;				| minsq += mincnt + mincnt + 1.
+	addw d,minsq,minsq;	;		;				| 
+	subw majax,err,err;	;		;				| error -= majax.
+fyerr:	movw majsq,y;		am->am;		;				| segerr = diagsq - (majsq + minsq).
+	addw d,minsq,temp;	;		;				| 
+	movw segerr,olderr;	;		;				| old_error = seg_error.
+	movw temp,y;		am->am;		;				| 
+	subw,s d,diagsq,segerr;	;		;				| Put segerr on y-bus (and in d-latch) for test
+	movw segerr,y;		am->am;		cjp, ~neg fypseg;		| 
+fynseg: negw segerr,segerr;	am->am;		;				| 
+fypseg:	subw,s d,olderr,y;	;		;				| 
+	;			;		cjp, ~neg fyloop;		| Loop until segerr > olderr. 
+	mov2nw 15,y;		am->scrmem;	cjs, go fatdraw;		| Terminate with -32766 & draw vectors.
+fmajx: sl0w dxprime,minax;	am->am;		;				| minax = 2 * dxprime.
+	sl0w dyprime,majax;	;		;				| majax = 2 * dyprime.
+	rsubw d,dyprime,tmperr;	;		;				| error = 2 * dxprime - dyprime.
+	decw tmperr;		;		;				| Subtract 1, so testing >= 0 == > 0.	
+	movw width,acc;		;		;				| Compute diagsq before change width.
+	movw acc,lomult;	;		cjs, go multiply;		| diag_sq = width * width.
+	testw (poslope);	;		;				| 
+	movw dyprime,y;		am->am;		;				| Compute addresses after mults.
+	subw d,y0,p0y;		;		;				| p0y = y0 - dyprime.
+	subw d,y1,p1y;		;		;				| p1y = y1 - dyprime.  Jump if slope neg.
+fxpslo:	movw dxprime,y;		am->am;		cjp, zer fxnslo;		| 
+	addw d,x0,p0x;		;		;				| p0x = x0 + dxprime. Slope positive.
+	addw d,x1,p1x;		;		cjp, go fxsgerr;		| p1x = x1 + dxprime.
+fxnslo:	subw d,x0,p0x;		;		;				| p0x = x0 - dxprime. Slope negative.
+	subw d,x1,p1x;		;		;				| p1x = x1 - dxprime.
+fxsgerr:movw d,arrcnt;		64->am;		;				| Arrcnt = 64.
+	movw minsq,acc;		;		;				| segerr - diagsq - (majsq + minsq).
+	addw majsq,acc,acc;	;		;				| 
+	rsubw diagsq,acc,segerr; ;		;				| 
+	movw tmperr,err;	savpts->scrmemp; ;				| Load address where to store coords.
+fxloop:	decws arrcnt;		;		cjs, go fatarray;		| Store endpoints in scratchpad mem.
+	incw p0y,p0y;		;		;				| p0y++
+	incw p1y,p1y;		;		;				| p1y++
+	incw majcnt,majcnt;	;		;				| majcnt++
+	sl1w majcnt,temp;	am->am;		;				| majsq += majcnt + majcnt + 1.
+	addw,s minax,err,err;	;		;				| error += minax
+	addw d,majsq,majsq;	;		cjp, neg fxerr;			| Jump if (error > 0) [effectively].
+fxmin:	decws arrcnt;		;		cjs, go fatarray;		| Store endpoints in scratchpad mem.
+	testw (poslope);	;		;				| 
+	incw mincnt,mincnt;	;		cjp, zer fxminn;		| mincnt++.  Jump if slope negative.
+fxminp: decw p0x;		;		;				| p0x--.
+	decw p1x;		;		cjp, go fxmin2;			| p1x--.
+fxminn: incw p0x,p0x;		;		;				| p0x++.
+	incw p1x,p1x;		;		;				| p1x++.
+fxmin2:	sl1w mincnt,temp;	am->am;		;				| minsq += mincnt + mincnt + 1.
+	addw d,minsq,minsq;	;		;				| 
+	subw majax,err,err;	;		;				| error -= majax.
+fxerr:	movw majsq,y;		am->am;		;				| segerr = diagsq - (majsq + minsq).
+	addw d,minsq,temp;	;		;				| 
+	movw segerr,olderr;	;		;				| old_error = seg_error.
+	movw temp,y;		am->am;		;				| 
+	subw,s d,diagsq,segerr;	;		;				| Put segerr on y-bus (and in d-latch) for test
+	movw segerr,y;		am->am;		cjp, ~neg fxpseg;		| 
+fxnseg: negw segerr,segerr;	am->am;		;				| 
+fxpseg:	subw,s d,olderr,y;	;		;				| 
+	;			;		cjp, ~neg fxloop;		| Loop until segerr > olderr. 
+	mov2nw 15,y;		am->scrmem;	cjs, go fatdraw;		| Terminate with -32766 & draw vectors.
+
+|   Fatarray loads locations in scratchpad memory with the x and y addresses of each vector.  This is done
+|   for the first 64 vectors, after which we draw this 64, and proceed to the next 64.  This routine is
+|   called, putting the address from where it was called on the stack.  When the routine jumps to fxdraw, the
+|   return address is therefore that of the calling routine, so we will return to the right place, hopefully
+|   with the right state.
+
+fatarray: movw p0x,y;		am->scrmem;	;			scrmp+	| p0x
+	movw p0y,y;		am->scrmem;	;			scrmp+	| p0y
+	movw p1x,y;		am->scrmem;	;			scrmp+	| p1x
+	movw p1y,y;		am->scrmem;	crtn, ~zer;		scrmp+	| p1y. Return to main if array not full.
+	mov2nw 15,y;		am->scrmem;	;				| Terminate point list with -32766
+	decw arrcnt;		;		cjp, go fatdraw;		| Dec arrcnt,draw, save state & cont.
+	
+|   It is in this part of the code that we first distinguish between textured and solid vectors.
+
+|   Fatdraw saves the state of the registers needed for this routine (if necessary, ie, if the width is greater
+|   than 64) and then goes into a loop where it pulls the 4 endpoints (until x0 == -1) and calls the textured or
+|   solid vector code for each set of points.  We need to restore our fat vector registers again if the width is > 64.  
+
+fatdraw: testw (arrcnt);	savfat->scrmemp; ;				| Check if (width <= 64).
+fdsave:	movw width,y;		am->scrmem;	cjp, ~neg fdlast;	scrmp+	| width. Jump if last vectors.
+	movw err,y;		am->scrmem;	;			scrmp+	| err
+	movw diagsq,y;		am->scrmem;	;			scrmp+	| diagsq
+	movw p0x,y;		am->scrmem;	;			scrmp+	| p0x.  
+	movw p1x,y;		am->scrmem;	;			scrmp+	| p1x
+	movw p0y,y;		am->scrmem;	;			scrmp+	| p0y
+	movw p1y,y;		am->scrmem;	;			scrmp+	| p1y
+	movw segerr,y;		am->scrmem;	;			scrmp+	| segerr
+	movw olderr,y;		am->scrmem;	;			scrmp+	| olderr
+	movw minax,y;		am->scrmem;	;			scrmp+	| minax
+	movw majax,y;		am->scrmem;	;			scrmp+	| majax
+	movw minsq,y;		am->scrmem;	;			scrmp+	| minsq
+	movw majsq,y;		am->scrmem;	;			scrmp+	| majsq
+	movw mincnt,y;		am->scrmem;	;			scrmp+	| mincnt
+	movw majcnt,y;		am->scrmem;	;			scrmp+	| majcnt
+	movw poslope,y;		am->scrmem;	;				| poslope 
+	
+|	Fdbegin is for drawing 64 vectors, and then returning to compute more endpoints.	
+fdbegin: movw 0,ptscnter;	am->scrmemp;	;				| Load address of coordinates.
+	movw d,x0;		scrmem->am;	;			scrmp+	| x0.
+	xorw,s d,x0,y;		0x8000->am;	;				| Check if done with pts.
+	movw d,y0;		scrmem->am;	cjp, zer fdres;		scrmp+	| y0. Jump if done (terminated w/ -32766).
+	movw d,x1;		scrmem->am;	;			scrmp+	| x1.
+	rsubw d,x0,dx;		;		;				| Restore dx.
+	movw d,y1;		scrmem->am;	;			scrmp+	| y1.
+	rsubw d,y0,dy;		SavePts->scrmemp; ;				| Restore dy + draw solid or textured.
+	btstw,s solid,options;	;		ldct vop0;			| 
+	movw x0,y;		am->scrmem;	;			scrmp+	| x0->scrmem (for clipping reasons).
+	movw y0,y;		am->scrmem;	;			scrmp+	| y0->scrmem.
+	movw x1,y;		am->scrmem;	;			scrmp+	| x1->scrmem.
+#ifndef GPPLUS
+	movw y1,y;		am->scrmem;	jsrp, zer top0;			| y1->scrmem & call solid or textured.
+#else GPPLUS
+	movw y1,y;		am->scrmem;	;			scrmp+	| y1->scrmem.
+	movw ptscnter,y;	am->scrmem;	jsrp, zer top0;			| ptscnter->scrmem(r[25] gets trashed);call solid or textured
+	movw d,acc;		SavePts->am;	;				| restore ptscnter
+	add2nw 2,acc;		am->scrmemp;	;				|
+	movw d,ptscnter;	scrmem->am;	;				|
+#endif GPPLUS
+	bsetw fat,options;	savsegaddr->scrmemp; ;				| Set fat vector bit of options field.
+	movw segaddr,y;		am->scrmem;	;				| Store segaddr (once only).
+	add2nw 2,ptscnter;	am->scrmemp;	;				| 
+fdloop:	movw d,x0;		scrmem->am;	;			scrmp+	| x0.
+	xorw,s d,x0,y;		0x8000->am;	;				| Check if done with pts.
+	movw d,y0;		scrmem->am;	cjp, zer fdres;		scrmp+	| y0. Jump if done (terminated w/ -32766).
+	movw d,x1;		scrmem->am;	;			scrmp+	| x1.
+	rsubw d,x0,dx;		;		;				| Restore dx.
+	movw d,y1;		scrmem->am;	;			scrmp+	| y1.
+	rsubw d,y0,dy;		SavePts->scrmemp; ;				| Restore dy + draw solid or textured.
+	btstw,s solid,options;	;		ldct vop0;			| 
+	movw x0,y;		am->scrmem;	;			scrmp+	| x0->scrmem (for clipping reasons).
+	movw y0,y;		am->scrmem;	;			scrmp+	| y0->scrmem.
+	movw x1,y;		am->scrmem;	;			scrmp+	| x1->scrmem.
+#ifndef GPPLUS
+	movw y1,y;		am->scrmem;	jsrp, zer top0;			| y1->scrmem & call solid or textured.
+#else GPPLUS
+	movw y1,y;		am->scrmem;	;			scrmp+	| y1->scrmem.
+	movw ptscnter,y;	am->scrmem;	jsrp, zer top0;			| ptscnter->scrmem(r[25] gets trashed);call solid or textured
+	movw d,acc;		SavePts->am;	;				| restore ptscnter
+	add2nw 2,acc;		am->scrmemp;	;				|
+	movw d,ptscnter;	scrmem->am;	;				|
+#endif GPPLUS
+	add2nw 2,ptscnter;	am->scrmemp;	cjp, go fdloop;			| 
+fdres:	;			savfat->scrmemp; ;				| Load addr for restoring. 
+	movw d,width;		scrmem->am;	;			scrmp+	| width
+	movw d,err;		scrmem->am;	;			scrmp+	| err
+	movw d,diagsq;		scrmem->am;	;			scrmp+	| diagsq
+	movw d,p0x;		scrmem->am;	;			scrmp+	| p0x
+	movw d,p1x;		scrmem->am;	;			scrmp+	| p1x
+	movw d,p0y;		scrmem->am;	;			scrmp+	| p0y
+	movw d,p1y;		scrmem->am;	;			scrmp+	| p1y
+	movw d,segerr;		scrmem->am;	;			scrmp+	| segerr
+	movw d,olderr;		scrmem->am;	;			scrmp+	| olderr
+	movw d,minax;		scrmem->am;	;			scrmp+	| minax
+	movw d,majax;		scrmem->am;	;			scrmp+	| majax
+	movw d,minsq;		scrmem->am;	;			scrmp+	| minsq
+	movw d,majsq;		scrmem->am;	;			scrmp+	| majsq
+	movw d,mincnt;		scrmem->am;	;			scrmp+	| mincnt
+	movw d,majcnt;		scrmem->am;	;			scrmp+	| majcnt 
+	movw d,poslope;		scrmem->am;	;				| poslope
+	;			savpts->scrmemp; ;				| Load address where to write coords.
+fdstart: movw d,arrcnt;		64->am;		crtn, go;			| Arrcnt = 64, return to comp. vectors.
+
+|   Fdlast is reached either when the width is less than 64, or we are drawing the last 64 vectors.
+fdlast:	movw 0,ptscnter;	am->scrmemp;	;				| Load address of coordinates.
+	movw d,x0;		scrmem->am;	;			scrmp+	| x0.
+	xorw,s d,x0,y;		0x8000->am;	;				| Check if done with pts.
+	movw d,y0;		scrmem->am;	cjpp, zer fdend;	scrmp+	| y0. Jump & pop if done(-32766 terminated).
+	movw d,x1;		scrmem->am;	;			scrmp+	| x1.
+	rsubw d,x0,dx;		;		;				| Restore dx.
+	movw d,y1;		scrmem->am;	;				| y1.
+	rsubw d,y0,dy;		SavePts->scrmemp; ;				| Restore dy + draw solid or textured.
+	btstw,s solid,options;	;		ldct vop0;			| 
+	movw x0,y;		am->scrmem;	;			scrmp+	| x0->scrmem (for clipping reasons).
+	movw y0,y;		am->scrmem;	;			scrmp+	| y0->scrmem.
+	movw x1,y;		am->scrmem;	;			scrmp+	| x1->scrmem.
+#ifndef GPPLUS
+	movw y1,y;		am->scrmem;	jsrp, zer top0;			| y1->scrmem & call solid or textured.
+#else GPPLUS
+	movw y1,y;		am->scrmem;	;			scrmp+	| y1->scrmem.
+	movw ptscnter,y;	am->scrmem;	jsrp, zer top0;			| ptscnter->scrmem(r[25] gets trashed);call solid or textured
+	movw d,acc;		SavePts->am;	;				| restore ptscnter
+	add2nw 2,acc;		am->scrmemp;	;				|
+	movw d,ptscnter;	scrmem->am;	;				|
+#endif GPPLUS
+	bsetw fat,options;	savsegaddr->scrmemp; ;				| Set fat vector bit of options field.
+	movw segaddr,y;		am->scrmem;	;				| Store segaddr (once only).
+	add2nw 2,ptscnter;	am->scrmemp;	;				| 
+fdlloop: movw d,x0;		scrmem->am;	;			scrmp+	| x0.
+	xorw,s d,x0,y;		0x8000->am;	;				| Check if done with pts.
+	movw d,y0;		scrmem->am;	cjpp, zer fdend;	scrmp+	| y0. Jump & pop if done(-32766 terminated).
+	movw d,x1;		scrmem->am;	;			scrmp+	| x1.
+	rsubw d,x0,dx;		;		;				| Restore dx.
+	movw d,y1;		scrmem->am;	;			scrmp+	| y1.
+	rsubw d,y0,dy;		SavePts->scrmemp; ;				| Restore dy + draw solid or textured.
+	btstw,s solid,options;	;		ldct vop0;			| 
+	movw x0,y;		am->scrmem;	;			scrmp+	| x0->scrmem (for clipping reasons).
+	movw y0,y;		am->scrmem;	;			scrmp+	| y0->scrmem.
+	movw x1,y;		am->scrmem;	;			scrmp+	| x1->scrmem.
+#ifndef GPPLUS
+	movw y1,y;		am->scrmem;	jsrp, zer top0;			| y1->scrmem & call solid or textured.
+#else GPPLUS
+	movw y1,y;		am->scrmem;	;			scrmp+	| y1->scrmem.
+	movw ptscnter,y;	am->scrmem;	jsrp, zer top0;			| ptscnter->scrmem(r[25] gets trashed);call solid or textured
+	movw d,acc;		SavePts->am;	;				| restore ptscnter
+	add2nw 2,acc;		am->scrmemp;	;				|
+	movw d,ptscnter;	scrmem->am;	;				|
+#endif GPPLUS
+	add2nw 2,ptscnter;	am->scrmemp;	cjp, go fdlloop;		| 
+fdend:	;			;		crtn, go;			| All done !!
+
+|   We reach fatpoint when we have a single point with width.  We will draw a single width point, and since
+|   we jump to the code, we will return to the calling routine.
+fatpoint: btstw,s solid,options; ;		ldct vop0;			| Are going to draw single point.
+	;			;		jrp, zer top0;			| Jump textured if zero, solid if 1.
+
+
+
+	
+#undef solid
+#undef fat
+
+#undef dvsr	
+#undef err	
+#undef diagsq	
+#undef loreslt	
+#undef dvdnd	
+#undef hireslt
+#undef divhigh	
+#undef lomult	
+#undef quot	
+#undef squares	
+#undef sqhigh	
+#undef majax	
+#undef minax	
+#undef olderr	
+#undef segerr
+#undef dxprime
+#undef dyprime	
+#undef tmperr	
+#undef vecl
+#undef minsq	
+#undef majsq	
+#undef mincnt	
+#undef majcnt	
+#undef arrcnt	
+#undef temp
+#undef p0x
+#undef p0y
+#undef p1x
+#undef p1y
+#undef dx
+#undef dy
+#undef x0
+#undef y0
+#undef x1
+#undef y1
+#undef temp
+#undef ptscnter
+#undef poslope	
+#undef width
+#undef stoff
+#undef patln
+#undef numsegs
+
+#undef savfat
+#undef savtex
+#undef savsegaddr
+
+#undef shaddh
+#undef shaddl
+
+#include "squareroot.pp.u"

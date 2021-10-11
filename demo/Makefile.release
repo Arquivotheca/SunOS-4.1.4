@@ -1,0 +1,26 @@
+#
+# @(#)Makefile.release 1.1 94/10/31 SMI
+#
+
+#
+#  Makefile to be included on the actual release tapes
+#
+
+DESTDIR=
+
+SUBDIR= SRC
+
+all:
+	-for i in ${SUBDIR}; do \
+		(cd $$i; make ${MFLAGS}); \
+		done
+
+clean:
+	-for i in ${SUBDIR}; do \
+		(cd $$i; make ${MFLAGS} clean); \
+		done
+
+install: all
+	-for i in ${SUBDIR}; do \
+		(cd $$i; make ${MFLAGS} DESTDIR=${DESTDIR} install); \
+		done

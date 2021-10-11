@@ -1,0 +1,362 @@
+| "@(#)statshade.pp.u 1.1 94/10/31 SMI"
+| Copyright (c) 1985 by Sun Microsystems, Inc.
+
+|   3D shading routines for the GP+
+|   
+|   CAUTION!!! Changes made to this file should be propagated to shade.pp.u
+|   
+|   Gouraud and flat shaded 3D segments
+|   #25:  3D Shaded:  25, y0, x0, x1, op, zhi, dzhi, dzlo, chi, dchi, dclo 
+|   #25:  3D Solid:   25, y0, x0, x1, op, zhi, dzhi, dzlo, chi, 0, 0 
+
+
+|   Polygon fill
+#define addrlo	r[0]
+#define addrhi	r[1]
+#define temp	r[2]
+
+#define zlo	r[6]	/* starting z value */
+#define zhi	r[7]
+#define dzlo	r[8]	/* z increment, Implied decimal point between hi and lo */
+#define dzhi	r[9]
+#define clo	r[10]	/* starting color */
+#define chi	r[11]
+#define dclo	r[12]	/* color increment, implied decimal point between hi and lo */
+#define dchi	r[13]
+#define glo	r[14]	/* Used by shaded routines */
+#define ghi	r[15]	/* Used by shaded routines */
+
+#define y0	r[16]	/* y of scan-line */
+#define x0	r[17]	/* starting x point, positive x incr */
+#define x1	r[18]	/* number of points in line */
+
+#define pwx0	r[16]	/* reusing these registers, must use caution */
+#define pwdx	r[17]	/* they are used for pick window x dimensions */
+
+#define sizex	r[19]	/* width of the scanline in pixel coords */
+
+#define pktmp	r[20]	/* used to store a value in the picking loops, saves a cycle */
+
+#define offsetx	r[21]	/* clip window values */
+#define offsety	r[22]
+#define clip	r[23]
+#define clipptr	r[24]
+#define dx	r[25]
+
+
+
+|   3D Segments, shaded and solid  (#25)
+plhsh:	;			Pickmaybe->scrmemp; ;				| initialize Pickmaybe
+	movw 0,y;		am->scrmem;	;				|
+	movw d, y0;		fifo1->am;	cjp, f1e .;			| 
+	movw d, x0;		fifo1->am;	cjp, f1e .;			| 
+	movw d, x1;		fifo1->am;	cjp, f1e .;			| 
+	rsubw,s d, x0, dx;	;		;				| 
+	decw dx;		;		;				| Dont draw pixel of last point (for fitting).
+	movw d, op;		fifo1->am;	cjp, f1e .;			| 
+	movw d, zhi;		fifo1->am;	cjp, f1e .;			| 
+	movw d, zlo;		fifo1->am;	cjp, f1e .;			| zlo is computed on the vp
+	movw d, dzhi;		fifo1->am;	cjp, f1e .;			| 
+	movw d, dzlo;		fifo1->am;	cjp, f1e .;			| 
+	movw d, chi;		fifo1->am;	cjp, f1e .;			| 
+	movw d, clo;		fifo1->am;	cjp, f1e .;			| 
+	movw d, dchi;		fifo1->am;	cjp, f1e .;			| 
+	movw d, dclo;		fifo1->am;	cjp, f1e .;		scrmp 0	| 
+	movw dzlo, y;		am->scrmem;	cjp, ~zer .+2;		scrmp +	| store dzlo in scratch memory location 0.
+ststart: ;			;		jmap start;			| special so we can 'cjp' to start from this bank
+	movw dzhi, y;		am->scrmem;	;			scrmp +	| store dzhi in scratch memory location 1.
+	movw dclo, y;		am->scrmem;	;			scrmp +	| store dclo in scratch memory location 2.
+	movw dchi, y;		am->scrmem;	;				| store dchi in scratch memory location 3.
+	norw d, op, clip;	0xfffe->am;	;				| 
+	sr0w op, op;		;		;				| op >> 1
+	andw d, op, op;		0xf->am;	;				| 
+plhrej:	movw,s y0, y;		=ststart->brreg; ;				| 
+	subw,s d, y0, y;	SHeight->am;	cjp, neg;			| if (y0 < 0) trivial rejection.
+	movw,s x1, y;		;		cjp, ~neg;			| if (y0 > SHeight) trivial rejection.
+	subw,s d, x0, y;	SWidth->am;	cjp, neg;			| if (x1 < 0) trivial rejection.
+	movw,s x0, y;		=plhx0ok->brreg; cjp, ~neg;			| if (x0 > SWidth) trivial rejection.
+	subw,s d, x1, y;	SWidth->am;	cjp, ~neg;			| 
+	negw x0,acc;		;		;				|
+	movw dchi, r[5];	;		;				| 
+	movw dclo, r[2];	;		cjs, go stmuldbl;		| 
+	movw chi, acc;		;		;				|
+	movw clo, y;		am->am;		;				|
+	addw d, r[1], clo;	;		;				| 
+	addcw r[0], acc, chi;	;		;				|
+	negw x0, acc;		;		;				|
+	movw dzhi, r[5];	;		;				| Change initial z
+	movw dzlo, r[2];	;		cjs, go stmuldbl;		| 
+	movw zhi, acc;		;		;				|  
+	movw zlo, y;		am->am;		;				|
+	addw d, r[1], zlo;	;		;				|
+	addcw r[0], acc, zhi;	;		;				|
+	movw 0, x0;		;		;				|  
+	subw,s d, x1, y;	SWidth->am;	;				|
+plhx0ok: ;			;		cjp, neg plhx1ok;		| 
+	movw d, x1;		XMax->am;	;				| 
+plhx1ok: ;			SavePts->scrmemp; ;				| 
+	movw y0, y;		am->scrmem;	;			scrmp +	| 
+	movw x0, y;		am->scrmem;	;			scrmp +	| 
+	movw x1, y;		am->scrmem;	;			scrmp +	| 
+	movw chi, y;		am->scrmem;	;			scrmp +	| 
+	movw clo, y;		am->scrmem;	;			scrmp +	| 
+	movw zhi, y;		am->scrmem;	;			scrmp +	| 
+	movw zlo, y;		am->scrmem;	;				| stuff screen boundries into clip window params if clipping is off
+	testw (clip);		ClipList->am;	;				| 
+	movw d, clipptr;	am->scrmemp;	cjp, ~zer plhclip;		| 
+	 
+plhclipoff: ;			0->scrmem;	;			scrmp +	| clipping has been turned off in the ops vector
+	;			0->scrmem;	;			scrmp +	| 
+	;			SWidth->scrmem;	;			scrmp +	|  
+	;			SHeight->scrmem; ;				| clipptr now points to scrmem with this data:  0, 0, 1152, 900  
+	 
+plhclip: ;			Pickmode->scrmemp; ;				| 
+	movw,s d,y;		scrmem->am;	;				| check if picking is on
+	movw clipptr,y;		am->scrmemp;	cjp,zer plhpkdn;		| Get clip list
+	;			;		jmap plypk3;			| call picking code; code will jmap back to plhpkdn
+
+plhpkdn: movw,s d, offsetx;	scrmem->am;	;			scrmp +	| Rtrn here for next clip.  4 tests for rejection.
+	incw x0, acc;		;		cjp, neg ststart;		| Recreate x1
+	rsubw x1, acc, dx;	;		;				|
+	subw,s d, x1, y;	;		;				| 
+	movw d, offsety;	scrmem->am;	cjp, neg plhreset;	scrmp +	| 
+	subw,s d, y0, y;	;		;				| 
+	addw d, offsetx, acc;	scrmem->am;	cjp, neg plhreset;	scrmp +	| sizex + offsetx
+	movw acc, sizex;	;		;				| save in sizex
+	rsubw,s x0, acc, y;	;		;				| 
+	addw d, offsety, acc;	scrmem->am;	cjp, ~neg plhreset;		| sizey + offsety
+	rsubw,s y0, acc, y;	;		;				| 
+	;			;		cjp, ~neg plhreset;		| Last rejection test.
+	movw offsetx, acc;	;		;				|
+	subw,s x0, acc, acc;	;		;				| 
+	;			;		cjp, neg plhright;		| 
+	movw dchi, r[5];	;		;				| Change initial color
+	movw dclo, r[2];	;		cjs, go stmuldbl;		| 
+	movw chi, acc;		;		;				| 
+	movw clo, y;		am->am;		;				|
+	addw d, r[1], clo;	;		;				|
+	addcw r[0], acc, chi;	;		;				|
+	movw offsetx, acc;	;		;				| 
+	subw x0, acc, acc;	;		;				| 
+	movw dzhi, r[5];	;		;				| Change initial z
+	movw dzlo, r[2];	;		cjs, go stmuldbl;		| 
+	movw zhi, acc;		;		;				| 
+	movw zlo, y;		am->am;		;				|
+	addw d, r[1], zlo;	;		;				|
+	addcw r[0], acc, zhi;	;		;				|
+	movw offsetx, acc;	;		;				| 
+	movw acc, x0;		;		;				| 
+	
+plhright: movw sizex, acc;	Pickmode->scrmemp; ;				| 
+	subw,s x1, acc, acc;	scrmem->am;	;			scrmp +	| 
+	sub2nw,s 1,d,y;		;		cjp, ~neg plhdrawdx;		| test Pickmode
+	addw x1, acc, x1;	;		;				| 
+plhdrawdx: incw x0, y;		am->am;		;				| Restore dx.
+	subw d, x1, dx;		;		;				| 
+plhdraw: movw,s d,y;		scrmem->am;	cjp, neg gsdraw;		| GP1_PICK_OFF or scanline intersects pick window (GP1_PICK_DRAW) and...
+										| 	...test Pickmaybe (next location after Pickmode) for nodraw mode 
+	;			;		cjp, ~zer gsnodraw;		| GP1_PICK_NODRAW, and scanline intersects pick window
+plhreset: testw (clip);		SavePts->scrmemp; ;				| GP1_PICK_NODRAW, but scanline doesn't intersect pick window
+	movw d, y0;		scrmem->am;	cjp, zer ststart;	scrmp +	| 
+	movw d, x0;		scrmem->am;	;			scrmp +	| 
+	movw d, x1;		scrmem->am;	;			scrmp +	| 
+	movw d, chi;		scrmem->am;	;			scrmp +	| 
+	movw d, clo;		scrmem->am;	;			scrmp +	| 
+	movw d, zhi;		scrmem->am;	;			scrmp +	| 
+	movw d, zlo;		scrmem->am;	;			scrmp +	| 
+	add2nw 2, clipptr;	;		cjp, go plhclip;		| 
+
+|   gsdraw:  shaded and solid 3d segments with HSE 
+gsdraw:	testw (dchi);		Pickmaybe->scrmemp; ;				| setting scrmemp to Pickmaybe to be used later
+	testw (dclo);		;		cjp, ~zer gsvctl;		| Shaded segment
+	;			;		cjp, zer constsh;		| Flat segment
+gsvctl:	;			=gsrmw->brreg;	;				|
+	;			;		cjp, ~vir .;			| 
+	;			VByte->vctlreg;	;				| 
+gsrmw:	movw y0, acc;		0xa000->gbhiptr; cjp, ~gbr;			| Set read-modify-write mode
+	movw acc, r[2];		;		cjs, go stMulSWid;		| Calculate address 
+	movw x0, acc;		;		;				| 
+	addw r[0], acc, glo;	am->vloareg;	;				| 
+	addcw d, r[1], ghi;	0->am;		;				| 
+	addw d, ghi, acc;	0x10->am;	;				| Pixel mode memory
+	sub2nw,s 0,d,y;		scrmem->am;	;				| test Pickmaybe
+	addw FBHi, acc, y;	am->vhiareg;	;				| 
+	movw ghi, y;		am->gbhiptr;	cjp, ~gbr .;			| Not altering read-modify-write mode
+	movw glo, y;		am->gbloptr;	cjp, ~gbr .;		gbrd	| At least 8 cycles after setting rmw
+	movw dx, acc;		=gsloop->brreg;	;				| 
+	;			;		cjp, neg gsztst;		| regular drawing code
+	;			;		cjs, go getpkwin;		| load pwx0 and pwdx
+	;			=pkloop->brreg;	;				|
+	;			;		cjp, go pkztst;			| drawing code w/picking
+
+|   gsloop - Gouraud shading of 3d scanlines
+gsloop:	addw d, zlo, zlo;	;		;				| increment z 
+gsloop1: addcw d, zhi, zhi;	scrmem->am;	cjp, neg gsquit;	scrmp+	| 
+	addw d, clo, clo;	scrmem->am;	;			scrmp+	| increment color 
+	addcw d, chi, chi;	scrmem->am;	;			varegs+	| 
+gsztst:	subw,s d, zhi, y;	gbrdreg->am;	cjp, ~gbr .;		scrmp 0	| compare z with z-buffer value 
+	;			scrmem->am;	cjp, ~cry .+2;		scrmp+	| dec loop counter
+	;			;		cjp, ~zer gsabrmw;		| 
+	decws acc;		;		;				| 
+	movw zhi, y;		am->gbwdreg;	cjp, ~gbr .;			| write new z 
+	movw chi, y;		am->vwdreg;	cjp, ~neg.3 .;		vmewr	| write color
+	;			;		cjp, go gsquit;			| 
+gsabrmw: decws acc;		;		;				| 
+	addw d, zlo, zlo;	;		cjp, go gsloop1;	gbrd	| abort read-mod-write wr phase.  do 1st loop instr  
+
+|   pkloop is gsloop with picking (on a per-pixel basis)
+|   in general, labels were changed from gs(something) to pk(something)
+pkloop:	addw d, zlo, zlo;	;		;				| increment z 
+pkloop1: addcw d, zhi, zhi;	scrmem->am;	cjp, neg pkgsquit;	scrmp+	| 
+	addw d, clo, clo;	scrmem->am;	;			scrmp+	| increment color 
+	addcw d, chi, chi;	scrmem->am;	;			varegs+	| 
+pkztst:	subw,s d, zhi, y;	gbrdreg->am;	cjp, ~gbr .;		scrmp 0	| compare z with z-buffer value 
+	rsubw x1,acc,y;		am->am;		cjp, ~cry .+3;			| x1-acc = current pixel x_val 
+	rsubw d,pwx0,pktmp;	;		cjp, zer .+3;			| 
+	;			;		cjp, go pkabrmw;		| 
+	rsubw d,pwx0,pktmp;	;		;				| x_val-pwx0
+	incw,s pktmp,y;		am->am;		;				| 
+	subw,s d,pwdx,y;	;		cjp, neg pknohit;		| if (x_val-pwx0) < 0 then no hit
+	;			;		cjp, neg pknohit;		| if (pwdx-(x_val-pwx0)) < 0 then no hit 
+	;			Pickmaybe->scrmemp; ;				| 
+	mov2nw 1,y;		am->scrmem;	;				| if we got a hit, set Pickmaybe = 2
+	;			;		;			scrmp 0	| 
+pknohit: decws acc;		scrmem->am;	;			scrmp+	| dec loop counter 
+	movw zhi, y;		am->gbwdreg;	cjp, ~gbr .;			| write new z 
+	movw chi, y;		am->vwdreg;	cjp, ~neg.3 .;		vmewr	| write color
+	;			;		cjp, go pkgsquit;		| 
+pkabrmw: decws acc;		scrmem->am;	;			scrmp+	| dec loop counter 
+	addw d, zlo, zlo;	;		cjp, go pkloop1;	gbrd	| abort read-mod-write wr phase   do 1st loop instr 
+
+
+constsh: ;			;		cjs, go stgsprime;		| 
+	;			scrmem->am;	cjp, ~vir .;			| 
+	sub2nw,s 0,d,y;		VByte->vctlreg;	;				| test Pickmaybe (scrmemp was set at the top of gsdraw)
+	;			;		cjp, ~gbr .;			| 
+	movw y0, acc;		0xa000->gbhiptr; ;				| Set read-modify-write mode
+	movw acc, r[2];		;		cjs, go stMulSWid;		|  
+	movw x0, acc;		=segloop->brreg; ;				| 
+	addw r[0], acc, glo;	am->vloareg;	;				| 
+	addcw d, r[1], ghi;	0->am;		;				| 
+	addw d, ghi, acc;	RopFB->am;	;				| 
+	addw FBHi, acc, y;	am->vhiareg;	;				| 
+	movw ghi, y;		am->gbhiptr;	cjp, ~gbr .;			|  
+	movw glo, y;		am->gbloptr;	cjp, ~gbr .;		gbrd	| at least 8 cycles after setting rmw
+	movw dx, acc;		;		cjp, neg segztst;		| regular drawing code (condition set at top of constsh)
+	;			;		cjs, go getpkwin;		| load pwx0 and pwdx
+	;			=pksegloop->brreg; ;				| 
+	;			;		cjp, go pksegztst;		| drawing code w/picking
+
+segloop: addw d, zlo, zlo;	;		;				| increment z
+segloop1: addcw d, zhi, zhi;	scrmem->am;	cjp, neg gsquit;	varegs+	| 
+segztst: subw,s d, zhi, y;	gbrdreg->am;	cjp, ~gbr .;		scrmp 0	| compare z with z-buffer value
+	;			scrmem->am;	cjp, ~cry .+2;		scrmp+	| dec loop counter
+	;			;		cjp, ~zer segabrmw;		| 
+	decws acc;		;		;				| 
+	movw zhi, y;		am->gbwdreg;	cjp, ~gbr .;			| write new z
+	movw chi, y;		am->vwdreg;	cjp, ~neg.3 .;		vmewr	| write color
+	;			;		cjp, go gsquit;			| 
+segabrmw: decws acc;		;		;				| 
+	addw d, zlo, zlo;	;		cjp, go segloop1;	gbrd	| abort read-mod-write wr phase. do 1st loop inst
+
+|   pksegloop is segloop with picking (on a per-pixel basis)
+|   in general, labels were changed from seg(something) to pkseg(something)
+pksegloop: addw d, zlo, zlo;	;		;				| increment z
+pksegloop1: addcw d, zhi, zhi;	scrmem->am;	cjp, neg pkgsquit;	varegs+	| 
+pksegztst: subw,s d, zhi, y;	gbrdreg->am;	cjp, ~gbr .;		scrmp 0	| compare z with z-buffer value.
+	rsubw x1,acc,y;		am->am;		cjp, ~cry .+3;			| x1-acc = current pixel x_val 
+	rsubw d,pwx0,pktmp;	;		cjp, zer .+3;			| 
+	;			;		cjp, go pksegabrmw;		| 
+	rsubw d,pwx0,pktmp;	;		;				| 
+	incw,s pktmp,y;		am->am;		;				| 
+	subw,s d,pwdx,y;	;		cjp, neg pksegnohit;		| if (x_val-pwx0) < 0 then no hit
+	;			;		cjp, neg pksegnohit;		| if (pwdx-(x_val-pwx0)) < 0 then no hit
+	;			Pickmaybe->scrmemp; ;				|
+	mov2nw 1,y;		am->scrmem;	;				| 
+	;			;		;			scrmp 0	|
+pksegnohit: decws acc;		scrmem->am;	;			scrmp+	| dec loop counter
+	movw zhi, y;		am->gbwdreg;	cjp, ~gbr .;			| write new z
+	movw chi, y;		am->vwdreg;	cjp, ~neg.3 .;		vmewr	| write color
+	;			;		cjp, go pkgsquit;		| 
+pksegabrmw: decws acc;		scrmem->am;	;			scrmp+	| dec loop counter
+	addw d, zlo, zlo;	;		cjp, go pksegloop1;	gbrd	| abort read-mod-write wr phase. do 1st loop instr
+
+|   gsnodraw is called from plhdraw when (Pickmode == 2 && Pickmaybe == 1)
+gsnodraw: 
+	movw y0, acc;		=ndrmw->brreg;	;				| load brreg for gbuffer write
+	movw acc, r[2];		;		cjs, go stMulSWid;		| Calculate address
+ndrmw:	movw x0, acc;		0x6000->gbhiptr; cjp,~gbr;			| set normal mode 
+	addw r[0], acc, glo;	;		;				| 
+	addcw d, r[1], ghi;	0->am;		;				| 
+	movw ghi, y;		am->gbhiptr;	cjp, ~gbr .;			| 
+	movw glo, y;		am->gbloptr;	cjp, ~gbr .;		gbrd	| Normal read mode
+	;			;		cjs, go getpkwin;		| load pwx0 and pwdx
+	;			;		cjp, go ndztst;			| 
+
+ndloop: addcw d, zhi, zhi;	scrmem->am;	cjp, neg plhreset;		| 
+ndztst:	rsubw x1,acc,y;		am->am;		;				| x1-acc = current pixel x_val
+	rsubw d,pwx0,pktmp;	;		;				| x_val-pwx0 
+	subw,s d, zhi, y;	gbrdreg->am;	cjp, ~gbr .;		scrmp 0	| compare z with z-buffer value
+	incw,s pktmp,y;		am->am;		cjp, ~zer ndnohit;		| a hit occurs only if the current pixel is already in the z buffer
+	subw,s d,pwdx,y;	;		cjp, neg ndnohit;		| if (x_val-pwx0) < 0 then no hit
+	;			;		cjp, neg ndnohit;		| if (pwdx-(x_val-pwx0)) < 0 then no hit
+	;			;		jmap pkhit3;			| pkhit3 will test for nodraw and return to start
+ndnohit: decws acc;		scrmem->am;	;			scrmp+	| dec loop counter
+	addw d, zlo, zlo;	;		cjp, go ndloop;		gbrd	| continue read mode, compute new z val
+
+gsquit:	;			=gsquit1->brreg; ;				| End read-mod-write so g-buffer released.
+gsquit1: ;			0x6000->gbhiptr; cjp, ~gbr;			| 
+	;			;		cjp, go plhreset;		| used to be crtn
+
+pkgsquit: ;			=pkgsquit1->brreg; ;				| End read-mod-write so g-buffer released
+pkgsquit1: ;			0x6000->gbhiptr; cjp, ~gbr;			| 
+	;			Pickmaybe->scrmemp; ;				| 
+	sub2nw,s 1,d,y;		scrmem->am;	;				| if Pickmaybe = 2, then we got a hit
+	;			;		cjp, ~zer plhreset;		| 
+	;			;		jmap pkhit3;			| pkhit3 jmaps back to plhreset if Pickmode == PICK_DRAW
+
+getpkwin: ;			Frame->scrmemp;	;				| 
+	rolw 4,d,acc;		scrmem->am;	;				| 16*Frame is offset into PickContext array
+	addw d,acc,acc;		PickOffset->am;	;				| window parameters at beginning of frame array
+	movw acc,y;		am->scrmemp;	;				| 
+	movw d,pwx0;		scrmem->am;	;			scrmp+	| window params in this order:  xoff, yoff, width, height
+	movw dx, acc;		;		;			scrmp+	| 
+	movw d,pwdx;		scrmem->am;	crtn, go;			| 
+	
+stgsprime: movw acc, r[0];	;		;				| 
+	movw chi, acc;		;		cjp, ~vir .;			| 
+	romw 8, chi, acc, 0xff00; VWord->vctlreg; ;				| 
+	IMM;			FBAllRopPrimeSrc2->vloareg; ;			| 
+	movw FBCont, y;		am->vhiareg;	;				| 
+	movw acc, y;		am->vwdreg;	cjp, ~vir .;		vmewr	| 
+	movw r[0], acc;		;		crtn, go;			| 
+
+
+
+#undef temp
+#undef addrlo
+#undef addrhi
+
+#undef zlo
+#undef zhi
+#undef dzlo
+#undef dzhi
+#undef clo
+#undef chi
+#undef dclo
+#undef dchi
+#undef glo
+#undef ghi
+
+#undef y0
+#undef x0
+#undef x1
+#undef dx
+#undef pwx0
+#undef pwdx
+#undef sizex
+#undef offsetx
+#undef offsety
+#undef clip
+#undef clipptr
+#undef pktmp

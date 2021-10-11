@@ -1,0 +1,187 @@
+| Copyright (c) 1985 by Sun Microsystems, Inc.
+| @(#)ropnull.vp.u 1.1 94/10/31 SMI
+
+| Null to frame buffer rops.
+
+#define LMaskTable	4096	/* vpprom address. */
+#define RMaskTable	4112	/* 4096 + 16 */
+
+#define dstx	r[0]	/* dbd->cgpr_offset.x */
+#define dsty	r[1]	/* dbd->cgpr_offset.y */
+#define dstwid	r[2]	/* dst.pr->pr_size.x */
+#define dstht	r[3]	/* dst.pr->pr_size.y */
+#define recx	r[4]	/* dst.pos.x */
+#define recy	r[5]	/* dst.pos.y */
+#define recwid	r[6]	/* dst.size.x */
+#define recht	r[7]	/* dst.size.y */
+#define w	r[8]
+#define color	r[9]
+#define FBHi	r[10]
+#define op	r[11]
+#define addrhi	r[12]
+#define addrlo	r[13]
+#define junk	r[14]
+#define Multiplier r[14]	/* Must be same as in ropfb.vp.u. */
+#define temp	r[15]
+#define ropmode	r[16]
+#define nodst	r[17]
+
+|	subw,s d,fbindx,y;	shmem->am;	jmap PRROPNF;	;
+PRROPNF: movw d,acc;		shmem->am;	cjs,~zer getfbaddr; ;		shp+	
+	movw PPMASK,acc;	=wrfifo->brreg;	;		;			
+	;			am->fifo1;	cjs,f1f;	;			
+	andw d,cmd,acc;		0xff->am;	cjs,go;		;			| low 8 bits of cmd
+	movw d,op;		shmem->am;	cjs,go roprect; ;		shp+	
+
+|   SetUp ()
+	andw,s d,op,y;		1->am;		;		;			| if (!(op & PIX_DONTCLIP)) prclip ()
+	;			;		cjs,zer prclip2;;			
+	negw,s recwid,y;	;		;		;			| if ((dst.size.x <= 0) ||
+	negw,s recht,y;		;		cjp,~neg prrnend; ;			| (dst.size.y <= 0)) return
+	;			;		cjp,~neg prrnend;;			
+	movw PPROPNULL,acc;	=wrfifo->brreg;	;		;			
+	IMM;			am->fifo1;	cjs,f1f;	;			| pp command
+	movw dstx,acc;		;		;		;			| dst.pos.x += dbd->cgpr_offset.x
+	addw recx,acc,recx;	;		;		;			
+	movw dsty,acc;		;		;		;			| dst.pos.y += dbd->cgpr_offset.y
+	addw recy,acc,recy;	;		;		;			
+	andw d,recx,temp;	0xf->am;	;		;			| skew= cg2_prskew (dst.pos.x) == recx & 15
+	sub2nw 0,temp;		am->am;		;		;			| w= (dst.size.x + skew - 1) >> 4.
+	addw d,recwid,acc;	;		;		;			
+	rolw 12,acc,w;		;		;		;			
+	andw d,w,w;		0xfff->am;	;		;			
+	rolw 11,op,color;	;		;		;			| color= PIX_COLOR (op)= (op >> 5) & 0xff.
+	andw d,color,color;	0xff->am;	;		;			
+	sr0w op,op;		;		;		;			| op= (op >> 1) & 0xf
+	andw d,op,op;		0xf->am;	;		;			
+|   SetPPMask ()
+	movw op,acc;		;		;		;			| PIXOP_NEEDS_DST (op<<1)= (op^(op<<1)) &0xa
+	sl0w acc,acc;		;		;		;			
+	xorw op,acc,acc;	=wrfifo->brreg;	;		;			
+	andw,s d,acc,acc;	0xa->am;	;		;			
+	movw d,ropmode;		6->am;		;		;			| PWRWRD->am
+	movw 0,nodst;		;		cjp,~zer rnrop;	;			
+	movw d,ropmode;		4->am;		;		;			| PRRWRD->am
+	incw 0,nodst;		;		;		;			
+rnrop:	movw d,acc;		6->am;		cjs,go;		;			| PWRWRD->fifo1
+rnopf:	movw op,acc;		am->fifo1;	cjs,f1f;	;			| cg2_setfunction (fb,CG2_ALLROP,op)
+	movw 0,acc;		am->fifo1;	cjs,f1f;	;			| RRPattern= 0
+	andw d,recx,acc;	0xf->am;	;		;			| RRMask1= mrc_lmasktable [dst.pos.x&0xf]
+	addw d,acc,acc;		LMaskTable->am;	;		;			
+	movw acc,y;		am->vppromp;	;		;			
+	sub2nw 0,recwid,junk;	am->am;		;		;			| RRMask2= mrc_rmasktable
+	addw d,recx,acc;	;		;		;			| [(dst.pos.x+dst.size.x-1)&0xf]
+	movw d,temp;		vpprom->am;	;		;			| temp= RRMask1
+	andw d,acc,acc;		0xf->am;	;		;			
+	addw d,acc,acc;		RMaskTable->am;	;		;			
+	movw acc,y;		am->vppromp;	;		;			
+	;			;		;		;			
+	;			;		;		;			
+	;			vpprom->fifo1;	cjp,f1f .;	;			| Mask2
+	movw temp,y;		am->fifo1;	cjp,f1f .;	;			| Mask1
+	movw w,y;		am->fifo1;	cjp,f1f .;	;			| cg2_setwidth (fb,CG2_ALLROP,w,...)
+	movw w,y;		am->fifo1;	cjp,f1f .;	;			| cg2_setwidth (,,,w)
+	rolw 8,d,acc;		1->am;		;		;			| cg2_setshift (fb,CG2_ALLROP,0,1)
+	movw acc,y;		am->fifo1;	cjp,f1f .;	;			| cg2_setshift (fb,CG2_ALLROP,0,1)
+	rolw 8,color,acc;	;		;		;			| RRSource2= color | color << 8
+	orw color,acc,acc;	;		;		;			
+	movw acc,y;		am->fifo1;	cjp,f1f .;	;			
+	movw recy,Multiplier;	;		cjs,go MulSWWid;;			| by= cg2_ropwordaddr (fb,0,recx,recy)
+	;			;		cjs,go fbaddr;	;			
+	movw acc,FBHi;		;		;		;			
+	rolw 13,recx,acc;	;		;		;			
+	andw d,acc,acc;		0x1fff->am;	;		;			
+	addw addrlo,acc,addrlo;;		;		;				
+	addcw d,FBHi,acc;	0x20->am;	;		;			| RopFB->am
+	movw addrlo,y;		am->fifo1;	cjp,f1f .;	;			
+	addw addrhi,acc,addrhi;;		;		;			
+	movw addrhi,y;		am->fifo1;	cjp,f1f .;	;			
+	movw recht,y;		am->fifo1;	cjp,f1f .;	;			
+	movw color,y;		am->fifo1;	cjp,f1f .;	;			
+	movw w,y;		am->fifo1;	cjp,f1f .;	;			
+	movw nodst,y;		am->fifo1;	cjp,f1f .;	;			
+	movw ropmode,y;		am->fifo1;	cjp,f1f .;	;			
+prrnend: addw d,cmdptr,cmdptr;	11->am;		;		;			
+	;			;		jmap getcmd;	;			
+
+
+roprect: movw d,dstx;		shmem->am;	;		;		shp+	
+	movw d,dsty;		shmem->am;	;		;		shp+	
+	movw d,dstwid;		shmem->am;	;		;		shp+	
+	movw d,dstht;		shmem->am;	;		;		shp+	
+	movw d,recx;		shmem->am;	;		;		shp+	
+	movw d,recy;		shmem->am;	;		;		shp+	
+	movw d,recwid;		shmem->am;	;		;		shp+	
+	movw d,recht;		shmem->am;	crtn,go;	;		shp+	
+
+
+prclip2:movw,s recx,y;		am->am;		;		;			 
+	movw,s recy,y;		;		cjp,~neg prclip2a;;			 
+	addw d,recwid,recwid;	;		;		;			 
+	movw 0,recx;		;		;		;			 
+prclip2a:movw recy,y;		am->am;		cjp,~neg prclip2b;;			 
+	addw d,recht,recht;	;		;		;			 
+	movw 0,recy;		;		;		;			 
+prclip2b:movw recx,y;		am->am;		;		;			 
+	subw d,dstwid,acc;	;		;		;			 
+	subw,s recwid,acc,y;	;		;		;			 
+	movw recy,y;		am->am;		cjp,~neg prclip2c;;			 
+	movw acc,recwid;	;		;		;			 
+prclip2c:subw d,dstht,acc;	;		;		;			 
+	subw,s recht,acc,y;	;		;		;			 
+	;			;		crtn,~neg;	;			 
+	movw acc,recht;		;		crtn,go;	;			 
+
+
+#ifndef SWIDTH
+#define SWIDTH 1152
+#endif
+
+|   Multiply by SWWidth (SWidth/8).  Number comes in Multiplier
+|   and goes out in r[0] (low) and r[1] (high).
+|   Must save accumulator.
+
+#if SWIDTH == 1152
+|   y * 144 = y * 128 + y * 16 = y << 7 + y << 4 = (y << 3 + y) << 4
+|   y < (1 << 10).
+|   y << 3 needs no masking because y is < 1024.
+#define m10 acc
+MulSWWid:rolw 3,Multiplier,m10;;		;		;			| y << 3.  Highbits 0.
+	addw Multiplier,m10,m10;;		;		;			| y << 3 + y.
+	rolw 4,m10,addrhi;	;		;		;			| (y << 3 + y) << 4.
+	andw d,addrhi,addrlo;	0xfff0->am;	;		;			
+	andw d,addrhi,addrhi;	0xf->am;	crtn,go;	;			
+#undef m10
+
+#endif
+#if SWIDTH == 1024
+
+|   y * 128 = y << 7
+MulSWWid:rolw 7,Multiplier,addrhi;;		;		;			| (y << 3 + y) << 7.
+	andw d,addrhi,addrlo;	0xff80->am;	;		;			
+	andw d,addrhi,addrhi;	0x7f->am;	crtn,go;	;			
+
+#endif
+
+#undef LMaskTable
+#undef RMaskTable
+
+#undef dstx
+#undef dsty
+#undef dstwid
+#undef dstht
+#undef recx
+#undef recy
+#undef recwid
+#undef recht
+#undef w
+#undef color
+#undef FBHi
+#undef op
+#undef addrhi
+#undef addrlo
+#undef junk
+#undef Multiplier
+#undef temp
+#undef ropmode
+#undef nodst

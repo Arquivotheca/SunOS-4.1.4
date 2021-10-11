@@ -1,0 +1,50 @@
+/* @(#)sb_master.ext 1.1 94/10/31 SMI */
+
+/*
+ *	Copyright (c) 1989, Sun Microsystems, Inc.  All Rights Reserved.
+ *	Sun considers its source code as an unpublished, proprietary
+ *	trade secret, and it is available only under strict license
+ *	provisions.  This copyright notice is placed here only to protect
+ *	Sun in the event the source is deemed a published work.  Dissassembly,
+ *	decompilation, or other means of reducing the object code to human
+ *	readable form is prohibited by the license agreement under which
+ *	this code is provided to the user or company in possession of this
+ *	copy.
+ *	RESTRICTED RIGHTS LEGEND: Use, duplication, or disclosure by the
+ *	Government is subject to restrictions as set forth in subparagraph
+ *	(c)(1)(ii) of the Rights in Technical Data and Computer Software
+ *	clause at DFARS 52.227-7013 and in similar clauses in the FAR and
+ *	NASA FAR Supplement.
+ */
+
+
+version 1
+
+#include "cb_menu_strings.h"
+
+#define DEF_WEIGHT		32
+#define EXTERN_DEF_WEIGHT	96
+
+#include "sb_focus.ext"
+
+#include "sb_gluemenu.ext"
+
+#include "sb_ansi_c.ext"
+
+#include "sb_sun_c.ext"
+
+#include "sb_sun_c_plus_plus.ext"
+
+#include "sb_sun_pascal.ext"
+
+#include "sb_sun_f77.ext"
+
+#include "sb_executable.ext"
+
+#include "sb_library.ext"
+
+#include "sb_base_language.ext"
+
+#include "sb_cpp_language.ext"
+
+#include "sb_extend.ext"

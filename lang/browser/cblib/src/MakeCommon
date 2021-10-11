@@ -1,0 +1,188 @@
+#
+# @(#)MakeCommon 1.1 94/10/31 SMI
+#
+
+.KEEP_STATE:
+
+main:	libcb.a
+
+SRC = ../src
+YACC	= /usr/bin/yacc
+
+HEADER_BASE =	\
+		array.h \
+		cb_cb.h \
+		cb_ccom.h \
+		cb_cpp_protocol.h \
+		cb_directory.h \
+		cb_enter.h \
+		cb_ex.h \
+		cb_ex_read.h \
+		cb_ex_write.h \
+		cb_extend.h \
+		cb_f77pass1.h \
+		cb_file.h \
+		cb_graph.h \
+		cb_heap.h \
+		cb_init.h \
+		cb_io.h \
+		cb_lang_name.h \
+		cb_libc.h \
+		cb_line_id.h \
+		cb_literals.h \
+		cb_menu_strings.h \
+		cb_misc.h \
+		cb_portability.h \
+		cb_query.h \
+		cb_read.h \
+		cb_rw.h \
+		cb_string.h \
+		cb_stubs.h \
+		cb_swap_bytes.h \
+		cb_write.h \
+		hash.h
+HEADER_FILES = $(HEADER_BASE:%.h=$(SRC)/%.h)
+
+.INIT:	$(HEADER_FILES) $(SRC)/sbextend.tag \
+	$(SRC)/lintp1.sed $(SRC)/lintp2.sed
+
+TAG_BASE = \
+		cb_ansi_c_tags.h \
+		cb_base_tags.h \
+		cb_cpp_tags.h \
+		cb_executable_tags.h \
+		cb_extend_tags.h \
+		cb_focus_tags.h \
+		cb_library_tags.h \
+		cb_sun_c_pp_tags.h \
+		cb_sun_c_tags.h \
+		cb_sun_f77_tags.h \
+		cb_sun_pascal_tags.h
+
+TAG_FILES = $(TAB_BASE:%.h=$(SRC)/%.h)
+
+VROOT_DIR = ../../../vroot
+VROOT = $(VROOT_DIR)/vroot.a
+$(VROOT):
+	cd $(@D) ; $(MAKE) $(@F)
+
+#
+#	sbextend
+#
+sbextend_BASE = \
+		array.c \
+		cb_ex_parse.c \
+		cb_ex_scan.c \
+		cb_ex_write.c \
+		cb_extend.c \
+		cb_heap.c \
+		cb_io.c \
+		cb_misc.c \
+		cb_string.c \
+		cb_swap_bytes.c \
+		hash.c \
+		cbextend.c
+sbextend_OBJ = $(sbextend_BASE:%.c=%-boot.o)
+sbextend_LINT = $(sbextend_BASE:%.c=%-boot.ln)
+
+sbextend:	 $(VROOT) $(sbextend_OBJ)
+	@echo Linking $@
+	@$(LINK.c) -o $@ $(LDFLAGS) $(sbextend_OBJ) $(VROOT)
+sbextend_lint:	$(sbextend_LINT)
+	@echo Linting sbextend
+	@lint $(sbextend_LINT) | sed -f lintp2.sed | sort
+	@touch $@
+cbextend-boot.o := CFLAGS += -I$(VROOT_DIR)
+
+#
+#	libcb.a
+#
+libcb_BASE = \
+		array.c \
+		cb_ccom.c \
+		cb_copyright.c \
+		cb_cpp_proto.c \
+		cb_directory.c \
+		cb_enter.c \
+		cb_f77pass1.c \
+		cb_file.c \
+		cb_graph.c \
+		cb_heap.c \
+		cb_init.c \
+		cb_io.c \
+		cb_misc.c \
+		cb_ranlib.c \
+		cb_read.c \
+		cb_string.c \
+		cb_stubs.c \
+		cb_swap_bytes.c \
+		cb_write.c \
+		hash.c
+libcb_OBJ = ${libcb_BASE:%.c=%.o}
+libcb_LINT = ${libcb_BASE:%.c=%.ln}
+
+$(libcb_OBJ) := CPPFLAGS +=-DINCLUDE_COPYRIGHT_REFERENCE
+cb_copyright.o := CPPFLAGS = -DINCLUDE_COPYRIGHT 
+
+libcb.a:	$(VROOT) ${libcb_OBJ}
+	@echo Building $@
+	@rm -f $@
+	@ar cr $@ ${libcb_OBJ} > /dev/null
+	@ranlib $@
+
+clean:
+	rm -f .make.state a.out core
+	rm -f $(TAG_FILES) $(SRC)/cbquery.ex sbextend
+	rm -f $(SRC)/cb_ex_scan.c $(SRC)/cb_ex_parse.h $(SRC)/cb_ex_parse.c
+	rm -fr .sb
+	rm -f $(sbextend_OBJ) $(libcb_OBJ)
+	rm -f libcb.a
+
+$(SRC)/cb_ex_scan.c: $(SRC)/cb_ex_scan.l $(SRC)/cb_ex_scan.sed
+	rm -f $@
+	lex -t $(SRC)/cb_ex_scan.l | sed -f $(SRC)/cb_ex_scan.sed > $@
+
+$(SRC)/cb_ex_parse.c + $(SRC)/cb_ex_parse.h: $(SRC)/cb_ex_parse.y \
+					     $(SRC)/cb_ex_parse.sed
+	$(YACC) -d $(SRC)/cb_ex_parse.y
+	rm -f cb_ex_parse.c
+	sed -f $(SRC)/cb_ex_parse.sed y.tab.c > $(SRC)/cb_ex_parse.c
+	rm -f y.tab.c
+	mv y.tab.h $(SRC)/cb_ex_parse.h
+
+EXT_BASE = \
+	sb_ansi_c.ext \
+	sb_base.ext \
+	sb_base_language.ext \
+	sb_c_baseline.ext \
+	sb_cpp.ext \
+	sb_cpp_language.ext \
+	sb_executable.ext \
+	sb_extend.ext \
+	sb_focus.ext \
+	sb_gluemenu.ext \
+	sb_graph.ext \
+	sb_language_master.ext \
+	sb_library.ext \
+	sb_master.ext \
+	sb_sun_c.ext \
+	sb_sun_c_plus_plus.ext \
+	sb_sun_f77.ext \
+	sb_sun_pascal.ext
+
+EXT_FILES = $(EXT_BASE:%.ext=$(SRC)/%.ext)
+
+$(SRC)/sbextend.tag: $(EXT_FILES) sbextend
+	sbextend $(SRC)/sb_master.ext $(SRC)
+	touch $@
+
+cb_ex_read-boot.o	cb_ex_read.ln:		$(VROOT)
+
+cb_ex_scan-boot.o	cb_ex_scan.ln:		$(SRC)/cb_ex_parse.h
+cb_ex_write-boot.o	cb_ex_write.ln:		$(SRC)/cb_ex_parse.h
+cb_extend-boot.o	cb_extend.ln:		$(SRC)/cb_ex_parse.h
+
+%-boot.o: $(SRC)/%.c
+	$(COMPILE.c) -o $@ $(SRC)/$(@:%-boot.o=%.c) -DCB_BOOT
+%.o: $(SRC)/%.c
+	$(COMPILE.c) -o $@ $(SRC)/$(@:.o=.c)

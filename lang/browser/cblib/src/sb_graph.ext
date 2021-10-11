@@ -1,0 +1,179 @@
+/* @(#)sb_graph.ext 1.1 94/10/31 */
+
+/*
+ *	Copyright (c) 1989, Sun Microsystems, Inc.  All Rights Reserved.
+ *	Sun considers its source code as an unpublished, proprietary
+ *	trade secret, and it is available only under strict license
+ *	provisions.  This copyright notice is placed here only to protect
+ *	Sun in the event the source is deemed a published work.  Dissassembly,
+ *	decompilation, or other means of reducing the object code to human
+ *	readable form is prohibited by the license agreement under which
+ *	this code is provided to the user or company in possession of this
+ *	copy.
+ *	RESTRICTED RIGHTS LEGEND: Use, duplication, or disclosure by the
+ *	Government is subject to restrictions as set forth in subparagraph
+ *	(c)(1)(ii) of the Rights in Technical Data and Computer Software
+ *	clause at DFARS 52.227-7013 and in similar clauses in the FAR and
+ *	NASA FAR Supplement.
+ */
+
+/*
+ * This file defines the browser environment shared by grapher users
+ */
+
+/*
+ * This section of the file describes properties and tags that are used
+ * to support graphing.
+ */
+properties grapher {
+	function_call_arc
+	function_call_node
+	function_regular_call_node
+	function_variable_call_node
+	function_formal_call_node
+	function_property
+
+	file_arc
+	object_file_arc
+	executable_object_file_arc
+	object_object_file_arc
+	object_source_file_arc
+	source_source_file_arc
+	file_node
+	executable_file_node
+	object_file_node
+	source_file_node
+	file_property
+	source_file_property
+}
+
+#define PROP BASE.grapher BASE.CB_MENU_TOKEN_CBCHECKCB
+tags grapher 25 {
+	/*
+	 * Function call graph tags
+	 */
+	function_regular_call_node
+			= ( PROP grapher.function_call_node
+			    grapher.function_regular_call_node )
+	function_variable_call_node
+			= ( PROP grapher.function_call_node
+			    grapher.function_variable_call_node )
+	function_formal_call_node
+			= ( PROP grapher.function_call_node
+			    grapher.function_formal_call_node )
+	function_call_arc
+			= ( PROP grapher.function_call_arc )
+	function_property
+			= ( PROP grapher.function_property )
+
+	/*
+	 *	Files graph
+	 */
+	executable_object_file_arc
+		= ( PROP grapher.file_arc grapher.object_file_arc
+		    grapher.executable_object_file_arc )
+	object_object_file_arc
+		= ( PROP grapher.file_arc grapher.object_file_arc
+		    grapher.object_object_file_arc )
+	object_source_file_arc
+		= ( PROP grapher.file_arc grapher.object_source_file_arc )
+	source_source_file_arc
+		= ( PROP grapher.file_arc grapher.source_source_file_arc )
+
+	executable_file_node
+		= ( PROP grapher.file_node grapher.executable_file_node )
+	object_file_node
+		= ( PROP grapher.file_node grapher.object_file_node )
+	source_file_node
+		= ( PROP grapher.file_node grapher.source_file_node )
+
+	source_file_property
+		= ( PROP grapher.file_property grapher.source_file_property )
+}
+#undef PROP
+
+/*
+ * This section defines how to render arcs and nodes
+ */
+render grapher_function_call_arc		solid
+render grapher_function_regular_call_node	square
+render grapher_function_variable_call_node	square
+render grapher_function_formal_call_node	square
+
+render grapher_executable_object_file_arc	solid
+render grapher_object_object_file_arc		solid
+render grapher_object_source_file_arc		solid
+render grapher_source_source_file_arc		solid
+render grapher_executable_file_node		square
+render grapher_object_file_node			square
+render grapher_source_file_node			square
+
+/*
+ * This section describes the different graphs that are collected
+ */
+graph "Files" "I"
+menu {
+	"All Files"
+		= ( BASE.grapher grapher.file_arc ) |
+		  ( BASE.grapher grapher.file_node )
+	"Source Files"
+		= ( BASE.grapher grapher.source_source_file_arc ) |
+		  ( BASE.grapher grapher.file_node )
+	"Object Files"
+		= ( BASE.grapher grapher.object_file_arc ) |
+		  ( BASE.grapher grapher.file_node )
+}
+
+graph "Function Calls" "F"
+menu {
+	"Calls"
+		= ( BASE.grapher grapher.function_call_arc )
+}
+
+#define GRAPHER_NODE_MENU_GENERICS \
+	"Show Node" \
+		= ( BASE.grapher BASE.show_node ) \
+	"Float Node" \
+		= ( BASE.grapher BASE.float_node ) \
+	"Hide Node" \
+		= ( BASE.grapher BASE.hide_node ) \
+	"Delete Node" \
+		= ( BASE.grapher BASE.delete_node ) \
+	"Center Node" \
+		= ( BASE.grapher BASE.center_node )
+
+
+#define GRAPHER_FUNCTION_NODE_MENU \
+node grapher_function_regular_call_node function_regular_call_node \
+menu { \
+	GRAPHER_NODE_MENU_GENERICS \
+	"Show Function" \
+		= ( BASE.grapher grapher.function_property ) | \
+		  ( BASE.show_property ) \
+} \
+node grapher_function_variable_call_node function_variable_call_node \
+menu { \
+	GRAPHER_NODE_MENU_GENERICS \
+} \
+node grapher_function_formal_call_node function_formal_call_node \
+menu { \
+	GRAPHER_NODE_MENU_GENERICS \
+}
+
+#define GRAPHER_FILE_NODE_MENU \
+node grapher_executable_file_node executable_file_node \
+menu { \
+	GRAPHER_NODE_MENU_GENERICS \
+} \
+node grapher_object_file_node object_file_node \
+menu { \
+	GRAPHER_NODE_MENU_GENERICS \
+} \
+node grapher_source_file_node source_file_node \
+menu { \
+	GRAPHER_NODE_MENU_GENERICS \
+	"Show File" \
+		= ( BASE.grapher grapher.source_file_property ) | \
+		  ( BASE.show_property ) \
+}
+

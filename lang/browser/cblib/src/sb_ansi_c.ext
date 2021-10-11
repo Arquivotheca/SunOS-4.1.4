@@ -1,0 +1,297 @@
+/* @(#)sb_ansi_c.ext 1.1 94/10/31 SMI */
+
+/*
+ *	Copyright (c) 1989, Sun Microsystems, Inc.  All Rights Reserved.
+ *	Sun considers its source code as an unpublished, proprietary
+ *	trade secret, and it is available only under strict license
+ *	provisions.  This copyright notice is placed here only to protect
+ *	Sun in the event the source is deemed a published work.  Dissassembly,
+ *	decompilation, or other means of reducing the object code to human
+ *	readable form is prohibited by the license agreement under which
+ *	this code is provided to the user or company in possession of this
+ *	copy.
+ *	RESTRICTED RIGHTS LEGEND: Use, duplication, or disclosure by the
+ *	Government is subject to restrictions as set forth in subparagraph
+ *	(c)(1)(ii) of the Rights in Technical Data and Computer Software
+ *	clause at DFARS 52.227-7013 and in similar clauses in the FAR and
+ *	NASA FAR Supplement.
+ */
+
+/*
+ * This file defines the browser environment for the ANSI-C language.
+ */
+
+#ifndef sb_ansi_c_ext_INCLUDED
+#define sb_ansi_c_ext_INCLUDED
+
+language ansi_c "/*" "*/" grep-able
+version 1
+
+/*
+ * These ref-focus-unit statements defines the tags that the focus
+ * facility uses. sb_focus.ext describe them in detail.
+ */
+#define REF_FOCUS_UNITS \
+ref-focus-unit File \
+ref-focus-unit Macro \
+ref-focus-unit Function \
+ref-focus-unit Block \
+ref-focus-unit Struct \
+ref-focus-unit Union \
+ref-focus-unit Enum \
+ref-focus-unit Language
+
+#include "sb_language_master.ext"
+
+#include "sb_c_baseline.ext"
+
+/*
+ * This macro defines the properties that should mark a declaration tag
+ */
+#define DEF ALL_HITS c.def
+
+/*
+ * This macro defines the properties that should mark a reference tag
+ */
+#define REF ALL_HITS c.ref
+
+
+properties ansi_c {
+	from_formals
+	prototype
+}
+
+tags ansi_c 20 {
+	def_var_formal_list_auto =		/* fn(int f) => f */
+		DEF_WEIGHT
+		( DEF c.variable c.non_field c.formal c.auto c.decl c.local
+		 c.non_register c.list ansi_c.from_formals )
+		CPP_SECONDARY_SYMBOL
+	def_var_formal_list_auto_hidden =
+		( HIDDEN )
+
+	def_var_formal_list_register =
+		DEF_WEIGHT
+		( DEF c.variable c.non_field c.formal c.auto c.decl c.local
+		c.register c.list ansi_c.from_formals )
+		CPP_SECONDARY_SYMBOL
+	def_var_formal_list_register_hidden =
+		( HIDDEN )
+
+	ref_enum_tag_prototype =
+		( REF c.enum c.tag ansi_c.prototype )
+		CPP_SECONDARY_SYMBOL
+	ref_enum_tag_formals =
+		( REF c.enum c.tag ansi_c.from_formals )
+		CPP_SECONDARY_SYMBOL
+
+	ref_struct_tag_prototype =
+		( REF c.struct c.tag ansi_c.prototype )
+		CPP_SECONDARY_SYMBOL
+	ref_struct_tag_formals =
+		( REF c.struct c.tag ansi_c.from_formals )
+		CPP_SECONDARY_SYMBOL
+
+	ref_union_tag_prototype =
+		( REF c.union c.tag ansi_c.prototype )
+		CPP_SECONDARY_SYMBOL
+	ref_union_tag_formals =
+		( REF c.union c.tag ansi_c.from_formals )
+		CPP_SECONDARY_SYMBOL
+
+	ref_typedef_prototype =
+		( REF c.type c.user_defined ansi_c.prototype )
+		CPP_SECONDARY_SYMBOL
+	ref_typedef_formals =
+		( REF c.type c.user_defined ansi_c.from_formals )
+		CPP_SECONDARY_SYMBOL
+
+	ref_builtin_prototype =
+		( REF c.type c.builtin ansi_c.prototype )
+		CPP_SECONDARY_SYMBOL
+	ref_builtin_formals =
+		( REF c.type c.builtin ansi_c.from_formals )
+		CPP_SECONDARY_SYMBOL
+}
+
+/*
+ * Additions to the regular C menu for ANSI C
+ */
+insert-menu-items ansi_c "Declarations" "Variables" "Local Variables"
+					"Formals" "In Formals List"
+menu {
+	"In List With Types" menu {
+		"All Formal Declarations"
+			= ( DEF c.variable c.local c.auto c.formal c.decl
+			   ansi_c.from_formals c.list )
+			help "In the formals list"
+		"Regular Declarations"
+			= ( DEF c.variable c.local c.auto c.formal c.decl
+			   c.non_register ansi_c.from_formals c.list )
+			help "In the formals list, not register"
+		"register Declarations"
+			= ( DEF c.variable c.local c.auto c.formal c.decl
+			   c.register ansi_c.from_formals c.list )
+			help "In the formals list, register"
+	} help "In the formals list"
+}
+
+insert-menu-items ansi_c "References" "Type Tags" "All Tags" "From Sizeof"
+menu {
+	"From Prototype"
+		= ( REF c.tag ansi_c.prototype )
+		help "All references to type tags from function prototypes"
+	"From Formals"
+		= ( REF c.tag ansi_c.from_formals )
+		help "All references to type tags from function formals list"
+}
+insert-menu-items ansi_c "References" "Type Tags" "Struct Tags" "From Sizeof"
+menu {
+	"From Prototype"
+		= ( REF c.tag c.struct ansi_c.prototype )
+		help "All references to struct tags from function prototypes"
+	"From Formals"
+		= ( REF c.tag c.struct ansi_c.from_formals )
+		help "All references to struct tags from function formals list"
+}
+insert-menu-items ansi_c "References" "Type Tags" "Union Tags" "From Sizeof"
+menu {
+	"From Prototype"
+		= ( REF c.tag c.union ansi_c.prototype )
+		help "All references to union tags from function prototypes"
+	"From Formals"
+		= ( REF c.tag c.union ansi_c.from_formals )
+		help "All references to union tags from function formals list"
+}
+insert-menu-items ansi_c "References" "Type Tags" "Enum Tags" "From Sizeof"
+menu {
+	"From Prototype"
+		= ( REF c.tag c.enum ansi_c.prototype )
+		help "All references to enum tags from function prototypes"
+	"From Formals"
+		= ( REF c.tag c.enum ansi_c.from_formals )
+		help "All references to enum tags from function formals list"
+}
+
+insert-menu-items ansi_c "References" "Types" "All Types" "From Sizeof"
+menu {
+	"From Prototype"
+		= ( REF c.type ansi_c.prototype )
+		help "All references to types from function prototypes"
+	"From Formals"
+		= ( REF c.type ansi_c.from_formals )
+		help "All references to types from function formals list"
+}
+insert-menu-items ansi_c "References" "Types" "Typedefs" "From Sizeof"
+menu {
+	"From Prototype"
+		= ( REF c.type c.user_defined ansi_c.prototype )
+		help "All references to typedefs from function prototypes"
+	"From Formals"
+		= ( REF c.type c.user_defined ansi_c.from_formals )
+		help "All references to typedefs from function formals list"
+}
+insert-menu-items ansi_c "References" "Types" "Builtin Types" "From Sizeof"
+menu {
+	"From Prototype"
+		= ( REF c.type c.builtin ansi_c.prototype )
+		help "All references to builtin types from function prototypes"
+	"From Formals"
+		= ( REF c.type c.builtin ansi_c.from_formals )
+		help "All references to builtin types from " +
+			"function formals list"
+}
+
+insert-menu-items ansi_c "References" "From Sizeof"
+menu {
+	"From Function Prototype" menu {
+		"All Function Prototypes"
+		  = ( REF ansi_c.prototype )
+		    help "References to types and tags " +
+		      "from function prototypes"
+		"Types" menu {
+			"All Types"
+			  = ( REF ansi_c.prototype c.type )
+			    help "References to types " +
+			      "from function prototypes"
+			"Builtin Types"
+			  = ( REF ansi_c.prototype c.type c.builtin )
+			    help "References to builtin types " +
+			      "from function prototypes"
+			"Typedefs"
+			  = ( REF ansi_c.prototype c.type c.user_defined )
+			    help "References to typedefs " +
+			      "from function prototypes"
+		} help "References to types from function prototypes"
+		"Type Tags" menu {
+			"All Tags"
+			  = ( REF ansi_c.prototype c.tag )
+			    help "References to type tags " +
+			      "from function prototypes"
+			"Struct Tags"
+			  = ( REF ansi_c.prototype c.tag c.struct )
+			    help "References to struct tags " +
+			      "from function prototypes"
+			"Union Tags"
+			  = ( REF ansi_c.prototype c.tag c.union )
+			    help "References to union tags " +
+			      "from function prototypes"
+			"Enum Tags"
+			  = ( REF ansi_c.prototype c.tag c.enum )
+			    help "References to enum tags " +
+			      "from function prototypes"
+		} help "References to type tags from function prototypes" 
+	} help "References to types and tags from function prototypes"
+
+	"From Function Formals List" menu {
+		"All Function Formals List"
+			= ( REF ansi_c.from_formals )
+			help "References to types and tags " +
+			  "from function formals lists"
+		"Types" menu {
+			"All Types"
+				= ( REF ansi_c.from_formals c.type )
+				help "References to types " +
+				  "from function formals lists"
+			"Builtin Types"
+				= ( REF ansi_c.from_formals c.type c.builtin )
+				help "References to builtin types " +
+				  "from function formals lists"
+			"Typedefs"
+				= ( REF ansi_c.from_formals c.type 
+				   c.user_defined )
+				help "References to typedefs " +
+				  "from function formals lists"
+		} help "References to types from function formals lists"
+	      "Type Tags" menu {
+			"All Tags"
+			  = ( REF ansi_c.from_formals c.tag )
+			    help "References to type tags " +
+			      "from function formals lists"
+			"Struct Tags"
+			  = ( REF ansi_c.from_formals c.tag c.struct )
+			    help "References to struct tags " +
+			      "from function formals lists"
+			"Union Tags"
+			  = ( REF ansi_c.from_formals c.tag c.union )
+			    help "References to union tags " +
+			      "from function formals lists"
+			"Enum Tags"
+			  = ( REF ansi_c.from_formals c.tag c.enum )
+			    help "References to enum tags " +
+			      "from function formals lists"
+		} help "References to type tags " +
+		  "from function formals lists"
+	} help "References to types and tags from function formals lists"
+}
+
+/*
+ * This section describes the node specific menus for the different graphs
+ */
+GRAPHER_FUNCTION_NODE_MENU
+GRAPHER_FILE_NODE_MENU
+
+#undef DEF
+#undef REF
+
+#endif

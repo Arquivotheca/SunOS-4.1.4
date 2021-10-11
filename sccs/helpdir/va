@@ -1,0 +1,8 @@
+* @(#)va 1.1 94/10/31 SMI;
+*
+*	Messages for the val command.
+*
+-1
+"too many files"
+You may supply a maximum of 50 files to
+val.

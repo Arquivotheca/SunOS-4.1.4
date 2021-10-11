@@ -1,0 +1,199 @@
+| "@(#)mulchip.pp.u 1.1 94/10/31 SMI"
+| Copyright 1985 by Sun Microsystems, Inc.
+
+
+|   Multiplier routine.
+|   Multiplier arrives in r[2].  It should have fewer one bits than
+|   multiplicand which arrives in acc.  The result is computed and
+|   in r[0,1] with the low order bits in r[0].  The algorithm is a
+|   simple shift-add.  It was chosen because the majority of
+|   multipliers will not have many bits.
+
+|   Input:  Mulcand in acc, low and high Multiplier in r[2] & r[5], respectively
+
+
+#define Mulcand		acc
+#define LoRslt		r[0]
+#define HiRslt		r[1]
+#define Multiplier	r[2]
+#define HiBit		r[3]
+#define Lotmp 		r[3]
+#define Mask		r[3]	/* Re-use HiBit register. */
+#define Sign		r[4]
+#define Hitmp 		r[5]	/* same as MulHigh */
+#define MulHigh		r[5]
+
+
+multiply: ;			GB_Installed->scrmemp; ;			| 
+	testw(d);		scrmem->am;	;				| 
+	xorw,s Multiplier, Mulcand, y; ;	cjp,~zer mulchip;		| 
+   	movw 0, Sign;		;		cjp, ~neg mul;			| 
+   	incw 0, Sign;		;		;				| 
+mul:	movw 0, LoRslt;		;		;				| Clear.
+	testw (Multiplier);	=mul2->brreg;	;				| 
+	movw 0, HiRslt;		;		cjp, ~neg mul1;			| 
+	negw Multiplier, Multiplier;;		;				| 
+mul1:	testw (Mulcand);	;		crtn, zer;			| 
+	priw Multiplier, 0, HiBit;16->am;	cjp, ~neg;			| Find highest bit and test Multiplier.
+	negw Mulcand, Mulcand;	;		;				| 
+mul2:	rsubw d, HiBit, HiBit;	am->brreg;	crtn, zer;			| Generate number of times for loop.
+	rolw,s 15, Multiplier, Multiplier;;	push, go;			| Shift Multiplier. Set carry 0.
+| Ld cntr.  Push mulloop on stack.
+
+	;			;		cjp, ~neg mulshift;		| If bit 15 zero skip addition.
+	addw,s HiRslt, Mulcand, HiRslt;;	;				| Add Multiplicand to result.
+mulshift:srcw HiRslt, HiRslt;	;		;				| Shift result.
+	srqw LoRslt, LoRslt;	;		;				| 
+	rolw,s 15, Multiplier, Multiplier;;	rfct;				| Shift Multiplier. Set carry 0.
+
+	incw HiBit, y;		am->nreg;	;				| 
+	movw 0, Mask;		;		;				| 
+	bsetw n, Mask;		;		;				| 
+	decw Mask, Mask;	am->am;		;				| 
+	rolw n, HiRslt, HiRslt;;		;				| Rotate right 1 bit.
+	movw HiRslt, acc;	;		;				| 
+	andw d, HiRslt, HiRslt;	;		;				| Mask is in d.
+	movw LoRslt, y;		am->am;		;				| Save LoRslt in d.
+	romw n, d, acc, Mask;	;		;				| 
+	testw (Sign);		;		;				| 
+	movw acc, LoRslt;	;		crtn, zer;			| 
+	negw,s LoRslt, LoRslt;	;		;				| 
+	compw HiRslt, HiRslt;	;		crtn, ~cry;			| 
+	incw HiRslt, HiRslt;	;		crtn, go;			| 
+
+
+muldbl:	;			GB_Installed->scrmemp; ;			| 
+	testw(d);		scrmem->am;	;				| 
+	xorw,s MulHigh, Mulcand, y; ;		cjp,~zer muldchip;		| 
+	movw 0, Sign;		;		cjp, ~neg muld;			| 
+	incw 0, Sign;		;		;				| 
+muld:	movw 0, LoRslt;		;		;				| Clear
+	testw (MulHigh);	;		;				| 
+	movw 0, HiRslt;		;		cjp, ~zer muldnot0;		| 
+	testw (Multiplier);	;		;				| 
+	testw (Mulcand);	16->am;		crtn, zer;			| 
+	priw Multiplier, 0, HiBit; ;		cjp, neg muldneg;		| 
+	;			;		cjp, go muld2;			| 
+muldnot0: ;			;		cjp, ~neg muld1;		| 
+	negw,s Multiplier, Multiplier; ;	;				| Double precision negate.
+	compw MulHigh, MulHigh;	;		cjp, ~cry muld1;		| 
+	incw MulHigh, MulHigh;	;		;				| 
+muld1:	priw,s MulHigh, 0, HiBit; 32->am;	;				| Find highest bit
+	testw (Mulcand);	;		cjp, ~zer muldznhi;		| 
+	priw Multiplier, 0, HiBit; 16->am;	;				| 
+muldznhi: ;			;		cjp, ~neg muld2;		| 
+muldneg: negw Mulcand, Mulcand;	;		;				| 
+muld2:	rsubw d, HiBit, HiBit;	am->brreg;	crtn, zer;			| Calculate number of loop cycles
+	sr0w MulHigh, MulHigh; ;		;				| Shift multiplier, set carry 0.
+	srqw Multiplier, Multiplier; ;		;				| 
+	rolw 1, MulHigh, MulHigh; ;		;				| Fudge so that next instr. can shift in link bit.
+	srqw,s MulHigh, MulHigh; ;		push, go;			| 
+
+	;			;		cjp, ~neg muldshift;		| If bit 15 zero skip addition.
+	addw,s HiRslt, Mulcand, HiRslt; ;	;				| Add Multiplicand to result.
+muldshift: srcw HiRslt, HiRslt;	;		;				| Shift result.
+	srqw LoRslt, LoRslt;	;		;				| 
+	sr0w MulHigh, MulHigh; ;		;				| Shift multiplier, set carry 0.
+	srqw Multiplier, Multiplier; ;		;				| 
+	rolw 1, MulHigh, MulHigh; ;		;				| 
+	srqw,s MulHigh, MulHigh; ;		rfct;				| 
+
+	subw,s d, HiBit, HiBit;	16->am;		;				| 
+	;			;		cjp, ~neg muldrol;		| 
+	addw d, HiBit, HiBit;	;		;				| 
+muldhi:	movw,s HiRslt, LoRslt;	;		;				| HiBit < 16.
+	movw 0, HiRslt;		;		cjp, ~neg muldrol;		| 
+	decw HiRslt, HiRslt;	;		;				| 
+muldrol: incw HiBit, y;		am->nreg;	;				| 
+	movw 0, Mask;		;		;				| 
+	bsetw n, Mask;		;		;				| 
+	sub2nw,s 0, Mask, Mask;	am->am;		;				| 
+	rolw n, HiRslt, HiRslt;	;		cjp, ~zer muldlt16;		| Rotate right 1 bit.
+	compw 0, Mask;		am->am;		;				| 
+muldlt16: movw HiRslt, acc;	;		;				| 
+	andw d, HiRslt, HiRslt;	;		;				| Mask is in d.
+	movw LoRslt, y;		am->am;		;				| Save LoRslt in d.
+	romw n, d, acc, Mask;	;		;				| 
+	testw (Sign);		;		;				| 
+	movw acc, LoRslt;	;		crtn, zer;			| 
+	negw,s LoRslt, LoRslt;	;		;				| 
+	compw HiRslt, HiRslt;	;		crtn, ~cry;			| 
+	incw HiRslt, HiRslt;	;		crtn, go;			| 
+
+mulchip: movw 0,Sign;		;		cjp,~neg .+2;			| 
+	incw 0,Sign;		;		;				| 
+	testw(Multiplier);	;		;				|  
+	testw(Mulcand);		;		cjp,~neg mulok;			| 
+	negw Multiplier,Multiplier; ;		;				| 
+mulok: ;			;		cjp,~neg mcandok;		|
+	negw Mulcand,Mulcand;	;		;				| 
+mcandok: ;			;		cjs,go domul;			| 
+	testw(Sign);		;		;				| 
+	compw LoRslt,Lotmp;	;		crtn,zer;			| 
+	compw HiRslt,HiRslt;	;		;				|  
+	addw d,Lotmp,LoRslt;	1->am;		;				| 
+	addcw d,HiRslt,HiRslt;	0->am;		crtn,go;			| 
+	
+
+domul:	;			USMul->mulmode; ;				| 
+	movw Multiplier, y;	am->mulx;	;				| 
+	movw Mulcand, y;	am->muly;	;				| 
+	;			;		;				| wait for transfer of x and y to multiplier
+	;			;		;				| wait for multiply
+	movw d, LoRslt;		mulres->am;	;				| 
+	movw d, HiRslt;		mulres->am;	crtn, go;			|
+
+
+
+|   Multiply a 16.16 fixed point number by a 16-bit multiplicand.  
+|   	1.  compute (mulhigh * mulcand) - keep the lower 16 bits only (only 16 bits precision)
+|   	2.  compute (multipl * mulcand) - add low of (1) to high of this, keep low (fractional) part of this.
+|   It is important to note that the result is formatted as follows:	
+|   		LoRslt . HiRslt
+
+muldchip: movw 0,Sign;		;		cjp,~neg .+2;			| cc set in original muldbl routine above
+	incw 0,Sign;		;		;				| 
+	testw(MulHigh);		;		;				| 
+	testw(Mulcand);		;		cjp,~neg mdcmulok;		| 
+	compw MulHigh,MulHigh;	;		;				| negate 32 bit multiplier
+	compw Multiplier,Multiplier; ;		;				| 
+	addw d,Multiplier,Multiplier; 1->am;	;				| 
+	addcw d,MulHigh,MulHigh; 0->am;		;				| 
+mdcmulok: ;			;		cjp,~neg mdcmcandok;		| 
+	negw Mulcand,Mulcand;	;		;				| 
+mdcmcandok: ;			;		cjs,go domul;			| lower (fractional) half
+	movw MulHigh,Multiplier; ;		;				| move mulhi to multiplier and multiply upper (rational) half
+	movw,s HiRslt,Hitmp;	;		;				| save Hi of 1st mult to add to Lo of 2nd (check sign too)
+	;			;		cjp,~neg .+2;			| 
+	negw Hitmp,Hitmp;	;		;				| 
+	movw LoRslt,Lotmp;	;		cjs,go domul;			| 
+	movw LoRslt,y;		am->am;		;				| 
+	addw d,Hitmp,HiRslt;	;		;				| add lower portion high portion of previous
+	movw Lotmp,LoRslt;	;		;				| 
+	testw(Sign);		;		;				| 
+mdcnegres: compw LoRslt,Lotmp;	;		cjp,zer mdcswap;		| 
+	compw HiRslt,HiRslt;	;		;				|  
+	addw d,Lotmp,LoRslt;	1->am;		;				| 
+	addcw d,HiRslt,HiRslt;	0->am;		;				| 
+mdcswap: movw HiRslt,Hitmp;	;		;				| swap low and high results
+	movw LoRslt,HiRslt;	;		;				| 
+	movw Hitmp,LoRslt;	;		crtn,go;			| 
+
+
+#undef Lotmp
+#undef Hitmp
+#undef Sign
+#undef Mask
+#undef HiBit
+
+#ifndef SWIDTH
+#define SWIDTH 1152
+#endif
+
+#if SWIDTH == 1152
+#include "m1152.pp.u"
+#endif
+
+#if SWIDTH == 1024
+#include "m1024.pp.u"
+#endif

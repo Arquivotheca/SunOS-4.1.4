@@ -1,0 +1,42 @@
+The intent of this file is to state, and explain if necessary, the
+intention of unusual, non obvious, or oddball changes to any UNIX
+source that could not be determined from the SCCS history.  This could
+include policy issues, like clarifications, statements, or changes;
+decoupled corrections, like related changes to the kernel and the stand
+alone programs; and hacks to get around transitory problems.  It might
+also be useful to indicate which set of things had to be changed for a
+temporary hack, so that all the files could be rewacked en masse when
+the hack is removed.  Note that the SCCS history is still the primary
+information source if the change is completely self contained.
+
+The intended format is:
+
+MAJOR STATEMENT OF INTENT
+
+    FILE(s) AFFECTED
+
+	OPTIONAL DETAILS
+    .
+    .
+    .
+
+---
+
+have diag and the kernel retry disk i/o's a similar number of times
+
+    /usr/src/sun/stand/src/diag/sd.c
+
+---
+
+permit post-1.1 software with pre-RevN proms
+
+    /sys/sun/autoconf.c
+
+	accept any video as other choice for frame buffer (ANYVIDEO)
+	avoid localetheraddr if pre-RevN proms (/usr/betasrc only)
+    
+    /sys/sunstand/conf.c
+
+	alias nd to ec
+
+---

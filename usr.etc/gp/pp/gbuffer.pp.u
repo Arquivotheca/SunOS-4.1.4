@@ -1,0 +1,165 @@
+| "@(#)gbuffer.pp.u 1.1 94/10/31 SMI"
+
+| Copyright 1985 by Sun Microsystems, Inc.
+
+|   G-Buffer routines.
+
+|   set buf:  set a rectangle in the g-buffer to a color.
+#define bx	r[3]
+#define by	r[4]
+#define bw	r[5]
+#define bh	r[6]
+#define baddrlo r[7]
+#define baddrhi r[8]
+#define clipptr	r[9]
+#define offsetx r[10]
+#define offsety r[11]
+#define sizex	r[12]
+#define sizey	r[13]
+setbuf:	movw d, color;		fifo1->am;	cjp, f1e .;			| 
+	;			SavePts->scrmemp; ;				| 
+	movw d, bx;		fifo1->am;	cjp, f1e .;			| 
+	movw bx, y;		am->scrmem;	;			scrmp +	| 
+	movw d, by;		fifo1->am;	cjp, f1e .;			| 
+	movw by, y;		am->scrmem;	;			scrmp +	| 
+	movw d, bw;		fifo1->am;	cjp, f1e .;			| 
+	movw bw, y;		am->scrmem;	;			scrmp +	| 
+	movw d, bh;		fifo1->am;	cjp, f1e .;			| 
+	movw bh, y;		am->scrmem;	;			scrmp +	| 
+	;			;		cjp, ~gbr .;			| 
+	;			0x6000->gbhiptr; ;				| 
+	movw d, clipptr;	ClipList->am;	;				| 
+sb0clip: ;			SavePts->scrmemp; ;				| 
+	movw d, bx;		scrmem->am;	;			scrmp +	| 
+	movw d, by;		scrmem->am;	;			scrmp +	| 
+	movw d, bw;		scrmem->am;	;			scrmp +	| 
+	movw d, bh;		scrmem->am;	;			scrmp +	| 
+	movw clipptr, y;	am->scrmemp;	;				| 
+	addw d, clipptr, clipptr; 4->am;	;				| 
+	movw,s d, offsetx;	scrmem->am;	;			scrmp +	| 
+	movw bw, acc;		;		cjp, neg start;			| neg == end of clip list
+	addw bx, acc, acc;	;		;				| 
+	subw,s offsetx, acc, y;	;		;				| 
+	movw bh, acc;		;		cjp, neg sb0clip;		| 
+	addw by, acc, acc;	;		;				| 
+	movw d, offsety;	scrmem->am;	;			scrmp +	| 
+	subw,s offsety, acc, y;	;		;				| 
+	movw d, sizex;		scrmem->am;	cjp, neg sb0clip;	scrmp +	| 
+	movw offsetx, acc;	;		;				| 
+	addw sizex, acc, acc;	;		;				| 
+	subw,s bx, acc, y;	;		;				| 
+	movw d, sizey;		scrmem->am;	cjp, neg sb0clip;	scrmp +	| 
+	movw offsety, acc;	;		;				| 
+	addw sizey, acc, acc;	;		;				| 
+	subw,s by, acc, y;	;		;				| 
+	movw bx, acc;		;		cjp, neg sb0clip;		| 
+	subw,s offsetx, acc, y;	am->am;		;				| 
+	;			;		cjp, ~neg sb0offy;		| 
+	subw d, bx, bx;		;		;				| 
+	addw d, bw, bw;		;		;				| 
+sb0offy: movw by, acc;		;		;				| 
+	subw,s offsety, acc, y;	am->am;		;				| 
+	;			;		cjp, ~neg sb0sizex;		| 
+	subw d, by, by;		;		;				| 
+	addw d, bh, bh;		;		;				| 
+sb0sizex: movw bx, acc;		;		;				| 
+	addw bw, acc, acc;	;		;				| 
+	movw sizex, y;		am->am;		;				| 
+	addw d, offsetx, offsetx; ;		;				| 
+	rsubw,s offsetx, acc, acc; ;		;				| 
+	;			;		cjp, ~neg sb0sizey;		| 
+	addw bw, acc, bw;	;		;				| 
+sb0sizey: movw by, acc;		;		;				| 
+	addw bh, acc, acc;	;		;				| 
+	movw sizey, y;		am->am;		;				| 
+	addw d, offsety, offsety; ;		;				| 
+	rsubw,s offsety, acc, acc; ;		;				| 
+	;			;		cjp, ~neg sb0ok;		| 
+	addw bh, acc, bh;	;		;				| 
+sb0ok:	movw by, r[2];		;		cjs, go MulSWid;		| 
+	movw bx, acc;		;		;				| 
+	addw r[0], acc, baddrlo; ;		;				| 
+	addcw d, r[1], baddrhi;	0->am;		;				| 
+sb0while: negw,s bh, y;		;		;				| while (sh-- > 0) {
+	;			;		cjp, ~neg sb0clip;		| 
+	movw baddrhi, y;	am->gbhiptr;	cjp, ~gbr .;			| 
+	movw baddrlo, y;	am->gbloptr;	cjp, ~gbr .;			| 
+	decw bw;		am->brreg;	;				| 
+	incw bw, bw;		;		push, go;			| fastloop (bw, *ba++= color)
+	;			;		cjp, ~gbr .;			| 
+	movw color, y;		am->gbwdreg;	rfct;				| 
+	addw d, baddrlo, baddrlo; SWidth->am;	;				| 
+	addcw d, baddrhi, baddrhi; 0->am;	;				| 
+	decw bh, bh;		;		cjp, go sb0while;		| end while
+#undef bx
+#undef by
+#undef bw
+#undef bh
+#undef baddrlo
+#undef baddrhi
+#undef offsetx
+#undef offsety
+#undef sizex
+#undef sizey
+#undef clipptr
+
+
+|   bufscr:  copy a rectangle in the g-buffer to a rectangle on the screen.
+#define bw	r[3]
+#define bh	r[4]
+#define baddrlo	r[5]
+#define baddrhi	r[6]
+#define saddrlo	r[7]
+#define saddrhi r[8]
+#define lowbytes r[9]
+bufscr:	movw d, lowbytes;	fifo1->am;	cjp, f1e bufscr;		| flag.  Neg == copy high bytes.
+bsbw:	movw d, bw;		fifo1->am;	cjp, f1e bsbw;			| 
+bsbh:	movw d, bh;		fifo1->am;	cjp, f1e bsbh;			| 
+bsblo:	movw d, baddrlo;	fifo1->am;	cjp, f1e bsblo;			| 
+bsbhi:	movw d, baddrhi;	fifo1->am;	cjp, f1e bsbhi;			| 
+bsslo:	movw d, saddrlo;	fifo1->am;	cjp, f1e bsslo;			| 
+bsshi:	movw d, saddrhi;	fifo1->am;	cjp, f1e bsshi;			| 
+	;			;		cjs, go ropreg;			| 
+bsinit:	;			;		cjp, ~gbr bsinit;		| 
+	;			0x6000->gbhiptr; ;				| 
+bswhile: negw,s bh, y;		;		;				| while (sh-- > 0) {
+	;			;		cjp, ~neg start;		| 
+bsbhi1:	movw baddrhi, y;	am->gbhiptr;	cjp, ~gbr bsbhi1;		| 
+bsblo1:	movw baddrlo, y;	am->gbloptr;	cjp, ~gbr bsblo1;	gbrd	| ma= ma_top
+|   bsvctl:	;			;		cjp, ~vir bsvctl;		| prime fifo
+|	;			GPVWord->vctlreg; ;				| 
+|	;			FBAllRopPrimeSrc2->vloareg; ;			| 
+|	movw FBCont, y;		am->vhiareg;	;				| 
+|   bsprime: movw d, acc;		gbrdreg->am;	cjp, ~gbr bsprime;	gbrd	| 
+|	romw 8, d, acc, 0xff00;	;		;				| 
+|	IMM;			;		;				| 
+|   bsvw0:	movw acc, y;		am->vwdreg;	cjp, ~vir bsvw0;	vmewr	| 
+	movw saddrlo, y;	am->vloareg;	;				| bx= by
+	movw saddrhi, y;	am->vhiareg;	;				| 
+bsvctl1: ;			;		cjp, ~vir bsvctl1;		| 
+	testw (lowbytes);	VByte->vctlreg;	;				| 
+	decw bw;		am->brreg;	cjp, neg bshigh;		| 
+
+	incw bw, bw;		;		push, go;			| fastloop (sw, *sa++= *ba++) low bytes.
+bsfast:	movw d, acc;		gbrdreg->am;	cjp, ~gbr bsfast;	gbrd	| 
+bsvw:	movw acc, y;		am->vwdreg;	cjp, ~vir bsvw;		vmewr	| 
+	;			;		rfct;			varegs+	| 
+	;			;		cjp, go bsvw1;			| 
+
+bshigh:	incw bw, bw;		;		push, go;			| fastloop (sw, *sa++= *ba++)
+bsfasth: movw d, acc;		gbrdreg->am;	cjp, ~gbr bsfasth;	gbrd	| 
+bsvwh:	rolw 8, acc, y;		am->vwdreg;	cjp, ~vir bsvwh;	vmewr	| 
+	;			;		rfct;			varegs+	| 
+
+bsvw1:	movw 0, y;		am->vwdreg;	cjp, ~vir bsvw1;	vmewr	| flush fifo
+	addw d, baddrlo, baddrlo; SWidth->am;	;				| ma += ma_vert
+	addcw d, baddrhi, baddrhi; 0->am;	;				| 
+	addw d, saddrlo, saddrlo; SWidth->am;	;				| sa += linebytes
+	addcw d, saddrhi, saddrhi; 0->am;	;				| 
+	decw bh, bh;		;		cjp, go bswhile;		| end while
+#undef bw
+#undef bh
+#undef baddrlo
+#undef baddrhi
+#undef saddrlo
+#undef saddrhi
